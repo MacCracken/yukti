@@ -57,6 +57,14 @@ mod tests {
     }
 
     #[test]
+    fn test_device_busy() {
+        let e = YantraError::DeviceBusy {
+            path: PathBuf::from("/dev/sdb1"),
+        };
+        assert!(e.to_string().contains("/dev/sdb1"));
+    }
+
+    #[test]
     fn test_mount_failed() {
         let e = YantraError::MountFailed {
             device: "/dev/sdb1".into(),
@@ -67,10 +75,85 @@ mod tests {
     }
 
     #[test]
+    fn test_unmount_failed() {
+        let e = YantraError::UnmountFailed {
+            mount_point: PathBuf::from("/mnt/usb"),
+            reason: "device busy".into(),
+        };
+        assert!(e.to_string().contains("/mnt/usb"));
+        assert!(e.to_string().contains("device busy"));
+    }
+
+    #[test]
+    fn test_eject_failed() {
+        let e = YantraError::EjectFailed {
+            device: "/dev/sr0".into(),
+            reason: "tray locked".into(),
+        };
+        assert!(e.to_string().contains("/dev/sr0"));
+        assert!(e.to_string().contains("tray locked"));
+    }
+
+    #[test]
+    fn test_tray_failed() {
+        let e = YantraError::TrayFailed {
+            reason: "mechanical error".into(),
+        };
+        assert!(e.to_string().contains("mechanical error"));
+    }
+
+    #[test]
+    fn test_permission_denied() {
+        let e = YantraError::PermissionDenied {
+            operation: "mount".into(),
+            path: PathBuf::from("/dev/sda"),
+        };
+        assert!(e.to_string().contains("permission denied"));
+        assert!(e.to_string().contains("mount"));
+        assert!(e.to_string().contains("/dev/sda"));
+    }
+
+    #[test]
+    fn test_udev_error() {
+        let e = YantraError::Udev("netlink failed".into());
+        assert!(e.to_string().contains("netlink failed"));
+    }
+
+    #[test]
     fn test_no_media() {
         let e = YantraError::NoMedia {
             device: "/dev/sr0".into(),
         };
         assert!(e.to_string().contains("no media"));
+    }
+
+    #[test]
+    fn test_unsupported_filesystem() {
+        let e = YantraError::UnsupportedFilesystem {
+            fs_type: "hammerfs".into(),
+        };
+        assert!(e.to_string().contains("hammerfs"));
+    }
+
+    #[test]
+    fn test_io_error_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let e: YantraError = io_err.into();
+        assert!(e.to_string().contains("file not found"));
+    }
+
+    #[test]
+    fn test_parse_error() {
+        let e = YantraError::Parse("invalid integer".into());
+        assert!(e.to_string().contains("invalid integer"));
+    }
+
+    #[test]
+    fn test_result_type_alias() {
+        let ok: Result<i32> = Ok(42);
+        assert_eq!(ok.unwrap(), 42);
+
+        let err: Result<i32> = Err(YantraError::Parse("bad".into()));
+        assert!(err.is_err());
     }
 }

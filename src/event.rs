@@ -27,11 +27,11 @@ pub enum DeviceEventKind {
 impl std::fmt::Display for DeviceEventKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Attached => write!(f, "attached"),
-            Self::Detached => write!(f, "detached"),
-            Self::MediaChanged => write!(f, "media-changed"),
+            Self::Attached => f.write_str("attached"),
+            Self::Detached => f.write_str("detached"),
+            Self::MediaChanged => f.write_str("media-changed"),
             Self::Mounted { mount_point } => write!(f, "mounted:{}", mount_point.display()),
-            Self::Unmounted => write!(f, "unmounted"),
+            Self::Unmounted => f.write_str("unmounted"),
             Self::Error { message } => write!(f, "error:{message}"),
         }
     }
@@ -79,16 +79,19 @@ impl DeviceEvent {
     }
 
     /// Is this an attach event?
+    #[inline]
     pub fn is_attach(&self) -> bool {
         matches!(self.kind, DeviceEventKind::Attached)
     }
 
     /// Is this a detach event?
+    #[inline]
     pub fn is_detach(&self) -> bool {
         matches!(self.kind, DeviceEventKind::Detached)
     }
 
     /// Is this event for a removable device?
+    #[inline]
     pub fn is_removable(&self) -> bool {
         matches!(
             self.device_class,
@@ -177,6 +180,22 @@ mod tests {
     }
 
     #[test]
+    fn test_event_error_display() {
+        let kind = DeviceEventKind::Error {
+            message: "IO fault".into(),
+        };
+        assert_eq!(kind.to_string(), "error:IO fault");
+    }
+
+    #[test]
+    fn test_event_display_all() {
+        assert_eq!(DeviceEventKind::Attached.to_string(), "attached");
+        assert_eq!(DeviceEventKind::Detached.to_string(), "detached");
+        assert_eq!(DeviceEventKind::MediaChanged.to_string(), "media-changed");
+        assert_eq!(DeviceEventKind::Unmounted.to_string(), "unmounted");
+    }
+
+    #[test]
     fn test_event_collector() {
         let collector = EventCollector::new();
         assert_eq!(collector.count(), 0);
@@ -205,13 +224,6 @@ mod tests {
     }
 
     #[test]
-    fn test_event_display() {
-        assert_eq!(DeviceEventKind::Attached.to_string(), "attached");
-        assert_eq!(DeviceEventKind::Detached.to_string(), "detached");
-        assert_eq!(DeviceEventKind::MediaChanged.to_string(), "media-changed");
-    }
-
-    #[test]
     fn test_non_removable_event() {
         let e = DeviceEvent::new(
             DeviceId::new("block:nvme0n1"),
@@ -220,5 +232,48 @@ mod tests {
             PathBuf::from("/dev/nvme0n1"),
         );
         assert!(!e.is_removable());
+    }
+
+    #[test]
+    fn test_event_listener_default_filter() {
+        let collector = EventCollector::new();
+        assert!(collector.filter().is_none());
+    }
+
+    #[test]
+    fn test_event_collector_concurrent() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let collector = Arc::new(EventCollector::new());
+        let mut handles = vec![];
+
+        for _ in 0..4 {
+            let c = Arc::clone(&collector);
+            handles.push(thread::spawn(move || {
+                for _ in 0..25 {
+                    c.on_event(&DeviceEvent::new(
+                        DeviceId::new("block:sdb1"),
+                        DeviceClass::UsbStorage,
+                        DeviceEventKind::Attached,
+                        PathBuf::from("/dev/sdb1"),
+                    ));
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(collector.count(), 100);
+    }
+
+    #[test]
+    fn test_event_serde_roundtrip() {
+        let event = make_event(DeviceEventKind::Attached);
+        let json = serde_json::to_string(&event).unwrap();
+        let roundtrip: DeviceEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.device_id, event.device_id);
+        assert_eq!(roundtrip.kind, event.kind);
     }
 }

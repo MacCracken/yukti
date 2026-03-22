@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| Date | `2026-03-22T22:28:54Z` |
-| Commit | `928c8fb` |
+| Date | `2026-03-22T22:52:55Z` |
+| Commit | `a58e7b2` |
 | Branch | `main` |
 | Toolchain | `rustc 1.93.0 (254b59607 2026-01-19)` |
 
@@ -15,71 +15,91 @@
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| create | 13.994 ns | 13.994 |
-| display | 29.153 ns | 29.153 |
+| create | 10.656 ns | 10.656 (-23.9%) |
+| display | 19.576 ns | 19.576 (-32.9%) |
 
 ### device_info
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| create | 94.726 ns | 94.726 |
-| display_name | 13.100 ns | 13.100 |
-| size_display | 183.44 ns | 183.44 |
-| has_capability | 3.2617 ns | 3.2617 |
-| is_removable | 2.1921 ns | 2.1921 |
-| is_mounted | 1.0477 ns | 1.0477 |
+| create | 83.328 ns | 83.328 (-12.0%) |
+| display_name_label | 2.2545 ns | 2.2545 |
+| display_name_fallback | 26.705 ns | 26.705 |
+| size_display_zero | 1.8419 ns | 1.8419 |
+| size_display_gb | 167.73 ns | 167.73 |
+| has_capability_hit | 544.59 ps | 0.5446 |
+| has_capability_miss | 546.34 ps | 0.5463 |
+| is_removable | 1.7920 ns | 1.7920 (-18.3%) |
+| is_mounted | 1.0191 ns | 1.0191 (-2.7%) |
+
+### capabilities
+
+| Benchmark | Time | ns |
+|-----------|------|----|
+| from_slice_5 | 1.9200 ns | 1.9200 |
+| to_vec_5 | 18.448 ns | 18.448 |
+| contains_check | 482.24 ps | 0.4822 |
+| bitwise_or_all | 481.32 ps | 0.4813 |
 
 ### device_event
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| create | 88.389 ns | 88.389 |
-| is_attach | 542.55 ps | 0.5425 |
-| is_removable | 550.72 ps | 0.5507 |
+| create | 80.162 ns | 80.162 (-9.3%) |
+| is_attach | 516.25 ps | 0.5162 (-4.8%) |
+| is_removable | 543.89 ps | 0.5439 (-1.2%) |
 
 ### event_collector
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| push_100 | 8.2847 µs | 8284.7000 |
+| push_100 | 7.6753 µs | 7675.3000 (-7.4%) |
 
 ### serialization
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| serialize_device_info | 644.24 ns | 644.24 |
-| deserialize_device_info | 972.25 ns | 972.25 |
-| serialize_event | 444.05 ns | 444.05 |
-| deserialize_event | 533.23 ns | 533.23 |
+| serialize_device_info | 700.80 ns | 700.80 (+8.8%) |
+| deserialize_device_info | 843.16 ns | 843.16 (-13.3%) |
+| serialize_event | 382.18 ns | 382.18 (-13.9%) |
+| deserialize_event | 411.85 ns | 411.85 (-22.8%) |
 
 ### storage
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| filesystem_parse | 20.465 ns | 20.465 |
-| filesystem_parse_unknown | 33.966 ns | 33.966 |
-| validate_mount_point_ok | 15.258 ns | 15.258 |
-| validate_mount_point_forbidden | 46.208 ns | 46.208 |
-| default_mount_point | 60.402 ns | 60.402 |
-| mount_options_default | 33.276 ns | 33.276 |
+| filesystem_parse | 3.2032 ns | 3.2032 (-84.3%) |
+| filesystem_parse_case | 3.1228 ns | 3.1228 |
+| filesystem_parse_unknown | 14.135 ns | 14.135 (-58.4%) |
+| validate_mount_point_ok | 282.28 ns | 282.28 (+1750.0%) |
+| validate_mount_point_forbidden | 155.06 ns | 155.06 (+235.6%) |
+| validate_mount_point_deep | 319.02 ns | 319.02 |
+| default_mount_point | 56.152 ns | 56.152 (-7.0%) |
+| mount_options_default | 28.710 ns | 28.710 (-13.7%) |
 
 ### optical
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| detect_disc_type | 18.437 ns | 18.437 |
-| toc_audio_count | 2.5066 ns | 2.5066 |
-| toc_audio_duration | 3.5252 ns | 3.5252 |
+| detect_disc_type_cd | 2.8444 ns | 2.8444 |
+| detect_disc_type_dvd | 4.4478 ns | 4.4478 |
+| detect_disc_type_bluray | 3.0696 ns | 3.0696 |
+| detect_disc_type_unknown | 3.9304 ns | 3.9304 |
+| toc_audio_count | 2.8251 ns | 2.8251 (+12.7%) |
+| toc_audio_duration | 3.7778 ns | 3.7778 (+7.2%) |
 
 ### udev
 
 | Benchmark | Time | ns |
 |-----------|------|----|
-| classify_usb | 16.580 ns | 16.580 |
-| classify_optical | 28.534 ns | 28.534 |
-| extract_capabilities_usb | 82.031 ns | 82.031 |
-| extract_capabilities_optical | 122.10 ns | 122.10 |
-| device_info_from_udev | 804.09 ns | 804.09 |
+| classify_usb | 18.590 ns | 18.590 (+12.1%) |
+| classify_optical | 31.959 ns | 31.959 (+12.0%) |
+| classify_dm | 13.886 ns | 13.886 |
+| extract_capabilities_usb | 57.945 ns | 57.945 (-29.4%) |
+| extract_capabilities_optical | 115.04 ns | 115.04 (-5.8%) |
+| classify_and_extract_usb | 83.373 ns | 83.373 |
+| device_info_from_udev | 940.38 ns | 940.38 (+16.9%) |
+| device_info_from_udev_optical | 808.26 ns | 808.26 |
 
 ---
 

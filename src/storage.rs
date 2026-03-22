@@ -26,20 +26,35 @@ pub enum Filesystem {
 
 impl Filesystem {
     /// Parse from a filesystem type string (as returned by blkid/lsblk).
+    /// Zero-allocation for known types (uses case-insensitive comparison).
     pub fn from_str_type(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "ext4" => Self::Ext4,
-            "btrfs" => Self::Btrfs,
-            "xfs" => Self::Xfs,
-            "vfat" | "fat32" | "fat16" => Self::Vfat,
-            "ntfs" => Self::Ntfs,
-            "exfat" => Self::Exfat,
-            "iso9660" => Self::Iso9660,
-            "udf" => Self::Udf,
-            "hfsplus" | "hfs+" => Self::Hfsplus,
-            "swap" => Self::Swap,
-            "crypto_luks" | "luks" => Self::Luks,
-            other => Self::Unknown(other.to_string()),
+        if s.eq_ignore_ascii_case("ext4") {
+            Self::Ext4
+        } else if s.eq_ignore_ascii_case("btrfs") {
+            Self::Btrfs
+        } else if s.eq_ignore_ascii_case("xfs") {
+            Self::Xfs
+        } else if s.eq_ignore_ascii_case("vfat")
+            || s.eq_ignore_ascii_case("fat32")
+            || s.eq_ignore_ascii_case("fat16")
+        {
+            Self::Vfat
+        } else if s.eq_ignore_ascii_case("ntfs") {
+            Self::Ntfs
+        } else if s.eq_ignore_ascii_case("exfat") {
+            Self::Exfat
+        } else if s.eq_ignore_ascii_case("iso9660") {
+            Self::Iso9660
+        } else if s.eq_ignore_ascii_case("udf") {
+            Self::Udf
+        } else if s.eq_ignore_ascii_case("hfsplus") || s.eq_ignore_ascii_case("hfs+") {
+            Self::Hfsplus
+        } else if s.eq_ignore_ascii_case("swap") {
+            Self::Swap
+        } else if s.eq_ignore_ascii_case("crypto_luks") || s.eq_ignore_ascii_case("luks") {
+            Self::Luks
+        } else {
+            Self::Unknown(s.to_string())
         }
     }
 
@@ -65,20 +80,21 @@ impl Filesystem {
 
 impl std::fmt::Display for Filesystem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Ext4 => write!(f, "ext4"),
-            Self::Btrfs => write!(f, "btrfs"),
-            Self::Xfs => write!(f, "xfs"),
-            Self::Vfat => write!(f, "vfat"),
-            Self::Ntfs => write!(f, "ntfs"),
-            Self::Exfat => write!(f, "exfat"),
-            Self::Iso9660 => write!(f, "iso9660"),
-            Self::Udf => write!(f, "udf"),
-            Self::Hfsplus => write!(f, "hfs+"),
-            Self::Swap => write!(f, "swap"),
-            Self::Luks => write!(f, "luks"),
-            Self::Unknown(s) => write!(f, "{s}"),
-        }
+        let s = match self {
+            Self::Ext4 => "ext4",
+            Self::Btrfs => "btrfs",
+            Self::Xfs => "xfs",
+            Self::Vfat => "vfat",
+            Self::Ntfs => "ntfs",
+            Self::Exfat => "exfat",
+            Self::Iso9660 => "iso9660",
+            Self::Udf => "udf",
+            Self::Hfsplus => "hfs+",
+            Self::Swap => "swap",
+            Self::Luks => "luks",
+            Self::Unknown(s) => return f.write_str(s),
+        };
+        f.write_str(s)
     }
 }
 
@@ -116,6 +132,11 @@ pub struct MountResult {
     pub read_only: bool,
 }
 
+/// Forbidden system mount points.
+const FORBIDDEN_MOUNTS: &[&str] = &[
+    "/", "/bin", "/sbin", "/usr", "/etc", "/boot", "/sys", "/proc", "/dev",
+];
+
 /// Parse /proc/mounts to find mount points.
 pub fn find_mount_point(dev_path: &Path) -> Option<PathBuf> {
     // In production: read /proc/mounts and match dev_path
@@ -144,6 +165,7 @@ pub fn is_mounted(dev_path: &Path) -> bool {
 }
 
 /// Validate that a mount point is safe to use.
+/// Compares paths directly (no string allocation).
 pub fn validate_mount_point(path: &Path) -> Result<()> {
     // Must be absolute
     if !path.is_absolute() {
@@ -153,10 +175,8 @@ pub fn validate_mount_point(path: &Path) -> Result<()> {
         });
     }
     // Must not be a system directory
-    let forbidden = ["/", "/bin", "/sbin", "/usr", "/etc", "/boot", "/sys", "/proc", "/dev"];
-    let path_str = path.to_string_lossy();
-    for f in &forbidden {
-        if path_str == *f {
+    for f in FORBIDDEN_MOUNTS {
+        if path == Path::new(f) {
             return Err(YantraError::MountFailed {
                 device: String::new(),
                 reason: format!("cannot mount on system directory: {f}"),
@@ -185,11 +205,48 @@ mod tests {
     }
 
     #[test]
+    fn test_filesystem_parse_all_known() {
+        assert_eq!(Filesystem::from_str_type("ext4"), Filesystem::Ext4);
+        assert_eq!(Filesystem::from_str_type("btrfs"), Filesystem::Btrfs);
+        assert_eq!(Filesystem::from_str_type("xfs"), Filesystem::Xfs);
+        assert_eq!(Filesystem::from_str_type("vfat"), Filesystem::Vfat);
+        assert_eq!(Filesystem::from_str_type("fat16"), Filesystem::Vfat);
+        assert_eq!(Filesystem::from_str_type("ntfs"), Filesystem::Ntfs);
+        assert_eq!(Filesystem::from_str_type("exfat"), Filesystem::Exfat);
+        assert_eq!(Filesystem::from_str_type("iso9660"), Filesystem::Iso9660);
+        assert_eq!(Filesystem::from_str_type("udf"), Filesystem::Udf);
+        assert_eq!(Filesystem::from_str_type("hfsplus"), Filesystem::Hfsplus);
+        assert_eq!(Filesystem::from_str_type("hfs+"), Filesystem::Hfsplus);
+        assert_eq!(Filesystem::from_str_type("swap"), Filesystem::Swap);
+        assert_eq!(Filesystem::from_str_type("luks"), Filesystem::Luks);
+        assert_eq!(Filesystem::from_str_type("crypto_luks"), Filesystem::Luks);
+    }
+
+    #[test]
+    fn test_filesystem_parse_case_insensitive() {
+        assert_eq!(Filesystem::from_str_type("EXT4"), Filesystem::Ext4);
+        assert_eq!(Filesystem::from_str_type("Ext4"), Filesystem::Ext4);
+        assert_eq!(Filesystem::from_str_type("NTFS"), Filesystem::Ntfs);
+        assert_eq!(Filesystem::from_str_type("Btrfs"), Filesystem::Btrfs);
+        assert_eq!(Filesystem::from_str_type("XFS"), Filesystem::Xfs);
+        assert_eq!(Filesystem::from_str_type("ISO9660"), Filesystem::Iso9660);
+        assert_eq!(Filesystem::from_str_type("UDF"), Filesystem::Udf);
+    }
+
+    #[test]
     fn test_filesystem_writable() {
         assert!(Filesystem::Ext4.is_writable());
+        assert!(Filesystem::Btrfs.is_writable());
+        assert!(Filesystem::Xfs.is_writable());
         assert!(Filesystem::Vfat.is_writable());
+        assert!(Filesystem::Ntfs.is_writable());
+        assert!(Filesystem::Exfat.is_writable());
+        assert!(Filesystem::Hfsplus.is_writable());
         assert!(!Filesystem::Iso9660.is_writable());
+        assert!(!Filesystem::Udf.is_writable());
         assert!(!Filesystem::Swap.is_writable());
+        assert!(!Filesystem::Luks.is_writable());
+        assert!(!Filesystem::Unknown("zfs".into()).is_writable());
     }
 
     #[test]
@@ -197,6 +254,23 @@ mod tests {
         assert!(Filesystem::Iso9660.is_optical_media());
         assert!(Filesystem::Udf.is_optical_media());
         assert!(!Filesystem::Ext4.is_optical_media());
+        assert!(!Filesystem::Vfat.is_optical_media());
+    }
+
+    #[test]
+    fn test_filesystem_display_all() {
+        assert_eq!(Filesystem::Ext4.to_string(), "ext4");
+        assert_eq!(Filesystem::Btrfs.to_string(), "btrfs");
+        assert_eq!(Filesystem::Xfs.to_string(), "xfs");
+        assert_eq!(Filesystem::Vfat.to_string(), "vfat");
+        assert_eq!(Filesystem::Ntfs.to_string(), "ntfs");
+        assert_eq!(Filesystem::Exfat.to_string(), "exfat");
+        assert_eq!(Filesystem::Iso9660.to_string(), "iso9660");
+        assert_eq!(Filesystem::Udf.to_string(), "udf");
+        assert_eq!(Filesystem::Hfsplus.to_string(), "hfs+");
+        assert_eq!(Filesystem::Swap.to_string(), "swap");
+        assert_eq!(Filesystem::Luks.to_string(), "luks");
+        assert_eq!(Filesystem::Unknown("zfs".into()).to_string(), "zfs");
     }
 
     #[test]
@@ -220,9 +294,21 @@ mod tests {
     }
 
     #[test]
+    fn test_default_mount_point_no_label() {
+        let info = DeviceInfo::new(
+            DeviceId::new("block:sdb1"),
+            PathBuf::from("/dev/sdb1"),
+            DeviceClass::UsbStorage,
+        );
+        let mp = default_mount_point(&info);
+        assert_eq!(mp, PathBuf::from("/run/media/block_sdb1"));
+    }
+
+    #[test]
     fn test_validate_mount_point_ok() {
         assert!(validate_mount_point(Path::new("/mnt/usb")).is_ok());
         assert!(validate_mount_point(Path::new("/run/media/disk")).is_ok());
+        assert!(validate_mount_point(Path::new("/home/user/mnt")).is_ok());
     }
 
     #[test]
@@ -230,6 +316,9 @@ mod tests {
         assert!(validate_mount_point(Path::new("/")).is_err());
         assert!(validate_mount_point(Path::new("/usr")).is_err());
         assert!(validate_mount_point(Path::new("/boot")).is_err());
+        assert!(validate_mount_point(Path::new("/dev")).is_err());
+        assert!(validate_mount_point(Path::new("/sys")).is_err());
+        assert!(validate_mount_point(Path::new("/proc")).is_err());
     }
 
     #[test]
@@ -238,9 +327,27 @@ mod tests {
     }
 
     #[test]
-    fn test_filesystem_display() {
-        assert_eq!(Filesystem::Ext4.to_string(), "ext4");
-        assert_eq!(Filesystem::Vfat.to_string(), "vfat");
-        assert_eq!(Filesystem::Unknown("zfs".into()).to_string(), "zfs");
+    fn test_is_mounted_stub() {
+        assert!(!is_mounted(Path::new("/dev/sdb1")));
+    }
+
+    #[test]
+    fn test_find_mount_point_stub() {
+        assert!(find_mount_point(Path::new("/dev/sdb1")).is_none());
+    }
+
+    #[test]
+    fn test_mount_result_serde() {
+        let result = MountResult {
+            device_id: DeviceId::new("block:sdb1"),
+            dev_path: PathBuf::from("/dev/sdb1"),
+            mount_point: PathBuf::from("/mnt/usb"),
+            fs_type: Filesystem::Vfat,
+            read_only: false,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let roundtrip: MountResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.device_id, result.device_id);
+        assert_eq!(roundtrip.fs_type, result.fs_type);
     }
 }

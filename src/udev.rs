@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::device::{DeviceCapability, DeviceClass, DeviceId, DeviceInfo};
+use crate::device::{DeviceCapabilities, DeviceClass, DeviceId, DeviceInfo};
 use crate::error::{Result, YantraError};
 
 /// A raw udev device event from the kernel.
@@ -44,6 +44,7 @@ impl UdevEvent {
     }
 
     /// Get a property value.
+    #[inline]
     pub fn property(&self, key: &str) -> Option<&str> {
         self.properties.get(key).map(|s| s.as_str())
     }
@@ -70,57 +71,72 @@ pub fn classify_device(event: &UdevEvent) -> DeviceClass {
         return DeviceClass::SdCard;
     }
 
-    // Device mapper
-    if subsystem == "block" && event.sys_path.to_string_lossy().contains("/dm-") {
-        return DeviceClass::DeviceMapper;
-    }
-
-    // Loop device
-    if subsystem == "block" && event.sys_path.to_string_lossy().contains("/loop") {
-        return DeviceClass::Loop;
-    }
-
-    // Internal block device (fallback for block subsystem)
-    if subsystem == "block" && (dev_type == "disk" || dev_type == "partition") {
-        return DeviceClass::BlockInternal;
+    // Device mapper — use byte-level contains to avoid to_string_lossy allocation
+    if subsystem == "block" {
+        let path_bytes = event.sys_path.as_os_str().as_encoded_bytes();
+        if contains_bytes(path_bytes, b"/dm-") {
+            return DeviceClass::DeviceMapper;
+        }
+        if contains_bytes(path_bytes, b"/loop") {
+            return DeviceClass::Loop;
+        }
+        if dev_type == "disk" || dev_type == "partition" {
+            return DeviceClass::BlockInternal;
+        }
     }
 
     DeviceClass::Unknown
 }
 
+/// Byte-level substring search (avoids string allocation from OsStr).
+#[inline]
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Classify device and extract capabilities in a single pass,
+/// avoiding redundant HashMap lookups.
+pub fn classify_and_extract(event: &UdevEvent) -> (DeviceClass, DeviceCapabilities) {
+    let class = classify_device(event);
+    let caps = extract_capabilities(event, class);
+    (class, caps)
+}
+
 /// Extract capabilities from udev properties.
-pub fn extract_capabilities(event: &UdevEvent, class: DeviceClass) -> Vec<DeviceCapability> {
-    let mut caps = vec![DeviceCapability::Read];
+pub fn extract_capabilities(event: &UdevEvent, class: DeviceClass) -> DeviceCapabilities {
+    let mut caps = DeviceCapabilities::READ;
 
     // Writable unless read-only
     if event.property("ID_FS_READONLY").unwrap_or("0") != "1" {
-        caps.push(DeviceCapability::Write);
+        caps |= DeviceCapabilities::WRITE;
     }
 
     // Removable
     let removable = event.property("ID_USB_DRIVER").is_some()
         || event.property("UDISKS_REMOVABLE").unwrap_or("0") == "1"
-        || matches!(class, DeviceClass::UsbStorage | DeviceClass::Optical | DeviceClass::SdCard);
+        || matches!(
+            class,
+            DeviceClass::UsbStorage | DeviceClass::Optical | DeviceClass::SdCard
+        );
     if removable {
-        caps.push(DeviceCapability::Removable);
-        caps.push(DeviceCapability::Hotplug);
-        caps.push(DeviceCapability::Eject);
+        caps |= DeviceCapabilities::REMOVABLE
+            | DeviceCapabilities::HOTPLUG
+            | DeviceCapabilities::EJECT;
     }
 
     // Optical-specific
     if class == DeviceClass::Optical {
-        caps.push(DeviceCapability::MediaChange);
-        caps.push(DeviceCapability::TrayControl);
+        caps |= DeviceCapabilities::MEDIA_CHANGE | DeviceCapabilities::TRAY_CONTROL;
         if event.property("ID_CDROM_CD_RW").is_some()
             || event.property("ID_CDROM_DVD_RW").is_some()
         {
-            caps.push(DeviceCapability::Burn);
+            caps |= DeviceCapabilities::BURN;
         }
     }
 
     // SSD TRIM
     if event.property("ID_ATA_FEATURE_SET_TRIM").is_some() {
-        caps.push(DeviceCapability::Trim);
+        caps |= DeviceCapabilities::TRIM;
     }
 
     caps
@@ -133,7 +149,7 @@ pub fn device_info_from_udev(event: &UdevEvent) -> Result<DeviceInfo> {
         .clone()
         .ok_or_else(|| YantraError::Udev("no dev_path in event".into()))?;
 
-    let class = classify_device(event);
+    let (class, capabilities) = classify_and_extract(event);
     let id = DeviceId::new(format!(
         "{}:{}",
         event.subsystem,
@@ -157,7 +173,7 @@ pub fn device_info_from_udev(event: &UdevEvent) -> Result<DeviceInfo> {
         }
     }
 
-    info.capabilities = extract_capabilities(event, class);
+    info.capabilities = capabilities;
     info.properties = event.properties.clone();
 
     Ok(info)
@@ -181,6 +197,7 @@ pub fn enumerate_block_devices(sysfs_root: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::DeviceCapability;
 
     fn make_usb_event() -> UdevEvent {
         let mut props = HashMap::new();
@@ -246,22 +263,110 @@ mod tests {
     }
 
     #[test]
+    fn test_classify_dm() {
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/virtual/block/dm-0"),
+            dev_path: Some(PathBuf::from("/dev/dm-0")),
+            subsystem: "block".into(),
+            dev_type: Some("disk".into()),
+            properties: HashMap::new(),
+        };
+        assert_eq!(classify_device(&event), DeviceClass::DeviceMapper);
+    }
+
+    #[test]
+    fn test_classify_sd_card() {
+        let mut props = HashMap::new();
+        props.insert("ID_BUS".into(), "mmc".into());
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/mmc0/mmc0:0001/block/mmcblk0"),
+            dev_path: Some(PathBuf::from("/dev/mmcblk0")),
+            subsystem: "block".into(),
+            dev_type: Some("disk".into()),
+            properties: props,
+        };
+        assert_eq!(classify_device(&event), DeviceClass::SdCard);
+    }
+
+    #[test]
+    fn test_classify_block_internal() {
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda"),
+            dev_path: Some(PathBuf::from("/dev/sda")),
+            subsystem: "block".into(),
+            dev_type: Some("disk".into()),
+            properties: HashMap::new(),
+        };
+        assert_eq!(classify_device(&event), DeviceClass::BlockInternal);
+    }
+
+    #[test]
+    fn test_classify_unknown() {
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/usb/input0"),
+            dev_path: None,
+            subsystem: "input".into(),
+            dev_type: None,
+            properties: HashMap::new(),
+        };
+        assert_eq!(classify_device(&event), DeviceClass::Unknown);
+    }
+
+    #[test]
     fn test_usb_capabilities() {
         let event = make_usb_event();
         let caps = extract_capabilities(&event, DeviceClass::UsbStorage);
-        assert!(caps.contains(&DeviceCapability::Read));
-        assert!(caps.contains(&DeviceCapability::Removable));
-        assert!(caps.contains(&DeviceCapability::Hotplug));
-        assert!(caps.contains(&DeviceCapability::Eject));
+        assert!(caps.contains(DeviceCapabilities::READ));
+        assert!(caps.contains(DeviceCapabilities::REMOVABLE));
+        assert!(caps.contains(DeviceCapabilities::HOTPLUG));
+        assert!(caps.contains(DeviceCapabilities::EJECT));
+        assert!(!caps.contains(DeviceCapabilities::TRAY_CONTROL));
     }
 
     #[test]
     fn test_optical_capabilities() {
         let event = make_optical_event();
         let caps = extract_capabilities(&event, DeviceClass::Optical);
-        assert!(caps.contains(&DeviceCapability::TrayControl));
-        assert!(caps.contains(&DeviceCapability::MediaChange));
-        assert!(caps.contains(&DeviceCapability::Burn)); // DVD-RW
+        assert!(caps.contains(DeviceCapabilities::TRAY_CONTROL));
+        assert!(caps.contains(DeviceCapabilities::MEDIA_CHANGE));
+        assert!(caps.contains(DeviceCapabilities::BURN)); // DVD-RW
+    }
+
+    #[test]
+    fn test_readonly_device() {
+        let mut props = HashMap::new();
+        props.insert("ID_FS_READONLY".into(), "1".into());
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/block/sda"),
+            dev_path: Some(PathBuf::from("/dev/sda")),
+            subsystem: "block".into(),
+            dev_type: Some("disk".into()),
+            properties: props,
+        };
+        let caps = extract_capabilities(&event, DeviceClass::BlockInternal);
+        assert!(caps.contains(DeviceCapabilities::READ));
+        assert!(!caps.contains(DeviceCapabilities::WRITE));
+    }
+
+    #[test]
+    fn test_trim_capability() {
+        let mut props = HashMap::new();
+        props.insert("ID_ATA_FEATURE_SET_TRIM".into(), "1".into());
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/block/sda"),
+            dev_path: Some(PathBuf::from("/dev/sda")),
+            subsystem: "block".into(),
+            dev_type: Some("disk".into()),
+            properties: props,
+        };
+        let caps = extract_capabilities(&event, DeviceClass::BlockInternal);
+        assert!(caps.contains(DeviceCapabilities::TRIM));
     }
 
     #[test]
@@ -274,6 +379,7 @@ mod tests {
         assert_eq!(info.serial.as_deref(), Some("ABC123"));
         assert_eq!(info.label.as_deref(), Some("MYUSB"));
         assert_eq!(info.fs_type.as_deref(), Some("vfat"));
+        assert!(info.has_capability(DeviceCapability::Removable));
     }
 
     #[test]
@@ -282,6 +388,34 @@ mod tests {
         let info = device_info_from_udev(&event).unwrap();
         assert_eq!(info.class, DeviceClass::Optical);
         assert_eq!(info.label.as_deref(), Some("MOVIE_DISC"));
+        assert!(info.has_capability(DeviceCapability::TrayControl));
+    }
+
+    #[test]
+    fn test_device_info_with_size() {
+        let mut event = make_usb_event();
+        event.properties.insert("ID_PART_ENTRY_SIZE".into(), "31457280".into());
+        let info = device_info_from_udev(&event).unwrap();
+        assert_eq!(info.size_bytes, 31457280 * 512);
+    }
+
+    #[test]
+    fn test_device_info_label_enc_fallback() {
+        let mut props = HashMap::new();
+        props.insert("ID_BUS".into(), "usb".into());
+        props.insert("ID_USB_DRIVER".into(), "usb-storage".into());
+        props.insert("ID_FS_LABEL_ENC".into(), "ENCODED_LABEL".into());
+
+        let event = UdevEvent {
+            action: "add".into(),
+            sys_path: PathBuf::from("/sys/devices/usb/block/sdb/sdb1"),
+            dev_path: Some(PathBuf::from("/dev/sdb1")),
+            subsystem: "block".into(),
+            dev_type: Some("partition".into()),
+            properties: props,
+        };
+        let info = device_info_from_udev(&event).unwrap();
+        assert_eq!(info.label.as_deref(), Some("ENCODED_LABEL"));
     }
 
     #[test]
@@ -298,6 +432,12 @@ mod tests {
     }
 
     #[test]
+    fn test_udev_event_property_missing() {
+        let event = make_usb_event();
+        assert!(event.property("NONEXISTENT_KEY").is_none());
+    }
+
+    #[test]
     fn test_no_dev_path_error() {
         let event = UdevEvent {
             action: "add".into(),
@@ -308,5 +448,27 @@ mod tests {
             properties: HashMap::new(),
         };
         assert!(device_info_from_udev(&event).is_err());
+    }
+
+    #[test]
+    fn test_classify_and_extract_combined() {
+        let event = make_usb_event();
+        let (class, caps) = classify_and_extract(&event);
+        assert_eq!(class, DeviceClass::UsbStorage);
+        assert!(caps.contains(DeviceCapabilities::REMOVABLE));
+    }
+
+    #[test]
+    fn test_enumerate_block_devices_nonexistent() {
+        let devices = enumerate_block_devices(Path::new("/nonexistent/path"));
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn test_contains_bytes() {
+        assert!(contains_bytes(b"/sys/block/dm-0", b"/dm-"));
+        assert!(contains_bytes(b"/sys/block/loop0", b"/loop"));
+        assert!(!contains_bytes(b"/sys/block/sda", b"/dm-"));
+        assert!(!contains_bytes(b"", b"/dm-"));
     }
 }

@@ -1,9 +1,11 @@
 //! Core device types, traits, and capabilities.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
+use bitflags::bitflags;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +25,7 @@ impl DeviceId {
 
 impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        f.write_str(&self.0)
     }
 }
 
@@ -50,16 +52,17 @@ pub enum DeviceClass {
 
 impl fmt::Display for DeviceClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UsbStorage => write!(f, "usb-storage"),
-            Self::Optical => write!(f, "optical"),
-            Self::BlockInternal => write!(f, "block-internal"),
-            Self::SdCard => write!(f, "sd-card"),
-            Self::Network => write!(f, "network"),
-            Self::Loop => write!(f, "loop"),
-            Self::DeviceMapper => write!(f, "device-mapper"),
-            Self::Unknown => write!(f, "unknown"),
-        }
+        let s = match self {
+            Self::UsbStorage => "usb-storage",
+            Self::Optical => "optical",
+            Self::BlockInternal => "block-internal",
+            Self::SdCard => "sd-card",
+            Self::Network => "network",
+            Self::Loop => "loop",
+            Self::DeviceMapper => "device-mapper",
+            Self::Unknown => "unknown",
+        };
+        f.write_str(s)
     }
 }
 
@@ -88,6 +91,89 @@ pub enum DeviceCapability {
     Burn,
 }
 
+impl DeviceCapability {
+    /// Convert to the corresponding bitflag.
+    #[inline]
+    pub fn flag(self) -> DeviceCapabilities {
+        match self {
+            Self::Read => DeviceCapabilities::READ,
+            Self::Write => DeviceCapabilities::WRITE,
+            Self::Eject => DeviceCapabilities::EJECT,
+            Self::MediaChange => DeviceCapabilities::MEDIA_CHANGE,
+            Self::Removable => DeviceCapabilities::REMOVABLE,
+            Self::Trim => DeviceCapabilities::TRIM,
+            Self::Hotplug => DeviceCapabilities::HOTPLUG,
+            Self::TrayControl => DeviceCapabilities::TRAY_CONTROL,
+            Self::AudioPlayback => DeviceCapabilities::AUDIO_PLAYBACK,
+            Self::Burn => DeviceCapabilities::BURN,
+        }
+    }
+}
+
+bitflags! {
+    /// Bitflag storage for device capabilities — O(1) membership checks.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct DeviceCapabilities: u16 {
+        const READ           = 1 << 0;
+        const WRITE          = 1 << 1;
+        const EJECT          = 1 << 2;
+        const MEDIA_CHANGE   = 1 << 3;
+        const REMOVABLE      = 1 << 4;
+        const TRIM           = 1 << 5;
+        const HOTPLUG        = 1 << 6;
+        const TRAY_CONTROL   = 1 << 7;
+        const AUDIO_PLAYBACK = 1 << 8;
+        const BURN           = 1 << 9;
+    }
+}
+
+/// All individual capability variants for iteration.
+const ALL_CAPABILITIES: &[(DeviceCapabilities, DeviceCapability)] = &[
+    (DeviceCapabilities::READ, DeviceCapability::Read),
+    (DeviceCapabilities::WRITE, DeviceCapability::Write),
+    (DeviceCapabilities::EJECT, DeviceCapability::Eject),
+    (DeviceCapabilities::MEDIA_CHANGE, DeviceCapability::MediaChange),
+    (DeviceCapabilities::REMOVABLE, DeviceCapability::Removable),
+    (DeviceCapabilities::TRIM, DeviceCapability::Trim),
+    (DeviceCapabilities::HOTPLUG, DeviceCapability::Hotplug),
+    (DeviceCapabilities::TRAY_CONTROL, DeviceCapability::TrayControl),
+    (DeviceCapabilities::AUDIO_PLAYBACK, DeviceCapability::AudioPlayback),
+    (DeviceCapabilities::BURN, DeviceCapability::Burn),
+];
+
+impl DeviceCapabilities {
+    /// Convert to a Vec of individual capabilities (for display/serde).
+    pub fn to_vec(self) -> Vec<DeviceCapability> {
+        ALL_CAPABILITIES
+            .iter()
+            .filter(|(flag, _)| self.contains(*flag))
+            .map(|(_, cap)| *cap)
+            .collect()
+    }
+
+    /// Build from a slice of capabilities.
+    pub fn from_slice(caps: &[DeviceCapability]) -> Self {
+        let mut flags = Self::empty();
+        for cap in caps {
+            flags |= cap.flag();
+        }
+        flags
+    }
+}
+
+impl Serialize for DeviceCapabilities {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.to_vec().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DeviceCapabilities {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let caps: Vec<DeviceCapability> = Vec::deserialize(deserializer)?;
+        Ok(Self::from_slice(&caps))
+    }
+}
+
 /// Current state of a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DeviceState {
@@ -107,14 +193,15 @@ pub enum DeviceState {
 
 impl fmt::Display for DeviceState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ready => write!(f, "ready"),
-            Self::Mounted => write!(f, "mounted"),
-            Self::NoMedia => write!(f, "no-media"),
-            Self::Ejecting => write!(f, "ejecting"),
-            Self::Detached => write!(f, "detached"),
-            Self::Error => write!(f, "error"),
-        }
+        let s = match self {
+            Self::Ready => "ready",
+            Self::Mounted => "mounted",
+            Self::NoMedia => "no-media",
+            Self::Ejecting => "ejecting",
+            Self::Detached => "detached",
+            Self::Error => "error",
+        };
+        f.write_str(s)
     }
 }
 
@@ -145,8 +232,8 @@ pub struct DeviceInfo {
     pub mount_point: Option<PathBuf>,
     /// Size in bytes (0 if unknown or no media).
     pub size_bytes: u64,
-    /// Device capabilities.
-    pub capabilities: Vec<DeviceCapability>,
+    /// Device capabilities (bitflag — serializes as array for compatibility).
+    pub capabilities: DeviceCapabilities,
     /// When this device was first detected.
     pub detected_at: DateTime<Utc>,
     /// Extra properties from udev.
@@ -169,46 +256,49 @@ impl DeviceInfo {
             fs_type: None,
             mount_point: None,
             size_bytes: 0,
-            capabilities: Vec::new(),
+            capabilities: DeviceCapabilities::empty(),
             detected_at: Utc::now(),
             properties: HashMap::new(),
         }
     }
 
-    /// Check if the device has a specific capability.
+    /// Check if the device has a specific capability. O(1) bitwise check.
+    #[inline]
     pub fn has_capability(&self, cap: DeviceCapability) -> bool {
-        self.capabilities.contains(&cap)
+        self.capabilities.contains(cap.flag())
     }
 
     /// Check if the device is currently mounted.
+    #[inline]
     pub fn is_mounted(&self) -> bool {
         self.state == DeviceState::Mounted || self.mount_point.is_some()
     }
 
     /// Check if the device is removable (USB, optical, SD card).
+    #[inline]
     pub fn is_removable(&self) -> bool {
         matches!(
             self.class,
             DeviceClass::UsbStorage | DeviceClass::Optical | DeviceClass::SdCard
-        ) || self.has_capability(DeviceCapability::Removable)
+        ) || self.capabilities.contains(DeviceCapabilities::REMOVABLE)
     }
 
     /// Human-readable display name: label > model > dev_path.
-    pub fn display_name(&self) -> String {
+    pub fn display_name(&self) -> Cow<'_, str> {
         if let Some(label) = &self.label {
-            label.clone()
+            Cow::Borrowed(label)
         } else if let Some(model) = &self.model {
-            model.clone()
+            Cow::Borrowed(model)
         } else {
-            self.dev_path.display().to_string()
+            Cow::Owned(self.dev_path.display().to_string())
         }
     }
 
     /// Size formatted as human-readable string.
-    pub fn size_display(&self) -> String {
+    pub fn size_display(&self) -> Cow<'static, str> {
         let bytes = self.size_bytes;
         if bytes == 0 {
-            return "unknown".into();
+            return Cow::Borrowed("unknown");
         }
         const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
         let mut size = bytes as f64;
@@ -218,9 +308,9 @@ impl DeviceInfo {
             unit_idx += 1;
         }
         if unit_idx == 0 {
-            format!("{bytes} B")
+            Cow::Owned(format!("{bytes} B"))
         } else {
-            format!("{size:.1} {}", UNITS[unit_idx])
+            Cow::Owned(format!("{size:.1} {}", UNITS[unit_idx]))
         }
     }
 }
@@ -249,10 +339,39 @@ mod tests {
     }
 
     #[test]
-    fn test_device_class_display() {
+    fn test_device_id_equality_and_hash() {
+        use std::collections::HashSet;
+        let a = DeviceId::new("block:sdb1");
+        let b = DeviceId::new("block:sdb1");
+        let c = DeviceId::new("block:sdc1");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        let mut set = HashSet::new();
+        set.insert(a.clone());
+        assert!(set.contains(&b));
+        assert!(!set.contains(&c));
+    }
+
+    #[test]
+    fn test_device_class_display_all() {
         assert_eq!(DeviceClass::UsbStorage.to_string(), "usb-storage");
         assert_eq!(DeviceClass::Optical.to_string(), "optical");
         assert_eq!(DeviceClass::BlockInternal.to_string(), "block-internal");
+        assert_eq!(DeviceClass::SdCard.to_string(), "sd-card");
+        assert_eq!(DeviceClass::Network.to_string(), "network");
+        assert_eq!(DeviceClass::Loop.to_string(), "loop");
+        assert_eq!(DeviceClass::DeviceMapper.to_string(), "device-mapper");
+        assert_eq!(DeviceClass::Unknown.to_string(), "unknown");
+    }
+
+    #[test]
+    fn test_device_state_display_all() {
+        assert_eq!(DeviceState::Ready.to_string(), "ready");
+        assert_eq!(DeviceState::Mounted.to_string(), "mounted");
+        assert_eq!(DeviceState::NoMedia.to_string(), "no-media");
+        assert_eq!(DeviceState::Ejecting.to_string(), "ejecting");
+        assert_eq!(DeviceState::Detached.to_string(), "detached");
+        assert_eq!(DeviceState::Error.to_string(), "error");
     }
 
     #[test]
@@ -266,20 +385,61 @@ mod tests {
         assert_eq!(info.state, DeviceState::Ready);
         assert!(!info.is_mounted());
         assert!(info.is_removable());
+        assert!(info.capabilities.is_empty());
     }
 
     #[test]
-    fn test_has_capability() {
+    fn test_has_capability_bitflags() {
         let mut info = DeviceInfo::new(
             DeviceId::new("block:sr0"),
             PathBuf::from("/dev/sr0"),
             DeviceClass::Optical,
         );
         assert!(!info.has_capability(DeviceCapability::Eject));
-        info.capabilities.push(DeviceCapability::Eject);
-        info.capabilities.push(DeviceCapability::TrayControl);
+        info.capabilities |= DeviceCapability::Eject.flag();
+        info.capabilities |= DeviceCapability::TrayControl.flag();
         assert!(info.has_capability(DeviceCapability::Eject));
         assert!(info.has_capability(DeviceCapability::TrayControl));
+        assert!(!info.has_capability(DeviceCapability::Burn));
+    }
+
+    #[test]
+    fn test_capabilities_to_vec_roundtrip() {
+        let caps = DeviceCapabilities::READ
+            | DeviceCapabilities::WRITE
+            | DeviceCapabilities::REMOVABLE;
+        let vec = caps.to_vec();
+        assert_eq!(vec.len(), 3);
+        assert!(vec.contains(&DeviceCapability::Read));
+        assert!(vec.contains(&DeviceCapability::Write));
+        assert!(vec.contains(&DeviceCapability::Removable));
+
+        let rebuilt = DeviceCapabilities::from_slice(&vec);
+        assert_eq!(caps, rebuilt);
+    }
+
+    #[test]
+    fn test_capabilities_empty() {
+        let caps = DeviceCapabilities::empty();
+        assert!(caps.to_vec().is_empty());
+        assert!(!caps.contains(DeviceCapabilities::READ));
+    }
+
+    #[test]
+    fn test_capabilities_all() {
+        let caps = DeviceCapabilities::from_slice(&[
+            DeviceCapability::Read,
+            DeviceCapability::Write,
+            DeviceCapability::Eject,
+            DeviceCapability::MediaChange,
+            DeviceCapability::Removable,
+            DeviceCapability::Trim,
+            DeviceCapability::Hotplug,
+            DeviceCapability::TrayControl,
+            DeviceCapability::AudioPlayback,
+            DeviceCapability::Burn,
+        ]);
+        assert_eq!(caps.to_vec().len(), 10);
     }
 
     #[test]
@@ -289,13 +449,13 @@ mod tests {
             PathBuf::from("/dev/sdc1"),
             DeviceClass::UsbStorage,
         );
-        assert_eq!(info.display_name(), "/dev/sdc1");
+        assert_eq!(info.display_name().as_ref(), "/dev/sdc1");
 
         info.model = Some("SanDisk Cruzer".into());
-        assert_eq!(info.display_name(), "SanDisk Cruzer");
+        assert_eq!(info.display_name().as_ref(), "SanDisk Cruzer");
 
         info.label = Some("MY_USB".into());
-        assert_eq!(info.display_name(), "MY_USB");
+        assert_eq!(info.display_name().as_ref(), "MY_USB");
     }
 
     #[test]
@@ -305,13 +465,27 @@ mod tests {
             PathBuf::from("/dev/sda"),
             DeviceClass::BlockInternal,
         );
-        assert_eq!(info.size_display(), "unknown");
+        assert_eq!(info.size_display().as_ref(), "unknown");
 
         info.size_bytes = 512;
-        assert_eq!(info.size_display(), "512 B");
+        assert_eq!(info.size_display().as_ref(), "512 B");
+
+        info.size_bytes = 1024;
+        assert_eq!(info.size_display().as_ref(), "1.0 KB");
 
         info.size_bytes = 1024 * 1024 * 1024 * 16; // 16 GB
         assert!(info.size_display().contains("16.0 GB"));
+    }
+
+    #[test]
+    fn test_size_display_tb() {
+        let mut info = DeviceInfo::new(
+            DeviceId::new("test"),
+            PathBuf::from("/dev/sda"),
+            DeviceClass::BlockInternal,
+        );
+        info.size_bytes = 1024 * 1024 * 1024 * 1024 * 2; // 2 TB
+        assert!(info.size_display().contains("2.0 TB"));
     }
 
     #[test]
@@ -323,12 +497,28 @@ mod tests {
         );
         assert!(usb.is_removable());
 
+        let sd = DeviceInfo::new(
+            DeviceId::new("sd"),
+            PathBuf::from("/dev/mmcblk0"),
+            DeviceClass::SdCard,
+        );
+        assert!(sd.is_removable());
+
         let internal = DeviceInfo::new(
             DeviceId::new("ssd"),
             PathBuf::from("/dev/nvme0n1"),
             DeviceClass::BlockInternal,
         );
         assert!(!internal.is_removable());
+
+        // BlockInternal with Removable capability
+        let mut hotplug_internal = DeviceInfo::new(
+            DeviceId::new("hotplug"),
+            PathBuf::from("/dev/sda"),
+            DeviceClass::BlockInternal,
+        );
+        hotplug_internal.capabilities |= DeviceCapabilities::REMOVABLE;
+        assert!(hotplug_internal.is_removable());
     }
 
     #[test]
@@ -346,14 +536,46 @@ mod tests {
     }
 
     #[test]
-    fn test_serialization() {
-        let info = DeviceInfo::new(
+    fn test_is_mounted_by_mount_point_only() {
+        let mut info = DeviceInfo::new(
+            DeviceId::new("test"),
+            PathBuf::from("/dev/sdb1"),
+            DeviceClass::UsbStorage,
+        );
+        // mount_point set but state is Ready
+        info.mount_point = Some(PathBuf::from("/mnt/usb"));
+        assert!(info.is_mounted());
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let mut info = DeviceInfo::new(
             DeviceId::new("test:dev"),
             PathBuf::from("/dev/sdb"),
             DeviceClass::UsbStorage,
         );
+        info.capabilities = DeviceCapabilities::READ | DeviceCapabilities::WRITE | DeviceCapabilities::EJECT;
+        info.label = Some("TEST_DRIVE".into());
+        info.vendor = Some("TestVendor".into());
+        info.size_bytes = 1024 * 1024;
+
         let json = serde_json::to_string(&info).unwrap();
-        assert!(json.contains("usb-storage") || json.contains("UsbStorage"));
-        let _roundtrip: DeviceInfo = serde_json::from_str(&json).unwrap();
+        let roundtrip: DeviceInfo = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(roundtrip.id, info.id);
+        assert_eq!(roundtrip.class, info.class);
+        assert_eq!(roundtrip.capabilities, info.capabilities);
+        assert_eq!(roundtrip.label, info.label);
+        assert_eq!(roundtrip.size_bytes, info.size_bytes);
+    }
+
+    #[test]
+    fn test_capabilities_serde() {
+        let caps = DeviceCapabilities::READ | DeviceCapabilities::EJECT;
+        let json = serde_json::to_string(&caps).unwrap();
+        assert!(json.contains("Read"));
+        assert!(json.contains("Eject"));
+        let deserialized: DeviceCapabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(caps, deserialized);
     }
 }

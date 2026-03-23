@@ -63,9 +63,7 @@ fn make_optical_udev_event() -> UdevEvent {
 
     UdevEvent {
         action: "change".into(),
-        sys_path: PathBuf::from(
-            "/sys/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0/block/sr0",
-        ),
+        sys_path: PathBuf::from("/sys/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0/block/sr0"),
         dev_path: Some(PathBuf::from("/dev/sr0")),
         subsystem: "block".into(),
         dev_type: Some("disk".into()),
@@ -208,9 +206,8 @@ fn bench_capabilities(c: &mut Criterion) {
         b.iter(|| black_box(caps).to_vec())
     });
     group.bench_function("contains_check", |b| {
-        let caps = DeviceCapabilities::READ
-            | DeviceCapabilities::WRITE
-            | DeviceCapabilities::REMOVABLE;
+        let caps =
+            DeviceCapabilities::READ | DeviceCapabilities::WRITE | DeviceCapabilities::REMOVABLE;
         b.iter(|| black_box(caps).contains(DeviceCapabilities::WRITE))
     });
     group.bench_function("bitwise_or_all", |b| {
@@ -349,9 +346,7 @@ fn bench_storage(c: &mut Criterion) {
         let info = make_device_info();
         b.iter(|| default_mount_point(black_box(&info)))
     });
-    group.bench_function("mount_options_default", |b| {
-        b.iter(MountOptions::default)
-    });
+    group.bench_function("mount_options_default", |b| b.iter(MountOptions::default));
 
     group.finish();
 }

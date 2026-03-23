@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use tracing::{debug, error, info};
+
 use crate::device::{DeviceId, DeviceInfo};
 use crate::error::{Result, YantraError};
 
@@ -154,8 +156,7 @@ fn unescape_mount_path(s: &str) -> String {
                 && (b'0'..=b'7').contains(&d2)
                 && (b'0'..=b'7').contains(&d3)
             {
-                let val =
-                    (d1 - b'0') as u32 * 64 + (d2 - b'0') as u32 * 8 + (d3 - b'0') as u32;
+                let val = (d1 - b'0') as u32 * 64 + (d2 - b'0') as u32 * 8 + (d3 - b'0') as u32;
                 if let Some(ch) = char::from_u32(val) {
                     result.push(ch);
                 } else {
@@ -214,7 +215,11 @@ fn find_mount_in(dev_path: &Path, mount_table: &str) -> Option<PathBuf> {
 /// Parse /proc/mounts to find where a device is mounted.
 pub fn find_mount_point(dev_path: &Path) -> Option<PathBuf> {
     let mount_table = std::fs::read_to_string("/proc/mounts").ok()?;
-    find_mount_in(dev_path, &mount_table)
+    let result = find_mount_in(dev_path, &mount_table);
+    if let Some(ref mp) = result {
+        debug!(device = %dev_path.display(), mount_point = %mp.display(), "device is mounted");
+    }
+    result
 }
 
 /// Generate a default mount point for a device.
@@ -226,7 +231,13 @@ pub fn default_mount_point(device: &DeviceInfo) -> PathBuf {
     // Sanitize: replace non-alphanumeric with underscore
     let safe_name: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     PathBuf::from(format!("/run/media/{safe_name}"))
 }
@@ -308,6 +319,8 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
 
     validate_mount_point(&mount_point)?;
 
+    info!(device = %dev_str, mount_point = %mount_point.display(), read_only = options.read_only, "mounting device");
+
     // Create mount point directory if needed
     if !mount_point.exists() {
         std::fs::create_dir_all(&mount_point).map_err(|e| YantraError::MountFailed {
@@ -323,12 +336,11 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
             device: dev_str.clone(),
             reason: format!("invalid device path: {e}"),
         })?;
-    let c_target = CString::new(mount_point.as_os_str().as_bytes()).map_err(|e| {
-        YantraError::MountFailed {
+    let c_target =
+        CString::new(mount_point.as_os_str().as_bytes()).map_err(|e| YantraError::MountFailed {
             device: dev_str.clone(),
             reason: format!("invalid mount point: {e}"),
-        }
-    })?;
+        })?;
 
     // Collect non-flag options to pass as mount data
     let data_options: Vec<&str> = options
@@ -341,10 +353,12 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
     let c_data = if data_str.is_empty() {
         None
     } else {
-        Some(CString::new(data_str.as_bytes()).map_err(|e| YantraError::MountFailed {
-            device: dev_str.clone(),
-            reason: format!("invalid mount data: {e}"),
-        })?)
+        Some(
+            CString::new(data_str.as_bytes()).map_err(|e| YantraError::MountFailed {
+                device: dev_str.clone(),
+                reason: format!("invalid mount data: {e}"),
+            })?,
+        )
     };
     let data_ptr = c_data
         .as_ref()
@@ -371,7 +385,12 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
 
     if let Some(ref fs_type) = options.fs_type {
         // Explicit filesystem type
-        try_mount(fs_type).map_err(|errno| map_mount_errno(errno, &dev_str))?;
+        debug!(device = %dev_str, fs_type, "mounting with explicit filesystem type");
+        try_mount(fs_type).map_err(|errno| {
+            error!(device = %dev_str, fs_type, errno, "mount failed");
+            map_mount_errno(errno, &dev_str)
+        })?;
+        info!(device = %dev_str, fs_type, mount_point = %mount_point.display(), "mount succeeded");
         Ok(MountResult {
             device_id: DeviceId::new(dev_str),
             dev_path: dev_path.to_path_buf(),
@@ -381,10 +400,12 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
         })
     } else {
         // Auto-detect: try each filesystem type
+        debug!(device = %dev_str, "auto-detecting filesystem type");
         let mut last_errno = 0;
         for fs in AUTO_FS_TYPES {
             match try_mount(fs) {
                 Ok(()) => {
+                    info!(device = %dev_str, fs_type = fs, mount_point = %mount_point.display(), "mount succeeded (auto-detected)");
                     return Ok(MountResult {
                         device_id: DeviceId::new(dev_str),
                         dev_path: dev_path.to_path_buf(),
@@ -394,10 +415,12 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
                     });
                 }
                 Err(errno) => {
+                    debug!(device = %dev_str, fs_type = fs, errno, "filesystem type rejected");
                     last_errno = errno;
                 }
             }
         }
+        error!(device = %dev_str, errno = last_errno, "mount failed: no filesystem type matched");
         Err(map_mount_errno(last_errno, &dev_str))
     }
 }
@@ -453,6 +476,8 @@ pub fn unmount(mount_point: &Path) -> Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
+    info!(mount_point = %mount_point.display(), "unmounting");
+
     let c_target = CString::new(mount_point.as_os_str().as_bytes()).map_err(|e| {
         YantraError::UnmountFailed {
             mount_point: mount_point.to_path_buf(),
@@ -463,8 +488,11 @@ pub fn unmount(mount_point: &Path) -> Result<()> {
     let ret = unsafe { libc::umount2(c_target.as_ptr(), 0) };
     if ret != 0 {
         let errno = unsafe { *libc::__errno_location() };
+        error!(mount_point = %mount_point.display(), errno, "unmount failed");
         return Err(map_umount_errno(errno, mount_point));
     }
+
+    info!(mount_point = %mount_point.display(), "unmount succeeded");
 
     // Clean up mount point directory if empty and under /run/media/
     if mount_point.starts_with("/run/media/") {
@@ -492,8 +520,11 @@ pub fn eject(dev_path: &Path) -> Result<()> {
 
     let dev_str = dev_path.display().to_string();
 
+    info!(device = %dev_str, "ejecting device");
+
     // Unmount first if mounted
     if let Some(mp) = find_mount_point(dev_path) {
+        debug!(device = %dev_str, mount_point = %mp.display(), "unmounting before eject");
         unmount(&mp)?;
     }
 
@@ -508,6 +539,7 @@ pub fn eject(dev_path: &Path) -> Result<()> {
         .to_string();
 
     if dev_name.starts_with("sr") {
+        debug!(device = %dev_str, "optical drive detected, using CDROMEJECT ioctl");
         // Optical drive — use CDROMEJECT ioctl
         let c_path = CString::new(dev_path.as_os_str().as_bytes()).map_err(|e| {
             YantraError::EjectFailed {
@@ -545,12 +577,17 @@ pub fn eject(dev_path: &Path) -> Result<()> {
     } else {
         // USB/block device — write "1" to sysfs delete
         let delete_path = format!("/sys/block/{base_dev_name}/device/delete");
-        std::fs::write(&delete_path, b"1").map_err(|e| YantraError::EjectFailed {
-            device: dev_str,
-            reason: format!("failed to write to {delete_path}: {e}"),
+        debug!(device = %dev_str, sysfs_path = %delete_path, "USB/block device, writing to sysfs delete");
+        std::fs::write(&delete_path, b"1").map_err(|e| {
+            error!(device = %dev_str, sysfs_path = %delete_path, error = %e, "sysfs delete failed");
+            YantraError::EjectFailed {
+                device: dev_str,
+                reason: format!("failed to write to {delete_path}: {e}"),
+            }
         })?;
     }
 
+    info!(device = %dev_path.display(), "eject succeeded");
     Ok(())
 }
 
@@ -738,18 +775,12 @@ mod tests {
 
     #[test]
     fn test_unescape_mount_path_newline() {
-        assert_eq!(
-            unescape_mount_path("/mnt/my\\012drive"),
-            "/mnt/my\ndrive"
-        );
+        assert_eq!(unescape_mount_path("/mnt/my\\012drive"), "/mnt/my\ndrive");
     }
 
     #[test]
     fn test_unescape_mount_path_backslash() {
-        assert_eq!(
-            unescape_mount_path("/mnt/my\\134drive"),
-            "/mnt/my\\drive"
-        );
+        assert_eq!(unescape_mount_path("/mnt/my\\134drive"), "/mnt/my\\drive");
     }
 
     #[test]
@@ -877,8 +908,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_parse_mount_flags_combined() {
-        let flags =
-            parse_mount_flags(&["nosuid".into(), "nodev".into(), "noexec".into()], true);
+        let flags = parse_mount_flags(&["nosuid".into(), "nodev".into(), "noexec".into()], true);
         let expected = libc::MS_RDONLY as libc::c_ulong
             | libc::MS_NOSUID as libc::c_ulong
             | libc::MS_NODEV as libc::c_ulong

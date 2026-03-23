@@ -9,11 +9,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(target_os = "linux")]
 use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+
+use tracing::{debug, info};
 
 use crate::device::{DeviceCapabilities, DeviceClass, DeviceId, DeviceInfo};
 use crate::error::{Result, YantraError};
@@ -126,16 +128,14 @@ pub fn extract_capabilities(event: &UdevEvent, class: DeviceClass) -> DeviceCapa
             DeviceClass::UsbStorage | DeviceClass::Optical | DeviceClass::SdCard
         );
     if removable {
-        caps |= DeviceCapabilities::REMOVABLE
-            | DeviceCapabilities::HOTPLUG
-            | DeviceCapabilities::EJECT;
+        caps |=
+            DeviceCapabilities::REMOVABLE | DeviceCapabilities::HOTPLUG | DeviceCapabilities::EJECT;
     }
 
     // Optical-specific
     if class == DeviceClass::Optical {
         caps |= DeviceCapabilities::MEDIA_CHANGE | DeviceCapabilities::TRAY_CONTROL;
-        if event.property("ID_CDROM_CD_RW").is_some()
-            || event.property("ID_CDROM_DVD_RW").is_some()
+        if event.property("ID_CDROM_CD_RW").is_some() || event.property("ID_CDROM_DVD_RW").is_some()
         {
             caps |= DeviceCapabilities::BURN;
         }
@@ -219,9 +219,9 @@ fn read_sysfs_attr(base: &Path, attr: &str) -> Option<String> {
 /// pipeline.
 pub fn enumerate_devices(sysfs_root: &Path) -> Result<Vec<DeviceInfo>> {
     let block_dir = sysfs_root.join("block");
-    let entries = std::fs::read_dir(&block_dir).map_err(|e| {
-        YantraError::Udev(format!("failed to read {}: {}", block_dir.display(), e))
-    })?;
+    debug!(path = %block_dir.display(), "enumerating block devices");
+    let entries = std::fs::read_dir(&block_dir)
+        .map_err(|e| YantraError::Udev(format!("failed to read {}: {}", block_dir.display(), e)))?;
 
     let mut devices = Vec::new();
 
@@ -253,6 +253,7 @@ pub fn enumerate_devices(sysfs_root: &Path) -> Result<Vec<DeviceInfo>> {
         }
     }
 
+    info!(count = devices.len(), "enumeration complete");
     Ok(devices)
 }
 
@@ -379,15 +380,13 @@ pub fn parse_uevent(buf: &[u8]) -> Option<UdevEvent> {
     }
 
     // Derive dev_path from DEVNAME property or devpath
-    let dev_path = properties
-        .get("DEVNAME")
-        .map(|n| {
-            if n.starts_with('/') {
-                PathBuf::from(n)
-            } else {
-                PathBuf::from(format!("/dev/{}", n))
-            }
-        });
+    let dev_path = properties.get("DEVNAME").map(|n| {
+        if n.starts_with('/') {
+            PathBuf::from(n)
+        } else {
+            PathBuf::from(format!("/dev/{}", n))
+        }
+    });
 
     let sys_path = PathBuf::from(format!("/sys{}", devpath));
 
@@ -413,16 +412,15 @@ fn udev_event_to_device_event(uevent: &UdevEvent) -> Option<DeviceEvent> {
 
     let dev_path = uevent.dev_path.clone()?;
     let (class, _caps) = classify_and_extract(uevent);
-    let dev_name = dev_path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
+    let dev_name = dev_path.file_name().unwrap_or_default().to_string_lossy();
     let id = DeviceId::new(format!("{}:{}", uevent.subsystem, dev_name));
 
     let mut event = DeviceEvent::new(id, class, kind, dev_path);
 
     // Attach full info for non-remove events
-    if !uevent.is_remove() && let Ok(info) = device_info_from_udev(uevent) {
+    if !uevent.is_remove()
+        && let Ok(info) = device_info_from_udev(uevent)
+    {
         event = event.with_info(info);
     }
 
@@ -473,7 +471,7 @@ impl UdevMonitor {
         let addr = SockaddrNl {
             nl_family: libc::AF_NETLINK as u16,
             nl_pad: 0,
-            nl_pid: 0, // let kernel assign
+            nl_pid: 0,    // let kernel assign
             nl_groups: 1, // KOBJECT_UEVENT multicast group
         };
 
@@ -487,7 +485,9 @@ impl UdevMonitor {
         };
         if rc < 0 {
             let err = std::io::Error::last_os_error();
-            unsafe { libc::close(fd); }
+            unsafe {
+                libc::close(fd);
+            }
             return Err(YantraError::Udev(format!("bind() failed: {}", err)));
         }
 
@@ -504,6 +504,7 @@ impl UdevMonitor {
             );
         }
 
+        info!("udev monitor created (netlink fd={})", fd);
         Ok(Self {
             socket_fd: fd,
             running: Arc::new(AtomicBool::new(true)),
@@ -556,9 +557,11 @@ impl UdevMonitor {
     /// Blocking event loop — polls for events and dispatches them to the
     /// provided `EventListener` until `stop()` is called.
     pub fn run_with_listener(&self, listener: &dyn EventListener) -> Result<()> {
+        info!("udev monitor event loop started");
         while self.running.load(Ordering::Relaxed) {
             match self.poll(500)? {
                 Some(uevent) => {
+                    debug!(action = %uevent.action, subsystem = %uevent.subsystem, dev_path = ?uevent.dev_path, "uevent received");
                     if let Some(dev_event) = udev_event_to_device_event(&uevent) {
                         // Respect the listener's class filter
                         let dominated = listener
@@ -579,6 +582,7 @@ impl UdevMonitor {
 
     /// Signal the monitor to stop its event loop.
     pub fn stop(&self) {
+        info!("udev monitor stopping");
         self.running.store(false, Ordering::Relaxed);
     }
 
@@ -604,9 +608,8 @@ impl UdevMonitor {
                 if ret <= 0 {
                     continue;
                 }
-                let n = unsafe {
-                    libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0)
-                };
+                let n =
+                    unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
                 if n <= 0 {
                     continue;
                 }
@@ -651,7 +654,9 @@ mod tests {
 
         UdevEvent {
             action: "add".into(),
-            sys_path: PathBuf::from("/sys/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb/sdb1"),
+            sys_path: PathBuf::from(
+                "/sys/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb/sdb1",
+            ),
             dev_path: Some(PathBuf::from("/dev/sdb1")),
             subsystem: "block".into(),
             dev_type: Some("partition".into()),
@@ -669,7 +674,9 @@ mod tests {
 
         UdevEvent {
             action: "change".into(),
-            sys_path: PathBuf::from("/sys/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0/block/sr0"),
+            sys_path: PathBuf::from(
+                "/sys/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0/block/sr0",
+            ),
             dev_path: Some(PathBuf::from("/dev/sr0")),
             subsystem: "block".into(),
             dev_type: Some("disk".into()),
@@ -734,7 +741,9 @@ mod tests {
     fn test_classify_block_internal() {
         let event = UdevEvent {
             action: "add".into(),
-            sys_path: PathBuf::from("/sys/devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda"),
+            sys_path: PathBuf::from(
+                "/sys/devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda",
+            ),
             dev_path: Some(PathBuf::from("/dev/sda")),
             subsystem: "block".into(),
             dev_type: Some("disk".into()),
@@ -834,7 +843,9 @@ mod tests {
     #[test]
     fn test_device_info_with_size() {
         let mut event = make_usb_event();
-        event.properties.insert("ID_PART_ENTRY_SIZE".into(), "31457280".into());
+        event
+            .properties
+            .insert("ID_PART_ENTRY_SIZE".into(), "31457280".into());
         let info = device_info_from_udev(&event).unwrap();
         assert_eq!(info.size_bytes, 31457280 * 512);
     }
@@ -1054,7 +1065,11 @@ mod tests {
         let devices = enumerate_devices(&root).unwrap();
         assert_eq!(devices.len(), 1);
         // removable=1 sets UDISKS_REMOVABLE property
-        assert!(devices[0].capabilities.contains(DeviceCapabilities::REMOVABLE));
+        assert!(
+            devices[0]
+                .capabilities
+                .contains(DeviceCapabilities::REMOVABLE)
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1095,7 +1110,9 @@ mod tests {
             assert_eq!(event.action, "add");
             assert_eq!(
                 event.sys_path,
-                PathBuf::from("/sys/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb")
+                PathBuf::from(
+                    "/sys/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb"
+                )
             );
             assert_eq!(event.dev_path, Some(PathBuf::from("/dev/sdb")));
             assert_eq!(event.subsystem, "block");
@@ -1185,10 +1202,7 @@ mod tests {
 
         #[test]
         fn test_parse_uevent_missing_action() {
-            let buf = build_uevent(&[
-                "DEVPATH=/devices/block/sda",
-                "SUBSYSTEM=block",
-            ]);
+            let buf = build_uevent(&["DEVPATH=/devices/block/sda", "SUBSYSTEM=block"]);
             // No ACTION and no header means no action -> None
             assert!(parse_uevent(&buf).is_none());
         }

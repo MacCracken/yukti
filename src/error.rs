@@ -15,7 +15,10 @@ pub enum YantraError {
     MountFailed { device: String, reason: String },
 
     #[error("unmount failed for {mount_point}: {reason}")]
-    UnmountFailed { mount_point: PathBuf, reason: String },
+    UnmountFailed {
+        mount_point: PathBuf,
+        reason: String,
+    },
 
     #[error("eject failed for {device}: {reason}")]
     EjectFailed { device: String, reason: String },

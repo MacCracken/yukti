@@ -3,6 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
+use tracing::{debug, error, info};
+
 use crate::error::{Result, YantraError};
 
 // ---------------------------------------------------------------------------
@@ -120,12 +123,15 @@ fn map_ioctl_error(dev_path: &Path, op: &str) -> YantraError {
 pub fn open_tray(dev_path: &Path) -> Result<()> {
     use std::os::unix::io::AsRawFd;
 
+    info!(device = %dev_path.display(), "opening tray");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
     let ret = unsafe { libc::ioctl(fd, ioctl::CDROMEJECT as libc::c_ulong) };
     if ret < 0 {
+        error!(device = %dev_path.display(), "open tray ioctl failed");
         return Err(map_ioctl_error(dev_path, "eject"));
     }
+    info!(device = %dev_path.display(), "tray opened");
     Ok(())
 }
 
@@ -134,12 +140,15 @@ pub fn open_tray(dev_path: &Path) -> Result<()> {
 pub fn close_tray(dev_path: &Path) -> Result<()> {
     use std::os::unix::io::AsRawFd;
 
+    info!(device = %dev_path.display(), "closing tray");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
     let ret = unsafe { libc::ioctl(fd, ioctl::CDROMCLOSETRAY as libc::c_ulong) };
     if ret < 0 {
+        error!(device = %dev_path.display(), "close tray ioctl failed");
         return Err(map_ioctl_error(dev_path, "close tray"));
     }
+    info!(device = %dev_path.display(), "tray closed");
     Ok(())
 }
 
@@ -148,10 +157,12 @@ pub fn close_tray(dev_path: &Path) -> Result<()> {
 pub fn drive_status(dev_path: &Path) -> Result<TrayState> {
     use std::os::unix::io::AsRawFd;
 
+    debug!(device = %dev_path.display(), "querying drive status");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
     let ret = unsafe { libc::ioctl(fd, ioctl::CDROM_DRIVE_STATUS as libc::c_ulong) };
     if ret < 0 {
+        error!(device = %dev_path.display(), "drive status ioctl failed");
         return Err(map_ioctl_error(dev_path, "drive status"));
     }
     match ret {
@@ -171,6 +182,7 @@ pub fn drive_status(dev_path: &Path) -> Result<TrayState> {
 pub fn read_toc(dev_path: &Path) -> Result<DiscToc> {
     use std::os::unix::io::AsRawFd;
 
+    info!(device = %dev_path.display(), "reading disc TOC");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
 
@@ -263,6 +275,14 @@ pub fn read_toc(dev_path: &Path) -> Result<DiscToc> {
 
     // Determine disc type based on track contents.
     let disc_type = classify_toc_tracks(has_audio, has_data);
+
+    info!(
+        device = %dev_path.display(),
+        disc_type = %disc_type,
+        tracks = tracks.len(),
+        total_size_bytes,
+        "TOC read complete"
+    );
 
     Ok(DiscToc {
         disc_type,
@@ -408,10 +428,7 @@ impl DiscToc {
 
     /// Total duration of audio tracks in seconds.
     pub fn total_audio_duration(&self) -> f64 {
-        self.tracks
-            .iter()
-            .filter_map(|t| t.duration_secs)
-            .sum()
+        self.tracks.iter().filter_map(|t| t.duration_secs).sum()
     }
 }
 
@@ -426,8 +443,7 @@ pub fn detect_disc_type(media_type: &str, has_audio: bool, has_data: bool) -> Di
         } else {
             DiscType::CdData
         }
-    } else if media_type.eq_ignore_ascii_case("dvd") || media_type.eq_ignore_ascii_case("dvd-rom")
-    {
+    } else if media_type.eq_ignore_ascii_case("dvd") || media_type.eq_ignore_ascii_case("dvd-rom") {
         DiscType::DvdRom
     } else if media_type.eq_ignore_ascii_case("dvd-r")
         || media_type.eq_ignore_ascii_case("dvd-rw")
@@ -444,8 +460,7 @@ pub fn detect_disc_type(media_type: &str, has_audio: bool, has_data: bool) -> Di
         DiscType::BluRay
     } else if media_type.eq_ignore_ascii_case("bd-video") {
         DiscType::BluRayVideo
-    } else if media_type.eq_ignore_ascii_case("blank")
-        || media_type.eq_ignore_ascii_case("no_disc")
+    } else if media_type.eq_ignore_ascii_case("blank") || media_type.eq_ignore_ascii_case("no_disc")
     {
         DiscType::Blank
     } else {
@@ -524,15 +539,30 @@ mod tests {
     fn test_detect_dvd() {
         assert_eq!(detect_disc_type("dvd-rom", false, true), DiscType::DvdRom);
         assert_eq!(detect_disc_type("dvd", false, true), DiscType::DvdRom);
-        assert_eq!(detect_disc_type("dvd-r", false, true), DiscType::DvdWritable);
-        assert_eq!(detect_disc_type("dvd-rw", false, true), DiscType::DvdWritable);
-        assert_eq!(detect_disc_type("dvd+r", false, true), DiscType::DvdWritable);
-        assert_eq!(detect_disc_type("dvd+rw", false, true), DiscType::DvdWritable);
+        assert_eq!(
+            detect_disc_type("dvd-r", false, true),
+            DiscType::DvdWritable
+        );
+        assert_eq!(
+            detect_disc_type("dvd-rw", false, true),
+            DiscType::DvdWritable
+        );
+        assert_eq!(
+            detect_disc_type("dvd+r", false, true),
+            DiscType::DvdWritable
+        );
+        assert_eq!(
+            detect_disc_type("dvd+rw", false, true),
+            DiscType::DvdWritable
+        );
     }
 
     #[test]
     fn test_detect_dvd_video() {
-        assert_eq!(detect_disc_type("dvd-video", false, true), DiscType::DvdVideo);
+        assert_eq!(
+            detect_disc_type("dvd-video", false, true),
+            DiscType::DvdVideo
+        );
     }
 
     #[test]
@@ -544,7 +574,10 @@ mod tests {
 
     #[test]
     fn test_detect_bluray_video() {
-        assert_eq!(detect_disc_type("bd-video", false, true), DiscType::BluRayVideo);
+        assert_eq!(
+            detect_disc_type("bd-video", false, true),
+            DiscType::BluRayVideo
+        );
     }
 
     #[test]

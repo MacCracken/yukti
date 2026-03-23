@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
+use tracing::{debug, error, info, warn};
+
 use crate::device::{Device, DeviceId, DeviceInfo};
 use crate::error::{Result, YantraError};
 use crate::event::{DeviceEvent, EventListener};
@@ -49,6 +51,7 @@ impl LinuxDeviceManager {
 
     /// Register an event listener for device hotplug events.
     pub fn add_listener(&self, listener: Arc<dyn EventListener>) {
+        debug!("registering event listener");
         self.listeners.lock().unwrap().push(listener);
     }
 
@@ -61,8 +64,10 @@ impl LinuxDeviceManager {
     pub fn start_monitor(&self) -> Result<std::sync::mpsc::Receiver<DeviceEvent>> {
         let mut guard = self.monitor.lock().unwrap();
         if guard.is_some() {
+            warn!("start_monitor called but monitor already running");
             return Err(YantraError::Udev("monitor already running".into()));
         }
+        info!("starting udev hotplug monitor");
         let mon = UdevMonitor::new()?;
         let rx = mon.subscribe();
         *guard = Some(mon);
@@ -72,6 +77,7 @@ impl LinuxDeviceManager {
     /// Stop the background udev monitor.
     #[cfg(feature = "udev")]
     pub fn stop_monitor(&self) {
+        info!("stopping udev hotplug monitor");
         let guard = self.monitor.lock().unwrap();
         if let Some(ref mon) = *guard {
             mon.stop();
@@ -82,9 +88,9 @@ impl LinuxDeviceManager {
     #[cfg(feature = "storage")]
     pub fn mount(&self, id: &DeviceId, options: &MountOptions) -> Result<MountResult> {
         let devices = self.devices.read().unwrap();
-        let info = devices.get(id).ok_or_else(|| YantraError::DeviceNotFound {
-            id: id.to_string(),
-        })?;
+        let info = devices
+            .get(id)
+            .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?;
         let result = crate::storage::mount(&info.dev_path, options)?;
 
         drop(devices);
@@ -101,15 +107,16 @@ impl LinuxDeviceManager {
     #[cfg(feature = "storage")]
     pub fn unmount(&self, id: &DeviceId) -> Result<()> {
         let devices = self.devices.read().unwrap();
-        let info = devices.get(id).ok_or_else(|| YantraError::DeviceNotFound {
-            id: id.to_string(),
-        })?;
-        let mount_point = info.mount_point.clone().ok_or_else(|| {
-            YantraError::UnmountFailed {
+        let info = devices
+            .get(id)
+            .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?;
+        let mount_point = info
+            .mount_point
+            .clone()
+            .ok_or_else(|| YantraError::UnmountFailed {
                 mount_point: info.dev_path.clone(),
                 reason: "device is not mounted".into(),
-            }
-        })?;
+            })?;
         drop(devices);
 
         crate::storage::unmount(&mount_point)?;
@@ -126,9 +133,9 @@ impl LinuxDeviceManager {
     #[cfg(feature = "storage")]
     pub fn eject(&self, id: &DeviceId) -> Result<()> {
         let devices = self.devices.read().unwrap();
-        let info = devices.get(id).ok_or_else(|| YantraError::DeviceNotFound {
-            id: id.to_string(),
-        })?;
+        let info = devices
+            .get(id)
+            .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?;
         let dev_path = info.dev_path.clone();
         drop(devices);
 
@@ -148,6 +155,7 @@ impl LinuxDeviceManager {
 
     /// Dispatch a device event to all registered listeners.
     pub fn dispatch_event(&self, event: &DeviceEvent) {
+        debug!(device_id = %event.device_id, kind = %event.kind, class = %event.device_class, "dispatching event");
         let listeners = self.listeners.lock().unwrap();
         for listener in listeners.iter() {
             if let Some(filter) = listener.filter()
@@ -168,6 +176,7 @@ impl Default for LinuxDeviceManager {
 
 impl Device for LinuxDeviceManager {
     fn enumerate(&self) -> Result<Vec<DeviceInfo>> {
+        info!(sysfs_root = %self.sysfs_root.display(), "enumerating devices");
         #[cfg(feature = "udev")]
         {
             let devices = enumerate_devices(&self.sysfs_root)?;
@@ -176,27 +185,30 @@ impl Device for LinuxDeviceManager {
             for device in &devices {
                 cache.insert(device.id.clone(), device.clone());
             }
+            info!(count = devices.len(), "device cache updated");
             Ok(devices)
         }
         #[cfg(not(feature = "udev"))]
         {
+            warn!("udev feature disabled, enumeration unavailable");
             Ok(Vec::new())
         }
     }
 
     fn get(&self, id: &DeviceId) -> Result<Option<DeviceInfo>> {
         let devices = self.devices.read().unwrap();
-        Ok(devices.get(id).cloned())
+        let found = devices.get(id).cloned();
+        debug!(id = %id, found = found.is_some(), "device lookup");
+        Ok(found)
     }
 
     fn refresh(&self, id: &DeviceId) -> Result<DeviceInfo> {
-        // Re-enumerate and find the device
+        debug!(id = %id, "refreshing device");
         let all = self.enumerate()?;
-        all.into_iter()
-            .find(|d| d.id == *id)
-            .ok_or_else(|| YantraError::DeviceNotFound {
-                id: id.to_string(),
-            })
+        all.into_iter().find(|d| d.id == *id).ok_or_else(|| {
+            error!(id = %id, "device not found after refresh");
+            YantraError::DeviceNotFound { id: id.to_string() }
+        })
     }
 }
 

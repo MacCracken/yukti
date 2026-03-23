@@ -132,12 +132,21 @@ const ALL_CAPABILITIES: &[(DeviceCapabilities, DeviceCapability)] = &[
     (DeviceCapabilities::READ, DeviceCapability::Read),
     (DeviceCapabilities::WRITE, DeviceCapability::Write),
     (DeviceCapabilities::EJECT, DeviceCapability::Eject),
-    (DeviceCapabilities::MEDIA_CHANGE, DeviceCapability::MediaChange),
+    (
+        DeviceCapabilities::MEDIA_CHANGE,
+        DeviceCapability::MediaChange,
+    ),
     (DeviceCapabilities::REMOVABLE, DeviceCapability::Removable),
     (DeviceCapabilities::TRIM, DeviceCapability::Trim),
     (DeviceCapabilities::HOTPLUG, DeviceCapability::Hotplug),
-    (DeviceCapabilities::TRAY_CONTROL, DeviceCapability::TrayControl),
-    (DeviceCapabilities::AUDIO_PLAYBACK, DeviceCapability::AudioPlayback),
+    (
+        DeviceCapabilities::TRAY_CONTROL,
+        DeviceCapability::TrayControl,
+    ),
+    (
+        DeviceCapabilities::AUDIO_PLAYBACK,
+        DeviceCapability::AudioPlayback,
+    ),
     (DeviceCapabilities::BURN, DeviceCapability::Burn),
 ];
 
@@ -405,9 +414,8 @@ mod tests {
 
     #[test]
     fn test_capabilities_to_vec_roundtrip() {
-        let caps = DeviceCapabilities::READ
-            | DeviceCapabilities::WRITE
-            | DeviceCapabilities::REMOVABLE;
+        let caps =
+            DeviceCapabilities::READ | DeviceCapabilities::WRITE | DeviceCapabilities::REMOVABLE;
         let vec = caps.to_vec();
         assert_eq!(vec.len(), 3);
         assert!(vec.contains(&DeviceCapability::Read));
@@ -554,7 +562,8 @@ mod tests {
             PathBuf::from("/dev/sdb"),
             DeviceClass::UsbStorage,
         );
-        info.capabilities = DeviceCapabilities::READ | DeviceCapabilities::WRITE | DeviceCapabilities::EJECT;
+        info.capabilities =
+            DeviceCapabilities::READ | DeviceCapabilities::WRITE | DeviceCapabilities::EJECT;
         info.label = Some("TEST_DRIVE".into());
         info.vendor = Some("TestVendor".into());
         info.size_bytes = 1024 * 1024;

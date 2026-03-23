@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use yantra::device::{DeviceCapability, DeviceClass, DeviceId, DeviceInfo};
-use yantra::optical::{detect_disc_type, DiscType};
-use yantra::storage::{default_mount_point, validate_mount_point, Filesystem};
-use yantra::udev::{classify_device, device_info_from_udev, UdevEvent};
+use yantra::optical::{DiscType, detect_disc_type};
+use yantra::storage::{Filesystem, default_mount_point, validate_mount_point};
+use yantra::udev::{UdevEvent, classify_device, device_info_from_udev};
 
 fn main() {
     println!("=== Yantra Device Detection Example ===\n");
@@ -33,7 +33,10 @@ fn main() {
     println!("  Class:        {}", usb.class);
     println!("  Size:         {}", usb.size_display());
     println!("  Removable:    {}", usb.is_removable());
-    println!("  Has Eject:    {}", usb.has_capability(DeviceCapability::Eject));
+    println!(
+        "  Has Eject:    {}",
+        usb.has_capability(DeviceCapability::Eject)
+    );
     println!("  Capabilities: {:?}", usb.capabilities.to_vec());
     println!();
 
@@ -53,17 +56,29 @@ fn main() {
     // --- 3. Mount point helpers ---
     println!("--- Mount Point Helpers ---");
     let mount = default_mount_point(&usb);
-    println!("  Default mount for '{}': {}", usb.display_name(), mount.display());
+    println!(
+        "  Default mount for '{}': {}",
+        usb.display_name(),
+        mount.display()
+    );
 
     let safe = PathBuf::from("/mnt/usb");
     let forbidden = PathBuf::from("/usr");
     println!(
         "  Validate /mnt/usb: {}",
-        if validate_mount_point(&safe).is_ok() { "OK" } else { "REJECTED" }
+        if validate_mount_point(&safe).is_ok() {
+            "OK"
+        } else {
+            "REJECTED"
+        }
     );
     println!(
         "  Validate /usr:     {}",
-        if validate_mount_point(&forbidden).is_ok() { "OK" } else { "REJECTED" }
+        if validate_mount_point(&forbidden).is_ok() {
+            "OK"
+        } else {
+            "REJECTED"
+        }
     );
     println!();
 
@@ -103,7 +118,9 @@ fn main() {
 
     let event = UdevEvent {
         action: "add".into(),
-        sys_path: PathBuf::from("/sys/devices/pci0000:00/usb2/2-1/2-1:1.0/host1/target1:0:0/1:0:0:0/block/sdc/sdc1"),
+        sys_path: PathBuf::from(
+            "/sys/devices/pci0000:00/usb2/2-1/2-1:1.0/host1/target1:0:0/1:0:0:0/block/sdc/sdc1",
+        ),
         dev_path: Some(PathBuf::from("/dev/sdc1")),
         subsystem: "block".into(),
         dev_type: Some("partition".into()),
@@ -115,10 +132,22 @@ fn main() {
 
     let info = device_info_from_udev(&event).expect("failed to build DeviceInfo from udev event");
     println!("  Device ID:     {}", info.id);
-    println!("  Vendor:        {}", info.vendor.as_deref().unwrap_or("n/a"));
-    println!("  Model:         {}", info.model.as_deref().unwrap_or("n/a"));
-    println!("  Label:         {}", info.label.as_deref().unwrap_or("n/a"));
-    println!("  FS type:       {}", info.fs_type.as_deref().unwrap_or("n/a"));
+    println!(
+        "  Vendor:        {}",
+        info.vendor.as_deref().unwrap_or("n/a")
+    );
+    println!(
+        "  Model:         {}",
+        info.model.as_deref().unwrap_or("n/a")
+    );
+    println!(
+        "  Label:         {}",
+        info.label.as_deref().unwrap_or("n/a")
+    );
+    println!(
+        "  FS type:       {}",
+        info.fs_type.as_deref().unwrap_or("n/a")
+    );
     println!("  Size:          {}", info.size_display());
     println!("  Capabilities:  {:?}", info.capabilities.to_vec());
     println!();

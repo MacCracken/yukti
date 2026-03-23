@@ -1,14 +1,17 @@
 [package]
 name = "yantra"
-version = "0.1.0"
+version = "0.22.3"
 edition = "2024"
-license = "GPL-3.0"
+rust-version = "1.89"
+license = "GPL-3.0-only"
 description = "Device abstraction layer for AGNOS — USB, optical, block devices, udev hotplug"
 homepage = "https://github.com/MacCracken/yantra"
 repository = "https://github.com/MacCracken/yantra"
 readme = "README.md"
+documentation = "https://docs.rs/yantra"
 keywords = ["device", "usb", "udev", "hotplug", "hardware"]
 categories = ["hardware-support", "os"]
+exclude = [".claude/", ".github/", "bench-history.csv", "BENCHMARKS.md", "docs/", "scripts/"]
 
 [features]
 default = ["udev", "storage", "optical"]

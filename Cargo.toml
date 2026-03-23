@@ -42,3 +42,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "yantra_bench"
 harness = false
+required-features = ["udev", "storage", "optical"]
+
+[[example]]
+name = "detect"
+required-features = ["udev", "storage", "optical"]

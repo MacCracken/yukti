@@ -8,6 +8,10 @@ use tracing::{debug, error, info};
 
 use crate::error::{Result, YantraError};
 
+/// ENOMEDIUM errno value (not in all libc versions).
+#[cfg(target_os = "linux")]
+const ENOMEDIUM: i32 = 123;
+
 // ---------------------------------------------------------------------------
 // Linux ioctl constants
 // ---------------------------------------------------------------------------
@@ -84,7 +88,7 @@ fn open_optical_device(dev_path: &Path) -> Result<std::fs::File> {
                     operation: "open".into(),
                     path: dev_path.to_path_buf(),
                 },
-                123 /* ENOMEDIUM */ => YantraError::NoMedia {
+                ENOMEDIUM => YantraError::NoMedia {
                     device: dev_path.display().to_string(),
                 },
                 _ => YantraError::Io(e),
@@ -105,7 +109,7 @@ fn map_ioctl_error(dev_path: &Path, op: &str) -> YantraError {
             operation: op.into(),
             path: dev_path.to_path_buf(),
         },
-        123 /* ENOMEDIUM */ => YantraError::NoMedia {
+        ENOMEDIUM => YantraError::NoMedia {
             device: dev_path.display().to_string(),
         },
         _ => YantraError::TrayFailed {
@@ -303,6 +307,7 @@ fn classify_toc_tracks(has_audio: bool, has_data: bool) -> DiscType {
 
 /// Type of optical media.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DiscType {
     /// Audio CD (CDDA).
     CdAudio,
@@ -430,6 +435,11 @@ impl DiscToc {
     pub fn total_audio_duration(&self) -> f64 {
         self.tracks.iter().filter_map(|t| t.duration_secs).sum()
     }
+}
+
+/// Check if a mounted disc contains a DVD Video structure (VIDEO_TS directory).
+pub fn is_dvd_video(mount_point: &Path) -> bool {
+    mount_point.join("VIDEO_TS").is_dir() || mount_point.join("video_ts").is_dir()
 }
 
 /// Detect disc type from device capabilities and media info.
@@ -682,6 +692,54 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Tests for is_dvd_video
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_dvd_video_uppercase() {
+        let dir = std::env::temp_dir().join("yantra_test_dvd_upper");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("VIDEO_TS")).unwrap();
+        assert!(is_dvd_video(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_is_dvd_video_lowercase() {
+        let dir = std::env::temp_dir().join("yantra_test_dvd_lower");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("video_ts")).unwrap();
+        assert!(is_dvd_video(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_is_dvd_video_absent() {
+        let dir = std::env::temp_dir().join("yantra_test_dvd_absent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!is_dvd_video(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_is_dvd_video_file_not_dir() {
+        let dir = std::env::temp_dir().join("yantra_test_dvd_file");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Create a file named VIDEO_TS, not a directory
+        std::fs::write(dir.join("VIDEO_TS"), "not a directory").unwrap();
+        assert!(!is_dvd_video(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_is_dvd_video_nonexistent_mount() {
+        let dir = Path::new("/nonexistent/yantra_test_dvd_video");
+        assert!(!is_dvd_video(dir));
+    }
+
+    // -----------------------------------------------------------------------
     // Tests for classify_toc_tracks (pure logic, no hardware)
     // -----------------------------------------------------------------------
 
@@ -768,5 +826,11 @@ mod tests {
         let dev = std::path::Path::new("/dev/sr_nonexistent_yantra_test");
         let result = open_optical_device(dev);
         assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_enomedium_constant() {
+        assert_eq!(ENOMEDIUM, 123);
     }
 }

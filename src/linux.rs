@@ -26,7 +26,7 @@ use crate::udev::{UdevMonitor, enumerate_devices};
 /// higher-level operations like mount, eject, and hotplug monitoring.
 pub struct LinuxDeviceManager {
     sysfs_root: PathBuf,
-    devices: RwLock<HashMap<DeviceId, DeviceInfo>>,
+    devices: RwLock<HashMap<DeviceId, Arc<DeviceInfo>>>,
     listeners: Arc<Mutex<Vec<Arc<dyn EventListener>>>>,
     #[cfg(feature = "udev")]
     monitor: Mutex<Option<UdevMonitor>>,
@@ -87,18 +87,23 @@ impl LinuxDeviceManager {
     /// Mount a device by ID.
     #[cfg(feature = "storage")]
     pub fn mount(&self, id: &DeviceId, options: &MountOptions) -> Result<MountResult> {
-        let devices = self.devices.read().unwrap();
-        let info = devices
-            .get(id)
-            .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?;
+        let info = {
+            let devices = self.devices.read().unwrap();
+            Arc::clone(
+                devices
+                    .get(id)
+                    .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?,
+            )
+        };
         let result = crate::storage::mount(&info.dev_path, options)?;
 
-        drop(devices);
-        // Update cached state
+        // Update cached state — replace the Arc entry to avoid Arc::make_mut clone
         let mut devices = self.devices.write().unwrap();
-        if let Some(info) = devices.get_mut(id) {
-            info.state = crate::device::DeviceState::Mounted;
-            info.mount_point = Some(result.mount_point.clone());
+        if let Some(cached) = devices.get_mut(id) {
+            let mut updated = (**cached).clone();
+            updated.state = crate::device::DeviceState::Mounted;
+            updated.mount_point = Some(result.mount_point.clone());
+            *cached = Arc::new(updated);
         }
         Ok(result)
     }
@@ -106,10 +111,14 @@ impl LinuxDeviceManager {
     /// Unmount a device by ID.
     #[cfg(feature = "storage")]
     pub fn unmount(&self, id: &DeviceId) -> Result<()> {
-        let devices = self.devices.read().unwrap();
-        let info = devices
-            .get(id)
-            .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?;
+        let info = {
+            let devices = self.devices.read().unwrap();
+            Arc::clone(
+                devices
+                    .get(id)
+                    .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?,
+            )
+        };
         let mount_point = info
             .mount_point
             .clone()
@@ -117,14 +126,15 @@ impl LinuxDeviceManager {
                 mount_point: info.dev_path.clone(),
                 reason: "device is not mounted".into(),
             })?;
-        drop(devices);
 
         crate::storage::unmount(&mount_point)?;
 
         let mut devices = self.devices.write().unwrap();
-        if let Some(info) = devices.get_mut(id) {
-            info.state = crate::device::DeviceState::Ready;
-            info.mount_point = None;
+        if let Some(cached) = devices.get_mut(id) {
+            let mut updated = (**cached).clone();
+            updated.state = crate::device::DeviceState::Ready;
+            updated.mount_point = None;
+            *cached = Arc::new(updated);
         }
         Ok(())
     }
@@ -132,18 +142,22 @@ impl LinuxDeviceManager {
     /// Eject a device by ID (safe-remove for USB, tray eject for optical).
     #[cfg(feature = "storage")]
     pub fn eject(&self, id: &DeviceId) -> Result<()> {
-        let devices = self.devices.read().unwrap();
-        let info = devices
-            .get(id)
-            .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?;
-        let dev_path = info.dev_path.clone();
-        drop(devices);
+        let info = {
+            let devices = self.devices.read().unwrap();
+            Arc::clone(
+                devices
+                    .get(id)
+                    .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?,
+            )
+        };
 
-        crate::storage::eject(&dev_path)?;
+        crate::storage::eject(&info.dev_path)?;
 
         let mut devices = self.devices.write().unwrap();
-        if let Some(info) = devices.get_mut(id) {
-            info.state = crate::device::DeviceState::Ejecting;
+        if let Some(cached) = devices.get_mut(id) {
+            let mut updated = (**cached).clone();
+            updated.state = crate::device::DeviceState::Ejecting;
+            *cached = Arc::new(updated);
         }
         Ok(())
     }
@@ -183,7 +197,7 @@ impl Device for LinuxDeviceManager {
             let mut cache = self.devices.write().unwrap();
             cache.clear();
             for device in &devices {
-                cache.insert(device.id.clone(), device.clone());
+                cache.insert(device.id.clone(), Arc::new(device.clone()));
             }
             info!(count = devices.len(), "device cache updated");
             Ok(devices)
@@ -197,7 +211,7 @@ impl Device for LinuxDeviceManager {
 
     fn get(&self, id: &DeviceId) -> Result<Option<DeviceInfo>> {
         let devices = self.devices.read().unwrap();
-        let found = devices.get(id).cloned();
+        let found = devices.get(id).map(|arc| arc.as_ref().clone());
         debug!(id = %id, found = found.is_some(), "device lookup");
         Ok(found)
     }
@@ -315,6 +329,157 @@ mod tests {
             let second = mgr.start_monitor();
             assert!(second.is_err());
             mgr.stop_monitor();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration tests using MockSysfs
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "udev")]
+    mod mock_integration {
+        use super::*;
+
+        #[derive(Default)]
+        struct MockDeviceAttrs {
+            vendor: Option<String>,
+            model: Option<String>,
+            #[allow(dead_code)]
+            serial: Option<String>,
+            size_sectors: Option<u64>,
+            removable: bool,
+            #[allow(dead_code)]
+            readonly: bool,
+        }
+
+        struct MockSysfs {
+            root: tempfile::TempDir,
+        }
+
+        impl MockSysfs {
+            fn new() -> Self {
+                let root = tempfile::TempDir::new().expect("failed to create temp dir");
+                std::fs::create_dir_all(root.path().join("block")).unwrap();
+                Self { root }
+            }
+
+            fn root(&self) -> &Path {
+                self.root.path()
+            }
+
+            fn add_device(&self, name: &str, attrs: MockDeviceAttrs) {
+                let dev_dir = self.root.path().join("block").join(name);
+                std::fs::create_dir_all(dev_dir.join("device")).unwrap();
+                Self::write_attrs(&dev_dir, &attrs);
+            }
+
+            fn write_attrs(dir: &Path, attrs: &MockDeviceAttrs) {
+                if let Some(ref vendor) = attrs.vendor {
+                    std::fs::write(dir.join("device/vendor"), format!("  {}  \n", vendor)).unwrap();
+                }
+                if let Some(ref model) = attrs.model {
+                    std::fs::write(dir.join("device/model"), format!("{}\n", model)).unwrap();
+                }
+                if let Some(ref serial) = attrs.serial {
+                    std::fs::write(dir.join("device/serial"), format!("{}\n", serial)).unwrap();
+                }
+                if let Some(sectors) = attrs.size_sectors {
+                    std::fs::write(dir.join("size"), format!("{}\n", sectors)).unwrap();
+                }
+                std::fs::write(
+                    dir.join("removable"),
+                    if attrs.removable { "1\n" } else { "0\n" },
+                )
+                .unwrap();
+                std::fs::write(dir.join("ro"), if attrs.readonly { "1\n" } else { "0\n" }).unwrap();
+            }
+        }
+
+        #[test]
+        fn test_manager_enumerate_populates_cache() {
+            let mock = MockSysfs::new();
+            mock.add_device(
+                "sda",
+                MockDeviceAttrs {
+                    vendor: Some("ATA".into()),
+                    model: Some("TestDisk".into()),
+                    size_sectors: Some(2000),
+                    ..Default::default()
+                },
+            );
+            mock.add_device(
+                "sdb",
+                MockDeviceAttrs {
+                    size_sectors: Some(1000),
+                    removable: true,
+                    ..Default::default()
+                },
+            );
+
+            let mgr = LinuxDeviceManager::with_sysfs_root(mock.root().to_path_buf());
+            let devices = mgr.enumerate().unwrap();
+            assert_eq!(devices.len(), 2);
+
+            // Cache should now be populated
+            let cache = mgr.devices.read().unwrap();
+            assert_eq!(cache.len(), 2);
+        }
+
+        #[test]
+        fn test_manager_get_by_id_after_enumerate() {
+            let mock = MockSysfs::new();
+            mock.add_device(
+                "sda",
+                MockDeviceAttrs {
+                    vendor: Some("TestVendor".into()),
+                    size_sectors: Some(5000),
+                    ..Default::default()
+                },
+            );
+
+            let mgr = LinuxDeviceManager::with_sysfs_root(mock.root().to_path_buf());
+            let devices = mgr.enumerate().unwrap();
+            assert_eq!(devices.len(), 1);
+
+            // Retrieve by the ID assigned during enumeration
+            let id = &devices[0].id;
+            let fetched = mgr.get(id).unwrap();
+            assert!(fetched.is_some());
+            let fetched = fetched.unwrap();
+            assert_eq!(fetched.vendor.as_deref(), Some("TestVendor"));
+            assert_eq!(fetched.size_bytes, 5000 * 512);
+        }
+
+        #[test]
+        fn test_manager_refresh_after_enumerate() {
+            let mock = MockSysfs::new();
+            mock.add_device(
+                "sda",
+                MockDeviceAttrs {
+                    size_sectors: Some(1000),
+                    ..Default::default()
+                },
+            );
+
+            let mgr = LinuxDeviceManager::with_sysfs_root(mock.root().to_path_buf());
+            let devices = mgr.enumerate().unwrap();
+            let id = devices[0].id.clone();
+
+            // Refresh should re-enumerate and find the device
+            let refreshed = mgr.refresh(&id).unwrap();
+            assert_eq!(refreshed.id, id);
+            assert_eq!(refreshed.size_bytes, 1000 * 512);
+        }
+
+        #[test]
+        fn test_manager_enumerate_empty_mock() {
+            let mock = MockSysfs::new();
+            let mgr = LinuxDeviceManager::with_sysfs_root(mock.root().to_path_buf());
+            let devices = mgr.enumerate().unwrap();
+            assert!(devices.is_empty());
+
+            let cache = mgr.devices.read().unwrap();
+            assert!(cache.is_empty());
         }
     }
 }

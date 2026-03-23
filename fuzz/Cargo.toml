@@ -1,0 +1,22 @@
+[package]
+name = "yantra-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata.cargo-fuzz]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+yantra = { path = ".." }
+
+[[bin]]
+name = "fuzz_parse_uevent"
+path = "fuzz_targets/fuzz_parse_uevent.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_mount_table"
+path = "fuzz_targets/fuzz_mount_table.rs"
+doc = false

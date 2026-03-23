@@ -32,7 +32,8 @@ pub mod udev;
 pub mod linux;
 
 pub use device::{
-    Device, DeviceCapabilities, DeviceCapability, DeviceClass, DeviceId, DeviceInfo, DeviceState,
+    Device, DeviceCapabilities, DeviceCapability, DeviceClass, DeviceHealth, DeviceId, DeviceInfo,
+    DevicePermissions, DeviceState,
 };
 pub use error::YantraError;
 pub use event::{DeviceEvent, DeviceEventKind, EventListener};

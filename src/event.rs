@@ -9,6 +9,7 @@ use crate::device::{DeviceClass, DeviceId, DeviceInfo};
 
 /// What happened to a device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DeviceEventKind {
     /// New device detected (USB plugged in, disc inserted).
     Attached,
@@ -131,6 +132,16 @@ impl EventCollector {
         self.events.lock().unwrap().len()
     }
 
+    /// Access events without cloning. The caller's closure receives
+    /// a shared slice while the lock is held.
+    pub fn with_events<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&[DeviceEvent]) -> R,
+    {
+        let guard = self.events.lock().unwrap();
+        f(&guard)
+    }
+
     pub fn clear(&self) {
         self.events.lock().unwrap().clear();
     }
@@ -210,6 +221,27 @@ mod tests {
 
         collector.clear();
         assert_eq!(collector.count(), 0);
+    }
+
+    #[test]
+    fn test_event_collector_with_events() {
+        let collector = EventCollector::new();
+        collector.on_event(&make_event(DeviceEventKind::Attached));
+        collector.on_event(&make_event(DeviceEventKind::Detached));
+
+        let count = collector.with_events(|events| {
+            assert_eq!(events.len(), 2);
+            assert!(events[0].is_attach());
+            assert!(events[1].is_detach());
+            events.len()
+        });
+        assert_eq!(count, 2);
+
+        // Verify with_events on empty collector
+        collector.clear();
+        collector.with_events(|events| {
+            assert!(events.is_empty());
+        });
     }
 
     #[test]

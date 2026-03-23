@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 /// All errors that yantra can produce.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum YantraError {
     #[error("device not found: {id}")]
     DeviceNotFound { id: String },
@@ -31,6 +32,21 @@ pub enum YantraError {
 
     #[error("udev error: {0}")]
     Udev(String),
+
+    #[error("device already mounted: {device} at {mount_point}")]
+    AlreadyMounted {
+        device: String,
+        mount_point: PathBuf,
+    },
+
+    #[error("operation timed out: {operation}")]
+    Timeout { operation: String },
+
+    #[error("udev socket error: {0}")]
+    UdevSocket(String),
+
+    #[error("udev parse error: {0}")]
+    UdevParse(String),
 
     #[error("no media in device {device}")]
     NoMedia { device: String },
@@ -149,6 +165,44 @@ mod tests {
     fn test_parse_error() {
         let e = YantraError::Parse("invalid integer".into());
         assert!(e.to_string().contains("invalid integer"));
+    }
+
+    #[test]
+    fn test_already_mounted() {
+        let e = YantraError::AlreadyMounted {
+            device: "/dev/sdb1".into(),
+            mount_point: PathBuf::from("/mnt/usb"),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("device already mounted"));
+        assert!(msg.contains("/dev/sdb1"));
+        assert!(msg.contains("/mnt/usb"));
+    }
+
+    #[test]
+    fn test_timeout() {
+        let e = YantraError::Timeout {
+            operation: "mount /dev/sdb1".into(),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("operation timed out"));
+        assert!(msg.contains("mount /dev/sdb1"));
+    }
+
+    #[test]
+    fn test_udev_socket_error() {
+        let e = YantraError::UdevSocket("bind() failed: Address in use".into());
+        let msg = e.to_string();
+        assert!(msg.contains("udev socket error"));
+        assert!(msg.contains("bind() failed"));
+    }
+
+    #[test]
+    fn test_udev_parse_error() {
+        let e = YantraError::UdevParse("invalid uevent format".into());
+        let msg = e.to_string();
+        assert!(msg.contains("udev parse error"));
+        assert!(msg.contains("invalid uevent format"));
     }
 
     #[test]

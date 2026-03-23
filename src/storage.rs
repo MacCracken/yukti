@@ -11,6 +11,7 @@ use crate::error::{Result, YantraError};
 
 /// Filesystem type detected from a device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Filesystem {
     Ext4,
     Btrfs,
@@ -23,6 +24,11 @@ pub enum Filesystem {
     Hfsplus,
     Swap,
     Luks,
+    F2fs,
+    Erofs,
+    Tmpfs,
+    Cifs,
+    Nfs,
     Unknown(String),
 }
 
@@ -55,6 +61,16 @@ impl Filesystem {
             Self::Swap
         } else if s.eq_ignore_ascii_case("crypto_luks") || s.eq_ignore_ascii_case("luks") {
             Self::Luks
+        } else if s.eq_ignore_ascii_case("f2fs") {
+            Self::F2fs
+        } else if s.eq_ignore_ascii_case("erofs") {
+            Self::Erofs
+        } else if s.eq_ignore_ascii_case("tmpfs") {
+            Self::Tmpfs
+        } else if s.eq_ignore_ascii_case("cifs") {
+            Self::Cifs
+        } else if s.eq_ignore_ascii_case("nfs") || s.eq_ignore_ascii_case("nfs4") {
+            Self::Nfs
         } else {
             Self::Unknown(s.to_string())
         }
@@ -71,6 +87,10 @@ impl Filesystem {
                 | Self::Ntfs
                 | Self::Exfat
                 | Self::Hfsplus
+                | Self::F2fs
+                | Self::Tmpfs
+                | Self::Cifs
+                | Self::Nfs
         )
     }
 
@@ -94,10 +114,75 @@ impl std::fmt::Display for Filesystem {
             Self::Hfsplus => "hfs+",
             Self::Swap => "swap",
             Self::Luks => "luks",
+            Self::F2fs => "f2fs",
+            Self::Erofs => "erofs",
+            Self::Tmpfs => "tmpfs",
+            Self::Cifs => "cifs",
+            Self::Nfs => "nfs",
             Self::Unknown(s) => return f.write_str(s),
         };
         f.write_str(s)
     }
+}
+
+impl From<String> for Filesystem {
+    fn from(s: String) -> Self {
+        Self::from_str_type(&s)
+    }
+}
+
+impl From<&str> for Filesystem {
+    fn from(s: &str) -> Self {
+        Self::from_str_type(s)
+    }
+}
+
+/// Filesystem space usage information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilesystemUsage {
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
+    pub usage_percent: f64,
+}
+
+/// Query filesystem usage for a given mount point via `statvfs()`.
+#[cfg(target_os = "linux")]
+pub fn filesystem_usage(mount_point: &Path) -> Result<FilesystemUsage> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = CString::new(mount_point.as_os_str().as_bytes())
+        .map_err(|e| YantraError::Parse(format!("invalid mount point path: {e}")))?;
+
+    let mut stat: std::mem::MaybeUninit<libc::statvfs> = std::mem::MaybeUninit::uninit();
+    // SAFETY: statvfs writes into the provided buffer; the path is a valid CString.
+    let ret = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        return Err(YantraError::Io(err));
+    }
+    // SAFETY: statvfs returned 0, so the struct is fully initialised.
+    let stat = unsafe { stat.assume_init() };
+
+    let block_size = stat.f_frsize;
+    let total_bytes = stat.f_blocks * block_size;
+    let available_bytes = stat.f_bavail * block_size;
+    let free_bytes = stat.f_bfree * block_size;
+    let used_bytes = total_bytes - free_bytes;
+
+    let usage_percent = if total_bytes > 0 {
+        (used_bytes as f64 / total_bytes as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok(FilesystemUsage {
+        total_bytes,
+        used_bytes,
+        available_bytes,
+        usage_percent,
+    })
 }
 
 /// Mount options for a device.
@@ -121,6 +206,32 @@ impl Default for MountOptions {
             options: vec!["nosuid".into(), "nodev".into()],
             fs_type: None,
         }
+    }
+}
+
+impl MountOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn mount_point(mut self, path: impl Into<PathBuf>) -> Self {
+        self.mount_point = Some(path.into());
+        self
+    }
+
+    pub fn read_only(mut self, ro: bool) -> Self {
+        self.read_only = ro;
+        self
+    }
+
+    pub fn fs_type(mut self, fs: impl Into<String>) -> Self {
+        self.fs_type = Some(fs.into());
+        self
+    }
+
+    pub fn option(mut self, opt: impl Into<String>) -> Self {
+        self.options.push(opt.into());
+        self
     }
 }
 
@@ -176,10 +287,11 @@ fn unescape_mount_path(s: &str) -> String {
     result
 }
 
-/// Internal helper: find mount point for a device given mount table contents.
+/// Find mount point for a device given mount table contents.
 ///
-/// This is separated from `find_mount_point()` so unit tests can pass mock data.
-fn find_mount_in(dev_path: &Path, mount_table: &str) -> Option<PathBuf> {
+/// This is separated from `find_mount_point()` so unit tests and fuzz targets
+/// can pass mock data.
+pub fn find_mount_in(dev_path: &Path, mount_table: &str) -> Option<PathBuf> {
     // Try to canonicalize the dev_path to resolve symlinks.
     let canonical = std::fs::canonicalize(dev_path).unwrap_or_else(|_| dev_path.to_path_buf());
 
@@ -290,7 +402,7 @@ fn parse_mount_flags(options: &[String], read_only: bool) -> libc::c_ulong {
 /// Filesystem types to try when auto-detecting.
 #[cfg(target_os = "linux")]
 const AUTO_FS_TYPES: &[&str] = &[
-    "ext4", "vfat", "ntfs", "iso9660", "udf", "exfat", "btrfs", "xfs",
+    "ext4", "vfat", "ntfs", "iso9660", "udf", "exfat", "btrfs", "xfs", "f2fs", "erofs",
 ];
 
 /// Mount a device.
@@ -301,6 +413,13 @@ const AUTO_FS_TYPES: &[&str] = &[
 pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
+
+    if let Some(mp) = find_mount_point(dev_path) {
+        return Err(YantraError::AlreadyMounted {
+            device: dev_path.display().to_string(),
+            mount_point: mp,
+        });
+    }
 
     let dev_str = dev_path.display().to_string();
 
@@ -379,7 +498,7 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
         if ret == 0 {
             Ok(())
         } else {
-            Err(unsafe { *libc::__errno_location() })
+            Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0))
         }
     };
 
@@ -487,7 +606,7 @@ pub fn unmount(mount_point: &Path) -> Result<()> {
 
     let ret = unsafe { libc::umount2(c_target.as_ptr(), 0) };
     if ret != 0 {
-        let errno = unsafe { *libc::__errno_location() };
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
         error!(mount_point = %mount_point.display(), errno, "unmount failed");
         return Err(map_umount_errno(errno, mount_point));
     }
@@ -505,6 +624,19 @@ pub fn unmount(mount_point: &Path) -> Result<()> {
 /// CDROMEJECT ioctl number.
 #[cfg(target_os = "linux")]
 const CDROMEJECT: libc::c_ulong = 0x5309;
+
+/// RAII wrapper for a raw file descriptor that closes on drop.
+#[cfg(target_os = "linux")]
+struct OwnedFd(libc::c_int);
+
+#[cfg(target_os = "linux")]
+impl Drop for OwnedFd {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.0);
+        }
+    }
+}
 
 /// Eject a device.
 ///
@@ -533,10 +665,25 @@ pub fn eject(dev_path: &Path) -> Result<()> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // Determine the base device name (strip partition number for sysfs lookup)
-    let base_dev_name: String = dev_name
-        .trim_end_matches(|c: char| c.is_ascii_digit())
-        .to_string();
+    // Determine the base device name (strip partition suffix for sysfs lookup).
+    // Handles: sdb1→sdb, nvme0n1p1→nvme0n1, mmcblk0p1→mmcblk0
+    let base_dev_name: String = if dev_name.contains("nvme") || dev_name.contains("mmcblk") {
+        // nvme0n1p1 → strip "p<digits>" suffix
+        dev_name
+            .rfind('p')
+            .filter(|&i| {
+                i > 0
+                    && dev_name[i + 1..].chars().all(|c| c.is_ascii_digit())
+                    && !dev_name[i + 1..].is_empty()
+            })
+            .map(|i| dev_name[..i].to_string())
+            .unwrap_or_else(|| dev_name.clone())
+    } else {
+        // sdb1 → strip trailing digits
+        dev_name
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .to_string()
+    };
 
     if dev_name.starts_with("sr") {
         debug!(device = %dev_str, "optical drive detected, using CDROMEJECT ioctl");
@@ -548,32 +695,23 @@ pub fn eject(dev_path: &Path) -> Result<()> {
             }
         })?;
 
-        let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
-        if fd < 0 {
-            let errno = unsafe { *libc::__errno_location() };
+        let raw_fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
+        if raw_fd < 0 {
             return Err(YantraError::EjectFailed {
                 device: dev_str,
-                reason: std::io::Error::from_raw_os_error(errno).to_string(),
+                reason: std::io::Error::last_os_error().to_string(),
             });
         }
+        let fd = OwnedFd(raw_fd);
 
-        let ret = unsafe { libc::ioctl(fd, CDROMEJECT, 0) };
-        let ioctl_errno = if ret != 0 {
-            Some(unsafe { *libc::__errno_location() })
-        } else {
-            None
-        };
-
-        unsafe {
-            libc::close(fd);
-        }
-
-        if let Some(errno) = ioctl_errno {
+        let ret = unsafe { libc::ioctl(fd.0, CDROMEJECT, 0) };
+        if ret != 0 {
             return Err(YantraError::EjectFailed {
                 device: dev_str,
-                reason: std::io::Error::from_raw_os_error(errno).to_string(),
+                reason: std::io::Error::last_os_error().to_string(),
             });
         }
+        // fd is closed automatically when OwnedFd drops
     } else {
         // USB/block device — write "1" to sysfs delete
         let delete_path = format!("/sys/block/{base_dev_name}/device/delete");
@@ -655,6 +793,24 @@ mod tests {
     }
 
     #[test]
+    fn test_filesystem_from_str() {
+        let fs: Filesystem = "ext4".into();
+        assert_eq!(fs, Filesystem::Ext4);
+        let fs: Filesystem = "VFAT".into();
+        assert_eq!(fs, Filesystem::Vfat);
+        let fs: Filesystem = "unknown_fs".into();
+        assert!(matches!(fs, Filesystem::Unknown(_)));
+    }
+
+    #[test]
+    fn test_filesystem_from_string() {
+        let fs: Filesystem = String::from("btrfs").into();
+        assert_eq!(fs, Filesystem::Btrfs);
+        let fs: Filesystem = String::from("NTFS").into();
+        assert_eq!(fs, Filesystem::Ntfs);
+    }
+
+    #[test]
     fn test_filesystem_optical() {
         assert!(Filesystem::Iso9660.is_optical_media());
         assert!(Filesystem::Udf.is_optical_media());
@@ -684,6 +840,43 @@ mod tests {
         assert!(!opts.read_only);
         assert!(opts.options.contains(&"nosuid".to_string()));
         assert!(opts.options.contains(&"nodev".to_string()));
+    }
+
+    #[test]
+    fn test_mount_options_new() {
+        let opts = MountOptions::new();
+        assert!(!opts.read_only);
+        assert!(opts.mount_point.is_none());
+        assert!(opts.fs_type.is_none());
+    }
+
+    #[test]
+    fn test_mount_options_builder() {
+        let opts = MountOptions::new()
+            .mount_point("/mnt/usb")
+            .read_only(true)
+            .fs_type("ext4")
+            .option("noexec");
+        assert_eq!(opts.mount_point, Some(PathBuf::from("/mnt/usb")));
+        assert!(opts.read_only);
+        assert_eq!(opts.fs_type, Some("ext4".to_string()));
+        assert!(opts.options.contains(&"noexec".to_string()));
+        // Default options are preserved
+        assert!(opts.options.contains(&"nosuid".to_string()));
+        assert!(opts.options.contains(&"nodev".to_string()));
+    }
+
+    #[test]
+    fn test_mount_options_builder_chaining() {
+        let opts = MountOptions::new()
+            .option("uid=1000")
+            .option("gid=1000")
+            .fs_type("vfat")
+            .mount_point(PathBuf::from("/media/drive"));
+        assert_eq!(opts.fs_type, Some("vfat".to_string()));
+        assert_eq!(opts.mount_point, Some(PathBuf::from("/media/drive")));
+        assert!(opts.options.contains(&"uid=1000".to_string()));
+        assert!(opts.options.contains(&"gid=1000".to_string()));
     }
 
     #[test]
@@ -974,5 +1167,177 @@ mod tests {
         let result = find_mount_point(Path::new("/dev/sda1"));
         // May or may not find it depending on actual system
         let _ = result;
+    }
+
+    #[cfg(target_os = "linux")]
+    mod base_dev_name_tests {
+        /// Helper that extracts base device name using the same logic as eject().
+        fn base_dev(dev_name: &str) -> String {
+            if dev_name.contains("nvme") || dev_name.contains("mmcblk") {
+                dev_name
+                    .rfind('p')
+                    .filter(|&i| {
+                        i > 0
+                            && !dev_name[i + 1..].is_empty()
+                            && dev_name[i + 1..].chars().all(|c| c.is_ascii_digit())
+                    })
+                    .map(|i| dev_name[..i].to_string())
+                    .unwrap_or_else(|| dev_name.to_string())
+            } else {
+                dev_name
+                    .trim_end_matches(|c: char| c.is_ascii_digit())
+                    .to_string()
+            }
+        }
+
+        #[test]
+        fn test_base_dev_scsi() {
+            assert_eq!(base_dev("sdb1"), "sdb");
+            assert_eq!(base_dev("sdc"), "sdc");
+            assert_eq!(base_dev("sda12"), "sda");
+        }
+
+        #[test]
+        fn test_base_dev_nvme() {
+            assert_eq!(base_dev("nvme0n1p1"), "nvme0n1");
+            assert_eq!(base_dev("nvme0n1p2"), "nvme0n1");
+            assert_eq!(base_dev("nvme0n1"), "nvme0n1");
+            assert_eq!(base_dev("nvme1n1p10"), "nvme1n1");
+        }
+
+        #[test]
+        fn test_base_dev_mmcblk() {
+            assert_eq!(base_dev("mmcblk0p1"), "mmcblk0");
+            assert_eq!(base_dev("mmcblk0p2"), "mmcblk0");
+            assert_eq!(base_dev("mmcblk0"), "mmcblk0");
+        }
+
+        #[test]
+        fn test_base_dev_optical() {
+            assert_eq!(base_dev("sr0"), "sr");
+            assert_eq!(base_dev("sr1"), "sr");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_owned_fd_closes_on_drop() {
+        // Create a real fd via pipe, wrap one end in OwnedFd, drop it,
+        // then verify the fd is closed (fcntl returns -1).
+        let mut fds = [0 as libc::c_int; 2];
+        let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        assert_eq!(ret, 0);
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+
+        // Wrap the read end; drop closes it.
+        {
+            let _guard = OwnedFd(read_fd);
+        }
+
+        // read_fd should now be closed -- fcntl returns -1 / EBADF
+        let ret = unsafe { libc::fcntl(read_fd, libc::F_GETFD) };
+        assert_eq!(ret, -1);
+
+        // Clean up the write end manually.
+        unsafe {
+            libc::close(write_fd);
+        }
+    }
+
+    // --- Tests for new filesystem variants ---
+
+    #[test]
+    fn test_filesystem_parse_f2fs() {
+        assert_eq!(Filesystem::from_str_type("f2fs"), Filesystem::F2fs);
+        assert_eq!(Filesystem::from_str_type("F2FS"), Filesystem::F2fs);
+    }
+
+    #[test]
+    fn test_filesystem_parse_erofs() {
+        assert_eq!(Filesystem::from_str_type("erofs"), Filesystem::Erofs);
+        assert_eq!(Filesystem::from_str_type("EROFS"), Filesystem::Erofs);
+    }
+
+    #[test]
+    fn test_filesystem_parse_tmpfs() {
+        assert_eq!(Filesystem::from_str_type("tmpfs"), Filesystem::Tmpfs);
+        assert_eq!(Filesystem::from_str_type("TMPFS"), Filesystem::Tmpfs);
+    }
+
+    #[test]
+    fn test_filesystem_parse_cifs() {
+        assert_eq!(Filesystem::from_str_type("cifs"), Filesystem::Cifs);
+        assert_eq!(Filesystem::from_str_type("CIFS"), Filesystem::Cifs);
+    }
+
+    #[test]
+    fn test_filesystem_parse_nfs() {
+        assert_eq!(Filesystem::from_str_type("nfs"), Filesystem::Nfs);
+        assert_eq!(Filesystem::from_str_type("NFS"), Filesystem::Nfs);
+        assert_eq!(Filesystem::from_str_type("nfs4"), Filesystem::Nfs);
+        assert_eq!(Filesystem::from_str_type("NFS4"), Filesystem::Nfs);
+    }
+
+    #[test]
+    fn test_filesystem_new_variants_writable() {
+        assert!(Filesystem::F2fs.is_writable());
+        assert!(!Filesystem::Erofs.is_writable());
+        assert!(Filesystem::Tmpfs.is_writable());
+        assert!(Filesystem::Cifs.is_writable());
+        assert!(Filesystem::Nfs.is_writable());
+    }
+
+    #[test]
+    fn test_filesystem_new_variants_not_optical() {
+        assert!(!Filesystem::F2fs.is_optical_media());
+        assert!(!Filesystem::Erofs.is_optical_media());
+        assert!(!Filesystem::Tmpfs.is_optical_media());
+        assert!(!Filesystem::Cifs.is_optical_media());
+        assert!(!Filesystem::Nfs.is_optical_media());
+    }
+
+    #[test]
+    fn test_filesystem_new_variants_display() {
+        assert_eq!(Filesystem::F2fs.to_string(), "f2fs");
+        assert_eq!(Filesystem::Erofs.to_string(), "erofs");
+        assert_eq!(Filesystem::Tmpfs.to_string(), "tmpfs");
+        assert_eq!(Filesystem::Cifs.to_string(), "cifs");
+        assert_eq!(Filesystem::Nfs.to_string(), "nfs");
+    }
+
+    #[test]
+    fn test_filesystem_usage_serde() {
+        let usage = FilesystemUsage {
+            total_bytes: 1_000_000_000,
+            used_bytes: 400_000_000,
+            available_bytes: 550_000_000,
+            usage_percent: 40.0,
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        let roundtrip: FilesystemUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.total_bytes, 1_000_000_000);
+        assert_eq!(roundtrip.used_bytes, 400_000_000);
+        assert_eq!(roundtrip.available_bytes, 550_000_000);
+        assert!((roundtrip.usage_percent - 40.0).abs() < f64::EPSILON);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_filesystem_usage_root() {
+        // The root filesystem should always be queryable
+        let result = filesystem_usage(Path::new("/"));
+        assert!(result.is_ok());
+        let usage = result.unwrap();
+        assert!(usage.total_bytes > 0);
+        assert!(usage.usage_percent >= 0.0);
+        assert!(usage.usage_percent <= 100.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_filesystem_usage_nonexistent() {
+        let result = filesystem_usage(Path::new("/nonexistent/mount/point/xyz"));
+        assert!(result.is_err());
     }
 }

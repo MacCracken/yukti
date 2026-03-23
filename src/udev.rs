@@ -182,6 +182,18 @@ pub fn device_info_from_udev(event: &UdevEvent) -> Result<DeviceInfo> {
     }
 
     info.capabilities = capabilities;
+
+    // USB vendor/product IDs from udev properties
+    info.usb_vendor_id = event
+        .property("ID_VENDOR_ID")
+        .and_then(|s| u16::from_str_radix(s, 16).ok());
+    info.usb_product_id = event
+        .property("ID_MODEL_ID")
+        .and_then(|s| u16::from_str_radix(s, 16).ok());
+
+    // Partition table type
+    info.partition_table = event.property("ID_PART_TABLE_TYPE").map(|s| s.to_string());
+
     info.properties = event.properties.clone();
 
     Ok(info)
@@ -285,6 +297,14 @@ fn build_device_info_from_sysfs(
         props.insert("ID_PART_ENTRY_SIZE".to_string(), size_str);
     }
 
+    // USB vendor/product IDs from sysfs
+    if let Some(vid) = read_sysfs_attr(sys_path, "device/idVendor") {
+        props.insert("ID_VENDOR_ID".to_string(), vid);
+    }
+    if let Some(pid) = read_sysfs_attr(sys_path, "device/idProduct") {
+        props.insert("ID_MODEL_ID".to_string(), pid);
+    }
+
     let dev_path = PathBuf::from(format!("/dev/{}", dev_name));
 
     let event = UdevEvent {
@@ -297,6 +317,12 @@ fn build_device_info_from_sysfs(
     };
 
     let mut info = device_info_from_udev(&event).ok()?;
+
+    // Query device node permissions
+    #[cfg(target_os = "linux")]
+    {
+        info.permissions = crate::device::query_permissions(&info.dev_path);
+    }
 
     // Check mount status if storage feature is enabled
     #[cfg(feature = "storage")]
@@ -435,6 +461,7 @@ fn udev_event_to_device_event(uevent: &UdevEvent) -> Option<DeviceEvent> {
 pub struct UdevMonitor {
     socket_fd: std::os::unix::io::RawFd,
     running: Arc<AtomicBool>,
+    filter: Option<Vec<DeviceClass>>,
 }
 
 #[cfg(target_os = "linux")]
@@ -444,6 +471,12 @@ impl UdevMonitor {
     /// Requires `CAP_NET_ADMIN` or root on some kernels. The socket is set
     /// to `SOCK_CLOEXEC` and the receive buffer is enlarged to 256 KB.
     pub fn new() -> Result<Self> {
+        Self::with_filter(&[])
+    }
+
+    /// Create a monitor that only emits events for the specified device classes.
+    /// Pass an empty slice to receive all events (same as `new()`).
+    pub fn with_filter(classes: &[DeviceClass]) -> Result<Self> {
         // SAFETY: libc socket creation — no memory unsafety, just a syscall.
         let fd = unsafe {
             libc::socket(
@@ -453,7 +486,7 @@ impl UdevMonitor {
             )
         };
         if fd < 0 {
-            return Err(YantraError::Udev(format!(
+            return Err(YantraError::UdevSocket(format!(
                 "socket() failed: {}",
                 std::io::Error::last_os_error()
             )));
@@ -488,7 +521,7 @@ impl UdevMonitor {
             unsafe {
                 libc::close(fd);
             }
-            return Err(YantraError::Udev(format!("bind() failed: {}", err)));
+            return Err(YantraError::UdevSocket(format!("bind() failed: {}", err)));
         }
 
         // Set receive buffer size
@@ -504,10 +537,17 @@ impl UdevMonitor {
             );
         }
 
+        let filter = if classes.is_empty() {
+            None
+        } else {
+            Some(classes.to_vec())
+        };
+
         info!("udev monitor created (netlink fd={})", fd);
         Ok(Self {
             socket_fd: fd,
             running: Arc::new(AtomicBool::new(true)),
+            filter,
         })
     }
 
@@ -528,7 +568,7 @@ impl UdevMonitor {
         // SAFETY: poll() on a valid fd with a correctly initialised pollfd.
         let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
         if ret < 0 {
-            return Err(YantraError::Udev(format!(
+            return Err(YantraError::UdevSocket(format!(
                 "poll() failed: {}",
                 std::io::Error::last_os_error()
             )));
@@ -563,6 +603,13 @@ impl UdevMonitor {
                 Some(uevent) => {
                     debug!(action = %uevent.action, subsystem = %uevent.subsystem, dev_path = ?uevent.dev_path, "uevent received");
                     if let Some(dev_event) = udev_event_to_device_event(&uevent) {
+                        // Check monitor-level filter first
+                        if let Some(ref monitor_filter) = self.filter
+                            && !monitor_filter.contains(&dev_event.device_class)
+                        {
+                            continue;
+                        }
+
                         // Respect the listener's class filter
                         let dominated = listener
                             .filter()
@@ -594,6 +641,7 @@ impl UdevMonitor {
         let (tx, rx) = std::sync::mpsc::channel();
         let fd = self.socket_fd;
         let running = Arc::clone(&self.running);
+        let filter = self.filter.clone();
 
         std::thread::spawn(move || {
             let mut buf = vec![0u8; 8192];
@@ -615,9 +663,60 @@ impl UdevMonitor {
                 }
                 if let Some(uevent) = parse_uevent(&buf[..n as usize])
                     && let Some(dev_event) = udev_event_to_device_event(&uevent)
-                    && tx.send(dev_event).is_err()
                 {
-                    break; // receiver dropped
+                    // Apply monitor-level filter
+                    if let Some(ref f) = filter
+                        && !f.contains(&dev_event.device_class)
+                    {
+                        continue;
+                    }
+                    if tx.send(dev_event).is_err() {
+                        break; // receiver dropped
+                    }
+                }
+            }
+        });
+
+        rx
+    }
+
+    /// Subscribe with a bounded channel. If the channel is full, oldest events are dropped.
+    pub fn subscribe_bounded(&self, capacity: usize) -> std::sync::mpsc::Receiver<DeviceEvent> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(capacity);
+        let fd = self.socket_fd;
+        let running = Arc::clone(&self.running);
+        let filter = self.filter.clone();
+
+        std::thread::spawn(move || {
+            let mut buf = vec![0u8; 8192];
+            while running.load(Ordering::Relaxed) {
+                let mut pfd = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: poll/recv on a valid fd.
+                let ret = unsafe { libc::poll(&mut pfd, 1, 500) };
+                if ret <= 0 {
+                    continue;
+                }
+                let n =
+                    unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+                if n <= 0 {
+                    continue;
+                }
+                if let Some(uevent) = parse_uevent(&buf[..n as usize])
+                    && let Some(dev_event) = udev_event_to_device_event(&uevent)
+                {
+                    // Apply monitor-level filter
+                    if let Some(ref f) = filter
+                        && !f.contains(&dev_event.device_class)
+                    {
+                        continue;
+                    }
+                    if tx.try_send(dev_event).is_err() {
+                        tracing::warn!("bounded subscribe channel full, event dropped");
+                    }
                 }
             }
         });
@@ -638,7 +737,7 @@ impl Drop for UdevMonitor {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::device::DeviceCapability;
 
@@ -924,6 +1023,216 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // MockSysfs test harness
+    // -----------------------------------------------------------------------
+
+    /// Configurable attributes for a mock block device.
+    #[derive(Default)]
+    pub struct MockDeviceAttrs {
+        pub vendor: Option<String>,
+        pub model: Option<String>,
+        pub serial: Option<String>,
+        pub size_sectors: Option<u64>,
+        pub removable: bool,
+        pub readonly: bool,
+    }
+
+    /// A temporary fake sysfs tree for testing device enumeration.
+    pub struct MockSysfs {
+        root: tempfile::TempDir,
+    }
+
+    impl MockSysfs {
+        pub fn new() -> Self {
+            let root = tempfile::TempDir::new().expect("failed to create temp dir");
+            std::fs::create_dir_all(root.path().join("block")).unwrap();
+            Self { root }
+        }
+
+        pub fn root(&self) -> &Path {
+            self.root.path()
+        }
+
+        /// Add a block device with the given name and attributes.
+        pub fn add_device(&self, name: &str, attrs: MockDeviceAttrs) {
+            let dev_dir = self.root.path().join("block").join(name);
+            std::fs::create_dir_all(dev_dir.join("device")).unwrap();
+            self.write_attrs(&dev_dir, &attrs);
+        }
+
+        /// Add a partition under a parent device.
+        pub fn add_partition(&self, parent: &str, part_name: &str, attrs: MockDeviceAttrs) {
+            let part_dir = self.root.path().join("block").join(parent).join(part_name);
+            std::fs::create_dir_all(part_dir.join("device")).unwrap();
+            std::fs::write(part_dir.join("partition"), "1\n").unwrap();
+            self.write_attrs(&part_dir, &attrs);
+        }
+
+        fn write_attrs(&self, dir: &Path, attrs: &MockDeviceAttrs) {
+            if let Some(ref vendor) = attrs.vendor {
+                std::fs::write(dir.join("device/vendor"), format!("  {}  \n", vendor)).unwrap();
+            }
+            if let Some(ref model) = attrs.model {
+                std::fs::write(dir.join("device/model"), format!("{}\n", model)).unwrap();
+            }
+            if let Some(ref serial) = attrs.serial {
+                std::fs::write(dir.join("device/serial"), format!("{}\n", serial)).unwrap();
+            }
+            if let Some(sectors) = attrs.size_sectors {
+                std::fs::write(dir.join("size"), format!("{}\n", sectors)).unwrap();
+            }
+            std::fs::write(
+                dir.join("removable"),
+                if attrs.removable { "1\n" } else { "0\n" },
+            )
+            .unwrap();
+            std::fs::write(dir.join("ro"), if attrs.readonly { "1\n" } else { "0\n" }).unwrap();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration tests using MockSysfs
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mock_enumerate_three_devices() {
+        let mock = MockSysfs::new();
+        mock.add_device(
+            "sda",
+            MockDeviceAttrs {
+                vendor: Some("ATA".into()),
+                model: Some("Samsung SSD 870".into()),
+                size_sectors: Some(1953525168),
+                ..Default::default()
+            },
+        );
+        mock.add_device(
+            "sdb",
+            MockDeviceAttrs {
+                vendor: Some("SanDisk".into()),
+                model: Some("Cruzer Blade".into()),
+                size_sectors: Some(31457280),
+                removable: true,
+                ..Default::default()
+            },
+        );
+        mock.add_device(
+            "sr0",
+            MockDeviceAttrs {
+                vendor: Some("HL-DT-ST".into()),
+                model: Some("DVDRAM".into()),
+                size_sectors: Some(0),
+                ..Default::default()
+            },
+        );
+
+        let devices = enumerate_devices(mock.root()).unwrap();
+        assert_eq!(devices.len(), 3);
+
+        let names: Vec<String> = devices
+            .iter()
+            .map(|d| d.dev_path.display().to_string())
+            .collect();
+        assert!(names.contains(&"/dev/sda".to_string()));
+        assert!(names.contains(&"/dev/sdb".to_string()));
+        assert!(names.contains(&"/dev/sr0".to_string()));
+
+        let sda = devices
+            .iter()
+            .find(|d| d.dev_path.display().to_string() == "/dev/sda")
+            .unwrap();
+        assert_eq!(sda.vendor.as_deref(), Some("ATA"));
+        assert_eq!(sda.model.as_deref(), Some("Samsung SSD 870"));
+        assert_eq!(sda.size_bytes, 1953525168 * 512);
+
+        let sdb = devices
+            .iter()
+            .find(|d| d.dev_path.display().to_string() == "/dev/sdb")
+            .unwrap();
+        assert!(sdb.capabilities.contains(DeviceCapabilities::REMOVABLE));
+    }
+
+    #[test]
+    fn test_mock_enumerate_with_partitions() {
+        let mock = MockSysfs::new();
+        mock.add_device(
+            "sda",
+            MockDeviceAttrs {
+                size_sectors: Some(1000),
+                ..Default::default()
+            },
+        );
+        mock.add_partition(
+            "sda",
+            "sda1",
+            MockDeviceAttrs {
+                size_sectors: Some(500),
+                ..Default::default()
+            },
+        );
+        mock.add_partition(
+            "sda",
+            "sda2",
+            MockDeviceAttrs {
+                size_sectors: Some(500),
+                ..Default::default()
+            },
+        );
+
+        let devices = enumerate_devices(mock.root()).unwrap();
+        assert_eq!(devices.len(), 3);
+
+        let names: Vec<String> = devices
+            .iter()
+            .map(|d| d.dev_path.display().to_string())
+            .collect();
+        assert!(names.contains(&"/dev/sda".to_string()));
+        assert!(names.contains(&"/dev/sda1".to_string()));
+        assert!(names.contains(&"/dev/sda2".to_string()));
+
+        let sda1 = devices
+            .iter()
+            .find(|d| d.dev_path.display().to_string() == "/dev/sda1")
+            .unwrap();
+        assert_eq!(sda1.size_bytes, 500 * 512);
+    }
+
+    #[test]
+    fn test_mock_enumerate_empty() {
+        let mock = MockSysfs::new();
+        let devices = enumerate_devices(mock.root()).unwrap();
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn test_mock_removable_usb_capabilities() {
+        let mock = MockSysfs::new();
+        mock.add_device(
+            "sdb",
+            MockDeviceAttrs {
+                vendor: Some("Kingston".into()),
+                model: Some("DataTraveler".into()),
+                serial: Some("ABC123".into()),
+                size_sectors: Some(62914560),
+                removable: true,
+                ..Default::default()
+            },
+        );
+
+        let devices = enumerate_devices(mock.root()).unwrap();
+        assert_eq!(devices.len(), 1);
+        let dev = &devices[0];
+        assert_eq!(dev.vendor.as_deref(), Some("Kingston"));
+        assert_eq!(dev.model.as_deref(), Some("DataTraveler"));
+        assert_eq!(dev.serial.as_deref(), Some("ABC123"));
+        assert!(dev.capabilities.contains(DeviceCapabilities::REMOVABLE));
+        assert!(dev.capabilities.contains(DeviceCapabilities::HOTPLUG));
+        assert!(dev.capabilities.contains(DeviceCapabilities::EJECT));
+        assert!(dev.capabilities.contains(DeviceCapabilities::READ));
+        assert!(dev.capabilities.contains(DeviceCapabilities::WRITE));
+    }
+
+    // -----------------------------------------------------------------------
     // read_sysfs_attr tests
     // -----------------------------------------------------------------------
 
@@ -1070,6 +1379,84 @@ mod tests {
                 .capabilities
                 .contains(DeviceCapabilities::REMOVABLE)
         );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // USB vendor/product ID and partition table tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_device_info_usb_ids_from_udev() {
+        let mut event = make_usb_event();
+        event
+            .properties
+            .insert("ID_VENDOR_ID".into(), "0781".into());
+        event.properties.insert("ID_MODEL_ID".into(), "5567".into());
+        let info = device_info_from_udev(&event).unwrap();
+        assert_eq!(info.usb_vendor_id, Some(0x0781));
+        assert_eq!(info.usb_product_id, Some(0x5567));
+    }
+
+    #[test]
+    fn test_device_info_usb_ids_missing() {
+        let event = make_usb_event();
+        let info = device_info_from_udev(&event).unwrap();
+        assert!(info.usb_vendor_id.is_none());
+        assert!(info.usb_product_id.is_none());
+    }
+
+    #[test]
+    fn test_device_info_usb_ids_invalid_hex() {
+        let mut event = make_usb_event();
+        event
+            .properties
+            .insert("ID_VENDOR_ID".into(), "ZZZZ".into());
+        let info = device_info_from_udev(&event).unwrap();
+        assert!(info.usb_vendor_id.is_none());
+    }
+
+    #[test]
+    fn test_device_info_partition_table_from_udev() {
+        let mut event = make_usb_event();
+        event
+            .properties
+            .insert("ID_PART_TABLE_TYPE".into(), "gpt".into());
+        let info = device_info_from_udev(&event).unwrap();
+        assert_eq!(info.partition_table.as_deref(), Some("gpt"));
+    }
+
+    #[test]
+    fn test_device_info_partition_table_mbr() {
+        let mut event = make_usb_event();
+        event
+            .properties
+            .insert("ID_PART_TABLE_TYPE".into(), "dos".into());
+        let info = device_info_from_udev(&event).unwrap();
+        assert_eq!(info.partition_table.as_deref(), Some("dos"));
+    }
+
+    #[test]
+    fn test_device_info_partition_table_missing() {
+        let event = make_usb_event();
+        let info = device_info_from_udev(&event).unwrap();
+        assert!(info.partition_table.is_none());
+    }
+
+    #[test]
+    fn test_sysfs_usb_ids_populated() {
+        let root = std::env::temp_dir().join("yantra_test_sysfs_usb_ids");
+        let _ = std::fs::remove_dir_all(&root);
+        let sdb = root.join("block/sdb");
+        std::fs::create_dir_all(sdb.join("device")).unwrap();
+        std::fs::write(sdb.join("size"), "1000\n").unwrap();
+        std::fs::write(sdb.join("device/idVendor"), "0781\n").unwrap();
+        std::fs::write(sdb.join("device/idProduct"), "5567\n").unwrap();
+
+        let devices = enumerate_devices(&root).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].usb_vendor_id, Some(0x0781));
+        assert_eq!(devices[0].usb_product_id, Some(0x5567));
         std::fs::remove_dir_all(&root).unwrap();
     }
 

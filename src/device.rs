@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
@@ -29,8 +29,21 @@ impl fmt::Display for DeviceId {
     }
 }
 
+impl From<&str> for DeviceId {
+    fn from(s: &str) -> Self {
+        Self::new(s)
+    }
+}
+
+impl From<String> for DeviceId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
 /// High-level device classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DeviceClass {
     /// USB mass storage (flash drives, external HDDs).
     UsbStorage,
@@ -68,6 +81,7 @@ impl fmt::Display for DeviceClass {
 
 /// What a device can do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DeviceCapability {
     /// Can be read.
     Read,
@@ -185,6 +199,7 @@ impl<'de> Deserialize<'de> for DeviceCapabilities {
 
 /// Current state of a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DeviceState {
     /// Device present, media loaded, not mounted.
     Ready,
@@ -212,6 +227,26 @@ impl fmt::Display for DeviceState {
         };
         f.write_str(s)
     }
+}
+
+/// Device node permissions (from stat()).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevicePermissions {
+    pub uid: u32,
+    pub gid: u32,
+    pub mode: u32,
+}
+
+/// Query device node permissions via `std::fs::metadata()`.
+#[cfg(target_os = "linux")]
+pub fn query_permissions(dev_path: &Path) -> Option<DevicePermissions> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(dev_path).ok()?;
+    Some(DevicePermissions {
+        uid: meta.uid(),
+        gid: meta.gid(),
+        mode: meta.mode(),
+    })
 }
 
 /// Information about a detected device.
@@ -245,6 +280,14 @@ pub struct DeviceInfo {
     pub capabilities: DeviceCapabilities,
     /// When this device was first detected.
     pub detected_at: DateTime<Utc>,
+    /// Device node permissions (from stat()).
+    pub permissions: Option<DevicePermissions>,
+    /// USB vendor ID (e.g. 0x0781 for SanDisk).
+    pub usb_vendor_id: Option<u16>,
+    /// USB product ID.
+    pub usb_product_id: Option<u16>,
+    /// Partition table type (mbr, gpt).
+    pub partition_table: Option<String>,
     /// Extra properties from udev.
     pub properties: HashMap<String, String>,
 }
@@ -267,6 +310,10 @@ impl DeviceInfo {
             size_bytes: 0,
             capabilities: DeviceCapabilities::empty(),
             detected_at: Utc::now(),
+            permissions: None,
+            usb_vendor_id: None,
+            usb_product_id: None,
+            partition_table: None,
             properties: HashMap::new(),
         }
     }
@@ -324,6 +371,61 @@ impl DeviceInfo {
     }
 }
 
+/// Health information for a block device, read from sysfs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceHealth {
+    /// Rotational (HDD) or non-rotational (SSD/NVMe).
+    pub rotational: Option<bool>,
+    /// NVMe temperature in Celsius (from hwmon).
+    pub temperature_celsius: Option<f64>,
+    /// Device scheduler.
+    pub scheduler: Option<String>,
+}
+
+/// Query device health information from sysfs.
+///
+/// Reads:
+/// - `/sys/block/<dev>/queue/rotational` (0=SSD, 1=HDD)
+/// - `/sys/block/<dev>/device/hwmon/hwmon*/temp1_input` (millidegrees C for NVMe)
+/// - `/sys/block/<dev>/queue/scheduler`
+#[cfg(target_os = "linux")]
+pub fn query_device_health(dev_name: &str) -> DeviceHealth {
+    let base = PathBuf::from(format!("/sys/block/{}", dev_name));
+
+    let rotational = std::fs::read_to_string(base.join("queue/rotational"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .map(|v| v == 1);
+
+    let temperature_celsius = read_hwmon_temperature(&base);
+
+    let scheduler = std::fs::read_to_string(base.join("queue/scheduler"))
+        .ok()
+        .map(|s| s.trim().to_string());
+
+    DeviceHealth {
+        rotational,
+        temperature_celsius,
+        scheduler,
+    }
+}
+
+/// Search for hwmon temperature under the device's sysfs path.
+#[cfg(target_os = "linux")]
+fn read_hwmon_temperature(base: &std::path::Path) -> Option<f64> {
+    let hwmon_dir = base.join("device/hwmon");
+    let entries = std::fs::read_dir(&hwmon_dir).ok()?;
+    for entry in entries.flatten() {
+        let temp_path = entry.path().join("temp1_input");
+        if let Ok(contents) = std::fs::read_to_string(&temp_path)
+            && let Ok(millidegrees) = contents.trim().parse::<f64>()
+        {
+            return Some(millidegrees / 1000.0);
+        }
+    }
+    None
+}
+
 /// Trait for device management backends.
 pub trait Device: Send + Sync {
     /// Enumerate all currently connected devices.
@@ -345,6 +447,18 @@ mod tests {
         let id = DeviceId::new("block:sdb1");
         assert_eq!(id.as_str(), "block:sdb1");
         assert_eq!(id.to_string(), "block:sdb1");
+    }
+
+    #[test]
+    fn test_device_id_from_str() {
+        let id: DeviceId = "block:sdb1".into();
+        assert_eq!(id.as_str(), "block:sdb1");
+    }
+
+    #[test]
+    fn test_device_id_from_string() {
+        let id: DeviceId = String::from("block:sdc1").into();
+        assert_eq!(id.as_str(), "block:sdc1");
     }
 
     #[test]
@@ -586,5 +700,140 @@ mod tests {
         assert!(json.contains("Eject"));
         let deserialized: DeviceCapabilities = serde_json::from_str(&json).unwrap();
         assert_eq!(caps, deserialized);
+    }
+
+    // -----------------------------------------------------------------------
+    // DeviceHealth tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_device_health_serde_roundtrip() {
+        let health = DeviceHealth {
+            rotational: Some(true),
+            temperature_celsius: Some(42.5),
+            scheduler: Some("[mq-deadline] none".to_string()),
+        };
+        let json = serde_json::to_string(&health).unwrap();
+        let roundtrip: DeviceHealth = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.rotational, Some(true));
+        assert_eq!(roundtrip.temperature_celsius, Some(42.5));
+        assert_eq!(roundtrip.scheduler.as_deref(), Some("[mq-deadline] none"));
+    }
+
+    #[test]
+    fn test_device_health_all_none() {
+        let health = DeviceHealth {
+            rotational: None,
+            temperature_celsius: None,
+            scheduler: None,
+        };
+        let json = serde_json::to_string(&health).unwrap();
+        let roundtrip: DeviceHealth = serde_json::from_str(&json).unwrap();
+        assert!(roundtrip.rotational.is_none());
+        assert!(roundtrip.temperature_celsius.is_none());
+        assert!(roundtrip.scheduler.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_query_device_health_nonexistent() {
+        let health = query_device_health("nonexistent_yantra_test_device");
+        assert!(health.rotational.is_none());
+        assert!(health.temperature_celsius.is_none());
+        assert!(health.scheduler.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_query_device_health_fake_sysfs() {
+        let dir = std::env::temp_dir().join("yantra_test_health_sysfs");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // We can't easily test query_device_health with a fake sysfs root
+        // because it hardcodes /sys/block/. Instead, verify the function
+        // handles missing paths gracefully.
+        let health = query_device_health("yantra_fake_block_device_12345");
+        assert!(health.rotational.is_none());
+        assert!(health.temperature_celsius.is_none());
+        assert!(health.scheduler.is_none());
+    }
+
+    #[test]
+    fn test_device_permissions_serde() {
+        let perms = DevicePermissions {
+            uid: 0,
+            gid: 6,
+            mode: 0o060660,
+        };
+        let json = serde_json::to_string(&perms).unwrap();
+        let roundtrip: DevicePermissions = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.uid, 0);
+        assert_eq!(roundtrip.gid, 6);
+        assert_eq!(roundtrip.mode, 0o060660);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_query_permissions_existing_file() {
+        // /dev/null should always exist and be readable
+        let perms = query_permissions(std::path::Path::new("/dev/null"));
+        assert!(perms.is_some());
+        let p = perms.unwrap();
+        // /dev/null is owned by root (uid 0)
+        assert_eq!(p.uid, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_query_permissions_nonexistent() {
+        let perms = query_permissions(std::path::Path::new("/dev/yantra_nonexistent_device_xyz"));
+        assert!(perms.is_none());
+    }
+
+    #[test]
+    fn test_device_info_new_fields_default() {
+        let info = DeviceInfo::new(
+            DeviceId::new("test"),
+            PathBuf::from("/dev/sda"),
+            DeviceClass::BlockInternal,
+        );
+        assert!(info.permissions.is_none());
+        assert!(info.usb_vendor_id.is_none());
+        assert!(info.usb_product_id.is_none());
+        assert!(info.partition_table.is_none());
+    }
+
+    #[test]
+    fn test_device_info_usb_ids() {
+        let mut info = DeviceInfo::new(
+            DeviceId::new("test"),
+            PathBuf::from("/dev/sdb1"),
+            DeviceClass::UsbStorage,
+        );
+        info.usb_vendor_id = Some(0x0781);
+        info.usb_product_id = Some(0x5567);
+        assert_eq!(info.usb_vendor_id, Some(0x0781));
+        assert_eq!(info.usb_product_id, Some(0x5567));
+
+        // Serde roundtrip
+        let json = serde_json::to_string(&info).unwrap();
+        let roundtrip: DeviceInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.usb_vendor_id, Some(0x0781));
+        assert_eq!(roundtrip.usb_product_id, Some(0x5567));
+    }
+
+    #[test]
+    fn test_device_info_partition_table() {
+        let mut info = DeviceInfo::new(
+            DeviceId::new("test"),
+            PathBuf::from("/dev/sda"),
+            DeviceClass::BlockInternal,
+        );
+        info.partition_table = Some("gpt".into());
+        assert_eq!(info.partition_table.as_deref(), Some("gpt"));
+
+        let json = serde_json::to_string(&info).unwrap();
+        let roundtrip: DeviceInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.partition_table.as_deref(), Some("gpt"));
     }
 }

@@ -1,7 +1,5 @@
 //! Yukti — Device abstraction layer for AGNOS
 //!
-//! Sanskrit: यन्त्र (yukti) — device, instrument, machine
-//!
 //! Provides a unified API for detecting, monitoring, and managing hardware
 //! devices: USB storage, optical drives, block devices, and udev hotplug events.
 //!

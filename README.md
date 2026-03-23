@@ -1,6 +1,6 @@
 # Yukti
 
-> **Yukti** (Sanskrit: यन्त्र — device, instrument, machine) — device abstraction layer for AGNOS
+> **Yukti** (Sanskrit: युक्ति — reasoning, contrivance, application) — device abstraction layer for AGNOS
 
 [![CI](https://github.com/MacCracken/yukti/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/yukti/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)

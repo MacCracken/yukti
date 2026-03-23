@@ -12,9 +12,9 @@ categories = ["hardware-support", "os"]
 
 [features]
 default = ["udev", "storage", "optical"]
-udev = []
-storage = []
-optical = []
+udev = ["dep:libc"]
+storage = ["dep:libc"]
+optical = ["dep:libc"]
 ai = ["dep:reqwest", "dep:tokio"]
 
 [dependencies]
@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 reqwest = { version = "0.12", features = ["json"], optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 bitflags = "2"
+libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
 serde_json = "1"

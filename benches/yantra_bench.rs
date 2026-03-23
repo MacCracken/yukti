@@ -350,7 +350,7 @@ fn bench_storage(c: &mut Criterion) {
         b.iter(|| default_mount_point(black_box(&info)))
     });
     group.bench_function("mount_options_default", |b| {
-        b.iter(|| MountOptions::default())
+        b.iter(MountOptions::default)
     });
 
     group.finish();

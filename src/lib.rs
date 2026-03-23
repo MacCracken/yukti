@@ -12,6 +12,7 @@
 //! - [`storage`] — USB/block device mount, eject, filesystem detection
 //! - [`optical`] — Disc type detection, tray control, TOC reading
 //! - [`udev`] — udev monitor, device enumeration, hotplug
+//! - [`linux`] — Linux device manager (ties everything together)
 //! - [`error`] — Error types
 
 pub mod device;
@@ -27,6 +28,14 @@ pub mod storage;
 #[cfg(feature = "udev")]
 pub mod udev;
 
-pub use device::{Device, DeviceCapability, DeviceClass, DeviceId, DeviceInfo, DeviceState};
+#[cfg(target_os = "linux")]
+pub mod linux;
+
+pub use device::{
+    Device, DeviceCapabilities, DeviceCapability, DeviceClass, DeviceId, DeviceInfo, DeviceState,
+};
 pub use error::YantraError;
 pub use event::{DeviceEvent, DeviceEventKind, EventListener};
+
+#[cfg(target_os = "linux")]
+pub use linux::LinuxDeviceManager;

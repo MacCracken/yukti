@@ -1,6 +1,285 @@
 //! Optical drive operations — disc type detection, tray control, TOC reading.
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+use crate::error::{Result, YantraError};
+
+// ---------------------------------------------------------------------------
+// Linux ioctl constants
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+mod ioctl {
+    pub const CDROMEJECT: libc::c_ulong = 0x5309;
+    pub const CDROMCLOSETRAY: libc::c_ulong = 0x5319;
+    pub const CDROM_DRIVE_STATUS: libc::c_ulong = 0x5326;
+    pub const CDROMREADTOCHDR: libc::c_ulong = 0x5305;
+    pub const CDROMREADTOCENTRY: libc::c_ulong = 0x5306;
+    pub const CDROM_LBA: u8 = 0x01;
+    pub const CDROM_LEADOUT: u8 = 0xAA;
+
+    // Drive status return values
+    pub const CDS_NO_DISC: i32 = 1;
+    pub const CDS_TRAY_OPEN: i32 = 2;
+    pub const CDS_DRIVE_NOT_READY: i32 = 3;
+    pub const CDS_DISC_OK: i32 = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Linux kernel FFI structs
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+mod ffi {
+    #[repr(C)]
+    pub struct CdromTocHdr {
+        pub first_track: u8,
+        pub last_track: u8,
+    }
+
+    #[repr(C)]
+    pub struct CdromTocEntry {
+        pub track: u8,
+        pub adr_ctrl: u8,
+        pub format: u8,
+        pub addr: CdromAddr,
+        pub datamode: u8,
+    }
+
+    #[repr(C)]
+    pub union CdromAddr {
+        pub lba: i32,
+        pub msf: CdromMsf0,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct CdromMsf0 {
+        pub minute: u8,
+        pub second: u8,
+        pub frame: u8,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Linux helper: open optical device
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+fn open_optical_device(dev_path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(dev_path)
+        .map_err(|e| {
+            let raw = e.raw_os_error().unwrap_or(0);
+            match raw {
+                libc::EACCES | libc::EPERM => YantraError::PermissionDenied {
+                    operation: "open".into(),
+                    path: dev_path.to_path_buf(),
+                },
+                123 /* ENOMEDIUM */ => YantraError::NoMedia {
+                    device: dev_path.display().to_string(),
+                },
+                _ => YantraError::Io(e),
+            }
+        })
+}
+
+// ---------------------------------------------------------------------------
+// Linux helper: map ioctl errno to YantraError
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+fn map_ioctl_error(dev_path: &Path, op: &str) -> YantraError {
+    let err = std::io::Error::last_os_error();
+    let raw = err.raw_os_error().unwrap_or(0);
+    match raw {
+        libc::EACCES | libc::EPERM => YantraError::PermissionDenied {
+            operation: op.into(),
+            path: dev_path.to_path_buf(),
+        },
+        123 /* ENOMEDIUM */ => YantraError::NoMedia {
+            device: dev_path.display().to_string(),
+        },
+        _ => YantraError::TrayFailed {
+            reason: format!("{op}: {err}"),
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public Linux functions
+// ---------------------------------------------------------------------------
+
+/// Open the optical drive tray (eject).
+#[cfg(target_os = "linux")]
+pub fn open_tray(dev_path: &Path) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let file = open_optical_device(dev_path)?;
+    let fd = file.as_raw_fd();
+    let ret = unsafe { libc::ioctl(fd, ioctl::CDROMEJECT as libc::c_ulong) };
+    if ret < 0 {
+        return Err(map_ioctl_error(dev_path, "eject"));
+    }
+    Ok(())
+}
+
+/// Close the optical drive tray.
+#[cfg(target_os = "linux")]
+pub fn close_tray(dev_path: &Path) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let file = open_optical_device(dev_path)?;
+    let fd = file.as_raw_fd();
+    let ret = unsafe { libc::ioctl(fd, ioctl::CDROMCLOSETRAY as libc::c_ulong) };
+    if ret < 0 {
+        return Err(map_ioctl_error(dev_path, "close tray"));
+    }
+    Ok(())
+}
+
+/// Query the drive/tray status.
+#[cfg(target_os = "linux")]
+pub fn drive_status(dev_path: &Path) -> Result<TrayState> {
+    use std::os::unix::io::AsRawFd;
+
+    let file = open_optical_device(dev_path)?;
+    let fd = file.as_raw_fd();
+    let ret = unsafe { libc::ioctl(fd, ioctl::CDROM_DRIVE_STATUS as libc::c_ulong) };
+    if ret < 0 {
+        return Err(map_ioctl_error(dev_path, "drive status"));
+    }
+    match ret {
+        ioctl::CDS_TRAY_OPEN => Ok(TrayState::Open),
+        ioctl::CDS_DISC_OK | ioctl::CDS_NO_DISC | ioctl::CDS_DRIVE_NOT_READY => {
+            Ok(TrayState::Closed)
+        }
+        _ => Ok(TrayState::Unknown),
+    }
+}
+
+/// Read the table of contents from a CD in the given drive.
+///
+/// Reads the TOC header, then each track entry plus the lead-out, and
+/// computes track lengths and durations (75 frames/sec for audio).
+#[cfg(target_os = "linux")]
+pub fn read_toc(dev_path: &Path) -> Result<DiscToc> {
+    use std::os::unix::io::AsRawFd;
+
+    let file = open_optical_device(dev_path)?;
+    let fd = file.as_raw_fd();
+
+    // Read TOC header to get first/last track numbers.
+    let mut hdr = ffi::CdromTocHdr {
+        first_track: 0,
+        last_track: 0,
+    };
+    let ret = unsafe {
+        libc::ioctl(
+            fd,
+            ioctl::CDROMREADTOCHDR as libc::c_ulong,
+            &mut hdr as *mut ffi::CdromTocHdr,
+        )
+    };
+    if ret < 0 {
+        return Err(map_ioctl_error(dev_path, "read TOC header"));
+    }
+
+    let first = hdr.first_track;
+    let last = hdr.last_track;
+
+    // Read LBA for each track plus the lead-out (0xAA).
+    let track_numbers: Vec<u8> = (first..=last)
+        .chain(std::iter::once(ioctl::CDROM_LEADOUT))
+        .collect();
+
+    let mut lba_values: Vec<(u8, i32, bool)> = Vec::with_capacity(track_numbers.len());
+
+    for &track_num in &track_numbers {
+        let mut entry = ffi::CdromTocEntry {
+            track: track_num,
+            adr_ctrl: 0,
+            format: ioctl::CDROM_LBA,
+            addr: ffi::CdromAddr { lba: 0 },
+            datamode: 0,
+        };
+        let ret = unsafe {
+            libc::ioctl(
+                fd,
+                ioctl::CDROMREADTOCENTRY as libc::c_ulong,
+                &mut entry as *mut ffi::CdromTocEntry,
+            )
+        };
+        if ret < 0 {
+            return Err(map_ioctl_error(dev_path, "read TOC entry"));
+        }
+        let lba = unsafe { entry.addr.lba };
+        // Bit 2 of adr_ctrl indicates data track (control field bit 2).
+        let is_data = (entry.adr_ctrl & 0x04) != 0;
+        lba_values.push((track_num, lba, is_data));
+    }
+
+    // Build track entries by computing length from consecutive LBA values.
+    let mut tracks = Vec::with_capacity((last - first + 1) as usize);
+    let mut has_audio = false;
+    let mut has_data = false;
+
+    for i in 0..(lba_values.len() - 1) {
+        let (track_num, start_lba, is_data_track) = lba_values[i];
+        let next_lba = lba_values[i + 1].1;
+        let length_sectors = (next_lba - start_lba).max(0) as u64;
+
+        let track_type = if is_data_track {
+            has_data = true;
+            TrackType::Data
+        } else {
+            has_audio = true;
+            TrackType::Audio
+        };
+
+        let duration_secs = if track_type == TrackType::Audio {
+            Some(length_sectors as f64 / 75.0)
+        } else {
+            None
+        };
+
+        tracks.push(TocEntry {
+            number: track_num as u32,
+            track_type,
+            start_lba: start_lba.max(0) as u64,
+            length_sectors,
+            duration_secs,
+        });
+    }
+
+    // Determine total size: lead-out LBA * 2048 bytes/sector.
+    let leadout_lba = lba_values.last().map(|v| v.1).unwrap_or(0);
+    let total_size_bytes = leadout_lba.max(0) as u64 * 2048;
+
+    // Determine disc type based on track contents.
+    let disc_type = classify_toc_tracks(has_audio, has_data);
+
+    Ok(DiscToc {
+        disc_type,
+        tracks,
+        total_size_bytes,
+    })
+}
+
+/// Classify disc type from TOC track information.
+fn classify_toc_tracks(has_audio: bool, has_data: bool) -> DiscType {
+    match (has_audio, has_data) {
+        (true, true) => DiscType::CdMixed,
+        (true, false) => DiscType::CdAudio,
+        (false, true) => DiscType::CdData,
+        (false, false) => DiscType::Unknown,
+    }
+}
 
 /// Type of optical media.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -149,11 +428,7 @@ pub fn detect_disc_type(media_type: &str, has_audio: bool, has_data: bool) -> Di
         }
     } else if media_type.eq_ignore_ascii_case("dvd") || media_type.eq_ignore_ascii_case("dvd-rom")
     {
-        if has_data {
-            DiscType::DvdRom
-        } else {
-            DiscType::DvdRom // DVD without data is still classified as DvdRom
-        }
+        DiscType::DvdRom
     } else if media_type.eq_ignore_ascii_case("dvd-r")
         || media_type.eq_ignore_ascii_case("dvd-rw")
         || media_type.eq_ignore_ascii_case("dvd+r")
@@ -371,5 +646,94 @@ mod tests {
         let roundtrip: DiscToc = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtrip.disc_type, DiscType::CdAudio);
         assert_eq!(roundtrip.tracks.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for classify_toc_tracks (pure logic, no hardware)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_classify_audio_only() {
+        assert_eq!(classify_toc_tracks(true, false), DiscType::CdAudio);
+    }
+
+    #[test]
+    fn test_classify_data_only() {
+        assert_eq!(classify_toc_tracks(false, true), DiscType::CdData);
+    }
+
+    #[test]
+    fn test_classify_mixed() {
+        assert_eq!(classify_toc_tracks(true, true), DiscType::CdMixed);
+    }
+
+    #[test]
+    fn test_classify_empty() {
+        assert_eq!(classify_toc_tracks(false, false), DiscType::Unknown);
+    }
+
+    // -----------------------------------------------------------------------
+    // Linux ioctl constant sanity checks
+    // -----------------------------------------------------------------------
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_ioctl_constants() {
+        assert_eq!(ioctl::CDROMEJECT, 0x5309);
+        assert_eq!(ioctl::CDROMCLOSETRAY, 0x5319);
+        assert_eq!(ioctl::CDROM_DRIVE_STATUS, 0x5326);
+        assert_eq!(ioctl::CDROMREADTOCHDR, 0x5305);
+        assert_eq!(ioctl::CDROMREADTOCENTRY, 0x5306);
+        assert_eq!(ioctl::CDROM_LBA, 0x01);
+        assert_eq!(ioctl::CDROM_LEADOUT, 0xAA);
+        assert_eq!(ioctl::CDS_NO_DISC, 1);
+        assert_eq!(ioctl::CDS_TRAY_OPEN, 2);
+        assert_eq!(ioctl::CDS_DRIVE_NOT_READY, 3);
+        assert_eq!(ioctl::CDS_DISC_OK, 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // Hardware tests (require an actual optical drive) — always #[ignore]
+    // -----------------------------------------------------------------------
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore]
+    fn test_open_tray_hardware() {
+        let dev = std::path::Path::new("/dev/sr0");
+        // This will fail without a real drive; that is expected.
+        let _ = open_tray(dev);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore]
+    fn test_close_tray_hardware() {
+        let dev = std::path::Path::new("/dev/sr0");
+        let _ = close_tray(dev);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore]
+    fn test_drive_status_hardware() {
+        let dev = std::path::Path::new("/dev/sr0");
+        let _ = drive_status(dev);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore]
+    fn test_read_toc_hardware() {
+        let dev = std::path::Path::new("/dev/sr0");
+        let _ = read_toc(dev);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_open_device_nonexistent() {
+        let dev = std::path::Path::new("/dev/sr_nonexistent_yantra_test");
+        let result = open_optical_device(dev);
+        assert!(result.is_err());
     }
 }

@@ -8,10 +8,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::device::{DeviceCapabilities, DeviceClass, DeviceId, DeviceInfo};
 use crate::error::{Result, YantraError};
+#[cfg(target_os = "linux")]
+use crate::event::{DeviceEvent, DeviceEventKind, EventListener};
 
 /// A raw udev device event from the kernel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,10 +174,11 @@ pub fn device_info_from_udev(event: &UdevEvent) -> Result<DeviceInfo> {
         .map(|s| s.to_string());
     info.fs_type = event.property("ID_FS_TYPE").map(|s| s.to_string());
 
-    if let Some(size_str) = event.property("ID_PART_ENTRY_SIZE") {
-        if let Ok(sectors) = size_str.parse::<u64>() {
-            info.size_bytes = sectors * 512;
-        }
+    if let Some(sectors) = event
+        .property("ID_PART_ENTRY_SIZE")
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        info.size_bytes = sectors * 512;
     }
 
     info.capabilities = capabilities;
@@ -192,6 +200,438 @@ pub fn enumerate_block_devices(sysfs_root: &Path) -> Vec<PathBuf> {
         }
     }
     devices
+}
+
+/// Read a single sysfs attribute file, returning the trimmed contents.
+/// Returns `None` on any I/O error (missing file, permission denied, etc.).
+fn read_sysfs_attr(base: &Path, attr: &str) -> Option<String> {
+    std::fs::read_to_string(base.join(attr))
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// Enumerate all block devices under `sysfs_root`, building full `DeviceInfo`
+/// for each disk and its partitions.
+///
+/// `sysfs_root` is typically `/sys` in production. Each entry in
+/// `<sysfs_root>/block/` is inspected for sysfs attributes and converted
+/// through the standard `classify_and_extract()` / `device_info_from_udev()`
+/// pipeline.
+pub fn enumerate_devices(sysfs_root: &Path) -> Result<Vec<DeviceInfo>> {
+    let block_dir = sysfs_root.join("block");
+    let entries = std::fs::read_dir(&block_dir).map_err(|e| {
+        YantraError::Udev(format!("failed to read {}: {}", block_dir.display(), e))
+    })?;
+
+    let mut devices = Vec::new();
+
+    for entry in entries.flatten() {
+        let dev_name = entry.file_name();
+        let dev_name_str = dev_name.to_string_lossy().to_string();
+        let sys_path = entry.path();
+
+        // Build a synthetic UdevEvent from sysfs attributes
+        if let Some(info) = build_device_info_from_sysfs(&sys_path, &dev_name_str, "disk") {
+            devices.push(info);
+        }
+
+        // Enumerate partitions: subdirectories matching "<devname><number>"
+        if let Ok(sub_entries) = std::fs::read_dir(&sys_path) {
+            for sub_entry in sub_entries.flatten() {
+                let part_name = sub_entry.file_name();
+                let part_name_str = part_name.to_string_lossy().to_string();
+                // Partitions are named like sda1, sda2, nvme0n1p1, mmcblk0p1
+                if part_name_str.starts_with(&dev_name_str)
+                    && part_name_str.len() > dev_name_str.len()
+                    && sub_entry.path().join("partition").exists()
+                    && let Some(info) =
+                        build_device_info_from_sysfs(&sub_entry.path(), &part_name_str, "partition")
+                {
+                    devices.push(info);
+                }
+            }
+        }
+    }
+
+    Ok(devices)
+}
+
+/// Build a `DeviceInfo` from sysfs attributes at the given path.
+fn build_device_info_from_sysfs(
+    sys_path: &Path,
+    dev_name: &str,
+    dev_type: &str,
+) -> Option<DeviceInfo> {
+    let mut props = HashMap::new();
+
+    // Read standard sysfs attributes
+    if let Some(vendor) = read_sysfs_attr(sys_path, "device/vendor") {
+        props.insert("ID_VENDOR".to_string(), vendor);
+    }
+    if let Some(model) = read_sysfs_attr(sys_path, "device/model") {
+        props.insert("ID_MODEL".to_string(), model);
+    }
+    if let Some(serial) = read_sysfs_attr(sys_path, "device/serial") {
+        props.insert("ID_SERIAL_SHORT".to_string(), serial);
+    }
+    if read_sysfs_attr(sys_path, "removable").as_deref() == Some("1") {
+        props.insert("UDISKS_REMOVABLE".to_string(), "1".to_string());
+    }
+    if read_sysfs_attr(sys_path, "ro").as_deref() == Some("1") {
+        props.insert("ID_FS_READONLY".to_string(), "1".to_string());
+    }
+    if let Some(size_str) = read_sysfs_attr(sys_path, "size") {
+        props.insert("ID_PART_ENTRY_SIZE".to_string(), size_str);
+    }
+
+    let dev_path = PathBuf::from(format!("/dev/{}", dev_name));
+
+    let event = UdevEvent {
+        action: "add".to_string(),
+        sys_path: sys_path.to_path_buf(),
+        dev_path: Some(dev_path),
+        subsystem: "block".to_string(),
+        dev_type: Some(dev_type.to_string()),
+        properties: props,
+    };
+
+    let mut info = device_info_from_udev(&event).ok()?;
+
+    // Check mount status if storage feature is enabled
+    #[cfg(feature = "storage")]
+    {
+        if let Some(mp) = crate::storage::find_mount_point(&info.dev_path) {
+            info.mount_point = Some(mp);
+            info.state = crate::device::DeviceState::Mounted;
+        }
+    }
+
+    Some(info)
+}
+
+// ---------------------------------------------------------------------------
+// UdevMonitor — real netlink-based udev monitoring (Linux only)
+// ---------------------------------------------------------------------------
+
+/// Netlink protocol number for kernel uevents.
+#[cfg(target_os = "linux")]
+const NETLINK_KOBJECT_UEVENT: libc::c_int = 15;
+
+/// Receive buffer size for the netlink socket (256 KB).
+#[cfg(target_os = "linux")]
+const RECV_BUF_SIZE: libc::c_int = 256 * 1024;
+
+/// Parse a raw kernel uevent message (null-separated key=value pairs).
+///
+/// The kernel uevent format is:
+/// ```text
+/// action@devpath\0
+/// KEY=VALUE\0
+/// KEY=VALUE\0
+/// ...
+/// ```
+#[cfg(target_os = "linux")]
+pub fn parse_uevent(buf: &[u8]) -> Option<UdevEvent> {
+    // Split on null bytes, skip empty segments
+    let parts: Vec<&[u8]> = buf.split(|&b| b == 0).filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut action = String::new();
+    let mut devpath = String::new();
+    let mut subsystem = String::new();
+    let mut devtype = None;
+    let mut properties = HashMap::new();
+
+    let start_idx;
+
+    // First entry might be the "action@devpath" header
+    let first = std::str::from_utf8(parts[0]).ok()?;
+    if let Some(at_pos) = first.find('@') {
+        action = first[..at_pos].to_lowercase();
+        devpath = first[at_pos + 1..].to_string();
+        start_idx = 1;
+    } else if first.contains('=') {
+        // No header, start parsing key=value from index 0
+        start_idx = 0;
+    } else {
+        return None;
+    }
+
+    for &part in &parts[start_idx..] {
+        let s = std::str::from_utf8(part).ok()?;
+        if let Some((key, value)) = s.split_once('=') {
+            match key {
+                "ACTION" => action = value.to_lowercase(),
+                "DEVPATH" => devpath = value.to_string(),
+                "SUBSYSTEM" => subsystem = value.to_string(),
+                "DEVTYPE" => devtype = Some(value.to_string()),
+                _ => {
+                    properties.insert(key.to_string(), value.to_string());
+                }
+            }
+        }
+    }
+
+    if action.is_empty() || devpath.is_empty() {
+        return None;
+    }
+
+    // Derive dev_path from DEVNAME property or devpath
+    let dev_path = properties
+        .get("DEVNAME")
+        .map(|n| {
+            if n.starts_with('/') {
+                PathBuf::from(n)
+            } else {
+                PathBuf::from(format!("/dev/{}", n))
+            }
+        });
+
+    let sys_path = PathBuf::from(format!("/sys{}", devpath));
+
+    Some(UdevEvent {
+        action,
+        sys_path,
+        dev_path,
+        subsystem,
+        dev_type: devtype,
+        properties,
+    })
+}
+
+/// Convert a `UdevEvent` into a `DeviceEvent` for the event system.
+#[cfg(target_os = "linux")]
+fn udev_event_to_device_event(uevent: &UdevEvent) -> Option<DeviceEvent> {
+    let kind = match uevent.action.as_str() {
+        "add" => DeviceEventKind::Attached,
+        "remove" => DeviceEventKind::Detached,
+        "change" => DeviceEventKind::MediaChanged,
+        _ => return None,
+    };
+
+    let dev_path = uevent.dev_path.clone()?;
+    let (class, _caps) = classify_and_extract(uevent);
+    let dev_name = dev_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let id = DeviceId::new(format!("{}:{}", uevent.subsystem, dev_name));
+
+    let mut event = DeviceEvent::new(id, class, kind, dev_path);
+
+    // Attach full info for non-remove events
+    if !uevent.is_remove() && let Ok(info) = device_info_from_udev(uevent) {
+        event = event.with_info(info);
+    }
+
+    Some(event)
+}
+
+/// Real netlink-based udev monitor.
+///
+/// Listens on a `NETLINK_KOBJECT_UEVENT` socket for kernel device events
+/// and converts them into yantra's `DeviceEvent` type.
+#[cfg(target_os = "linux")]
+pub struct UdevMonitor {
+    socket_fd: std::os::unix::io::RawFd,
+    running: Arc<AtomicBool>,
+}
+
+#[cfg(target_os = "linux")]
+impl UdevMonitor {
+    /// Create a new `UdevMonitor` bound to the kernel uevent netlink group.
+    ///
+    /// Requires `CAP_NET_ADMIN` or root on some kernels. The socket is set
+    /// to `SOCK_CLOEXEC` and the receive buffer is enlarged to 256 KB.
+    pub fn new() -> Result<Self> {
+        // SAFETY: libc socket creation — no memory unsafety, just a syscall.
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_NETLINK,
+                libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+                NETLINK_KOBJECT_UEVENT,
+            )
+        };
+        if fd < 0 {
+            return Err(YantraError::Udev(format!(
+                "socket() failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+
+        // Bind to multicast group 1 (kernel events)
+        #[repr(C)]
+        struct SockaddrNl {
+            nl_family: u16,
+            nl_pad: u16,
+            nl_pid: u32,
+            nl_groups: u32,
+        }
+
+        let addr = SockaddrNl {
+            nl_family: libc::AF_NETLINK as u16,
+            nl_pad: 0,
+            nl_pid: 0, // let kernel assign
+            nl_groups: 1, // KOBJECT_UEVENT multicast group
+        };
+
+        // SAFETY: bind() with a correctly-sized sockaddr_nl.
+        let rc = unsafe {
+            libc::bind(
+                fd,
+                &addr as *const SockaddrNl as *const libc::sockaddr,
+                std::mem::size_of::<SockaddrNl>() as libc::socklen_t,
+            )
+        };
+        if rc < 0 {
+            let err = std::io::Error::last_os_error();
+            unsafe { libc::close(fd); }
+            return Err(YantraError::Udev(format!("bind() failed: {}", err)));
+        }
+
+        // Set receive buffer size
+        let buf_size: libc::c_int = RECV_BUF_SIZE;
+        // SAFETY: setsockopt with valid fd and buffer pointer.
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &buf_size as *const libc::c_int as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+
+        Ok(Self {
+            socket_fd: fd,
+            running: Arc::new(AtomicBool::new(true)),
+        })
+    }
+
+    /// Poll the netlink socket for a single uevent.
+    ///
+    /// `timeout_ms` is the poll timeout in milliseconds. Use `-1` to block
+    /// indefinitely, or `0` for non-blocking.
+    ///
+    /// Returns `Ok(Some(event))` if a valid uevent was received,
+    /// `Ok(None)` on timeout or unparseable data, and `Err` on syscall failure.
+    pub fn poll(&self, timeout_ms: i32) -> Result<Option<UdevEvent>> {
+        let mut pfd = libc::pollfd {
+            fd: self.socket_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+
+        // SAFETY: poll() on a valid fd with a correctly initialised pollfd.
+        let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+        if ret < 0 {
+            return Err(YantraError::Udev(format!(
+                "poll() failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        if ret == 0 {
+            return Ok(None); // timeout
+        }
+
+        let mut buf = vec![0u8; 8192];
+        // SAFETY: recv() into a buffer we own; the fd is valid.
+        let n = unsafe {
+            libc::recv(
+                self.socket_fd,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                0,
+            )
+        };
+        if n <= 0 {
+            return Ok(None);
+        }
+
+        Ok(parse_uevent(&buf[..n as usize]))
+    }
+
+    /// Blocking event loop — polls for events and dispatches them to the
+    /// provided `EventListener` until `stop()` is called.
+    pub fn run_with_listener(&self, listener: &dyn EventListener) -> Result<()> {
+        while self.running.load(Ordering::Relaxed) {
+            match self.poll(500)? {
+                Some(uevent) => {
+                    if let Some(dev_event) = udev_event_to_device_event(&uevent) {
+                        // Respect the listener's class filter
+                        let dominated = listener
+                            .filter()
+                            .map(|classes| classes.contains(&dev_event.device_class))
+                            .unwrap_or(true);
+
+                        if dominated {
+                            listener.on_event(&dev_event);
+                        }
+                    }
+                }
+                None => continue,
+            }
+        }
+        Ok(())
+    }
+
+    /// Signal the monitor to stop its event loop.
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::Relaxed);
+    }
+
+    /// Create a channel-based subscription. Returns a `Receiver` that yields
+    /// `DeviceEvent`s. A background thread is spawned to drive the monitor.
+    ///
+    /// The thread exits when `stop()` is called or the receiver is dropped.
+    pub fn subscribe(&self) -> std::sync::mpsc::Receiver<DeviceEvent> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let fd = self.socket_fd;
+        let running = Arc::clone(&self.running);
+
+        std::thread::spawn(move || {
+            let mut buf = vec![0u8; 8192];
+            while running.load(Ordering::Relaxed) {
+                let mut pfd = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: poll/recv on a valid fd.
+                let ret = unsafe { libc::poll(&mut pfd, 1, 500) };
+                if ret <= 0 {
+                    continue;
+                }
+                let n = unsafe {
+                    libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0)
+                };
+                if n <= 0 {
+                    continue;
+                }
+                if let Some(uevent) = parse_uevent(&buf[..n as usize])
+                    && let Some(dev_event) = udev_event_to_device_event(&uevent)
+                    && tx.send(dev_event).is_err()
+                {
+                    break; // receiver dropped
+                }
+            }
+        });
+
+        rx
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for UdevMonitor {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        // SAFETY: closing a valid file descriptor we own.
+        unsafe {
+            libc::close(self.socket_fd);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -470,5 +910,419 @@ mod tests {
         assert!(contains_bytes(b"/sys/block/loop0", b"/loop"));
         assert!(!contains_bytes(b"/sys/block/sda", b"/dm-"));
         assert!(!contains_bytes(b"", b"/dm-"));
+    }
+
+    // -----------------------------------------------------------------------
+    // read_sysfs_attr tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_read_sysfs_attr_success() {
+        let dir = std::env::temp_dir().join("yantra_test_sysfs_attr");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("vendor"), "  ATA  \n").unwrap();
+        let val = read_sysfs_attr(&dir, "vendor");
+        assert_eq!(val.as_deref(), Some("ATA"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_read_sysfs_attr_missing() {
+        let dir = std::env::temp_dir().join("yantra_test_sysfs_missing");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(read_sysfs_attr(&dir, "nonexistent").is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_read_sysfs_attr_empty_file() {
+        let dir = std::env::temp_dir().join("yantra_test_sysfs_empty");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("empty"), "").unwrap();
+        let val = read_sysfs_attr(&dir, "empty");
+        assert_eq!(val.as_deref(), Some(""));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_read_sysfs_attr_nested() {
+        let dir = std::env::temp_dir().join("yantra_test_sysfs_nested");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("device")).unwrap();
+        std::fs::write(dir.join("device/model"), "Samsung SSD\n").unwrap();
+        let val = read_sysfs_attr(&dir, "device/model");
+        assert_eq!(val.as_deref(), Some("Samsung SSD"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // enumerate_devices tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_enumerate_devices_empty_block_dir() {
+        let root = std::env::temp_dir().join("yantra_test_enum_empty");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("block")).unwrap();
+        let devices = enumerate_devices(&root).unwrap();
+        assert!(devices.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_enumerate_devices_single_disk() {
+        let root = std::env::temp_dir().join("yantra_test_enum_single");
+        let _ = std::fs::remove_dir_all(&root);
+        let sda = root.join("block/sda");
+        std::fs::create_dir_all(&sda).unwrap();
+        std::fs::write(sda.join("size"), "1953525168\n").unwrap();
+        std::fs::write(sda.join("removable"), "0\n").unwrap();
+        std::fs::write(sda.join("ro"), "0\n").unwrap();
+
+        let devices = enumerate_devices(&root).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].dev_path, PathBuf::from("/dev/sda"));
+        assert_eq!(devices[0].size_bytes, 1953525168 * 512);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_enumerate_devices_with_partitions() {
+        let root = std::env::temp_dir().join("yantra_test_enum_parts");
+        let _ = std::fs::remove_dir_all(&root);
+        let sda = root.join("block/sda");
+        let sda1 = sda.join("sda1");
+        let sda2 = sda.join("sda2");
+
+        std::fs::create_dir_all(&sda).unwrap();
+        std::fs::create_dir_all(&sda1).unwrap();
+        std::fs::create_dir_all(&sda2).unwrap();
+
+        // Mark sda1 and sda2 as partitions
+        std::fs::write(sda1.join("partition"), "1\n").unwrap();
+        std::fs::write(sda2.join("partition"), "2\n").unwrap();
+        std::fs::write(sda.join("size"), "1000\n").unwrap();
+        std::fs::write(sda1.join("size"), "500\n").unwrap();
+        std::fs::write(sda2.join("size"), "500\n").unwrap();
+
+        let devices = enumerate_devices(&root).unwrap();
+        // 1 disk + 2 partitions
+        assert_eq!(devices.len(), 3);
+
+        let names: Vec<_> = devices.iter().map(|d| d.dev_path.clone()).collect();
+        assert!(names.contains(&PathBuf::from("/dev/sda")));
+        assert!(names.contains(&PathBuf::from("/dev/sda1")));
+        assert!(names.contains(&PathBuf::from("/dev/sda2")));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_enumerate_devices_nonexistent_root() {
+        let result = enumerate_devices(Path::new("/nonexistent/fake/path"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_enumerate_devices_with_vendor_model() {
+        let root = std::env::temp_dir().join("yantra_test_enum_vendor");
+        let _ = std::fs::remove_dir_all(&root);
+        let sda = root.join("block/sda");
+        std::fs::create_dir_all(sda.join("device")).unwrap();
+        std::fs::write(sda.join("device/vendor"), "  ATA     \n").unwrap();
+        std::fs::write(sda.join("device/model"), "Samsung SSD 870\n").unwrap();
+        std::fs::write(sda.join("size"), "1000\n").unwrap();
+
+        let devices = enumerate_devices(&root).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].vendor.as_deref(), Some("ATA"));
+        assert_eq!(devices[0].model.as_deref(), Some("Samsung SSD 870"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_enumerate_devices_removable() {
+        let root = std::env::temp_dir().join("yantra_test_enum_removable");
+        let _ = std::fs::remove_dir_all(&root);
+        let sdb = root.join("block/sdb");
+        std::fs::create_dir_all(&sdb).unwrap();
+        std::fs::write(sdb.join("removable"), "1\n").unwrap();
+        std::fs::write(sdb.join("size"), "100\n").unwrap();
+
+        let devices = enumerate_devices(&root).unwrap();
+        assert_eq!(devices.len(), 1);
+        // removable=1 sets UDISKS_REMOVABLE property
+        assert!(devices[0].capabilities.contains(DeviceCapabilities::REMOVABLE));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_uevent tests (Linux only)
+    // -----------------------------------------------------------------------
+
+    #[cfg(target_os = "linux")]
+    mod uevent_tests {
+        use super::*;
+
+        /// Build a realistic kernel uevent buffer (null-separated).
+        fn build_uevent(parts: &[&str]) -> Vec<u8> {
+            let mut buf = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                buf.extend_from_slice(part.as_bytes());
+                if i < parts.len() - 1 {
+                    buf.push(0);
+                }
+            }
+            buf
+        }
+
+        #[test]
+        fn test_parse_uevent_usb_add() {
+            let buf = build_uevent(&[
+                "add@/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb",
+                "ACTION=add",
+                "DEVPATH=/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb",
+                "SUBSYSTEM=block",
+                "DEVTYPE=disk",
+                "DEVNAME=sdb",
+                "MAJOR=8",
+                "MINOR=16",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.action, "add");
+            assert_eq!(
+                event.sys_path,
+                PathBuf::from("/sys/devices/pci0000:00/usb1/1-1/1-1:1.0/host0/target0:0:0/0:0:0:0/block/sdb")
+            );
+            assert_eq!(event.dev_path, Some(PathBuf::from("/dev/sdb")));
+            assert_eq!(event.subsystem, "block");
+            assert_eq!(event.dev_type.as_deref(), Some("disk"));
+            assert_eq!(event.property("MAJOR"), Some("8"));
+            assert_eq!(event.property("MINOR"), Some("16"));
+        }
+
+        #[test]
+        fn test_parse_uevent_remove() {
+            let buf = build_uevent(&[
+                "remove@/devices/pci0000:00/usb1/1-1/block/sdb",
+                "ACTION=remove",
+                "DEVPATH=/devices/pci0000:00/usb1/1-1/block/sdb",
+                "SUBSYSTEM=block",
+                "DEVTYPE=disk",
+                "DEVNAME=sdb",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.action, "remove");
+            assert!(event.is_remove());
+        }
+
+        #[test]
+        fn test_parse_uevent_change_optical() {
+            let buf = build_uevent(&[
+                "change@/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0/block/sr0",
+                "ACTION=change",
+                "DEVPATH=/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0/block/sr0",
+                "SUBSYSTEM=block",
+                "DEVTYPE=disk",
+                "DEVNAME=sr0",
+                "ID_CDROM=1",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.action, "change");
+            assert!(event.is_change());
+            assert_eq!(event.subsystem, "block");
+            assert_eq!(event.property("ID_CDROM"), Some("1"));
+        }
+
+        #[test]
+        fn test_parse_uevent_partition() {
+            let buf = build_uevent(&[
+                "add@/devices/pci0000:00/block/sdb/sdb1",
+                "ACTION=add",
+                "DEVPATH=/devices/pci0000:00/block/sdb/sdb1",
+                "SUBSYSTEM=block",
+                "DEVTYPE=partition",
+                "DEVNAME=sdb1",
+                "PARTN=1",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.dev_type.as_deref(), Some("partition"));
+            assert_eq!(event.dev_path, Some(PathBuf::from("/dev/sdb1")));
+            assert_eq!(event.property("PARTN"), Some("1"));
+        }
+
+        #[test]
+        fn test_parse_uevent_no_header() {
+            // Some uevents may lack the header line
+            let buf = build_uevent(&[
+                "ACTION=add",
+                "DEVPATH=/devices/block/sda",
+                "SUBSYSTEM=block",
+                "DEVTYPE=disk",
+                "DEVNAME=sda",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.action, "add");
+            assert_eq!(event.sys_path, PathBuf::from("/sys/devices/block/sda"));
+        }
+
+        #[test]
+        fn test_parse_uevent_empty_buffer() {
+            assert!(parse_uevent(&[]).is_none());
+        }
+
+        #[test]
+        fn test_parse_uevent_garbage() {
+            assert!(parse_uevent(b"not a valid uevent at all").is_none());
+        }
+
+        #[test]
+        fn test_parse_uevent_missing_action() {
+            let buf = build_uevent(&[
+                "DEVPATH=/devices/block/sda",
+                "SUBSYSTEM=block",
+            ]);
+            // No ACTION and no header means no action -> None
+            assert!(parse_uevent(&buf).is_none());
+        }
+
+        #[test]
+        fn test_parse_uevent_devname_absolute_path() {
+            let buf = build_uevent(&[
+                "add@/devices/block/sda",
+                "ACTION=add",
+                "DEVPATH=/devices/block/sda",
+                "SUBSYSTEM=block",
+                "DEVNAME=/dev/sda",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.dev_path, Some(PathBuf::from("/dev/sda")));
+        }
+
+        #[test]
+        fn test_parse_uevent_all_properties_preserved() {
+            let buf = build_uevent(&[
+                "add@/devices/block/sdb",
+                "ACTION=add",
+                "DEVPATH=/devices/block/sdb",
+                "SUBSYSTEM=block",
+                "DEVTYPE=disk",
+                "ID_BUS=usb",
+                "ID_VENDOR=Kingston",
+                "ID_MODEL=DataTraveler_3.0",
+                "ID_SERIAL_SHORT=XYZ789",
+                "ID_FS_TYPE=ext4",
+                "ID_FS_LABEL=mydata",
+            ]);
+
+            let event = parse_uevent(&buf).unwrap();
+            assert_eq!(event.property("ID_BUS"), Some("usb"));
+            assert_eq!(event.property("ID_VENDOR"), Some("Kingston"));
+            assert_eq!(event.property("ID_MODEL"), Some("DataTraveler_3.0"));
+            assert_eq!(event.property("ID_SERIAL_SHORT"), Some("XYZ789"));
+            assert_eq!(event.property("ID_FS_TYPE"), Some("ext4"));
+            assert_eq!(event.property("ID_FS_LABEL"), Some("mydata"));
+        }
+
+        #[test]
+        fn test_udev_event_to_device_event_add() {
+            let mut props = HashMap::new();
+            props.insert("ID_BUS".into(), "usb".into());
+            let uevent = UdevEvent {
+                action: "add".into(),
+                sys_path: PathBuf::from("/sys/devices/block/sdb"),
+                dev_path: Some(PathBuf::from("/dev/sdb")),
+                subsystem: "block".into(),
+                dev_type: Some("disk".into()),
+                properties: props,
+            };
+
+            let dev_event = udev_event_to_device_event(&uevent).unwrap();
+            assert!(dev_event.is_attach());
+            assert_eq!(dev_event.dev_path, PathBuf::from("/dev/sdb"));
+            assert!(dev_event.device_info.is_some());
+        }
+
+        #[test]
+        fn test_udev_event_to_device_event_remove() {
+            let uevent = UdevEvent {
+                action: "remove".into(),
+                sys_path: PathBuf::from("/sys/devices/block/sdb"),
+                dev_path: Some(PathBuf::from("/dev/sdb")),
+                subsystem: "block".into(),
+                dev_type: Some("disk".into()),
+                properties: HashMap::new(),
+            };
+
+            let dev_event = udev_event_to_device_event(&uevent).unwrap();
+            assert!(dev_event.is_detach());
+            assert!(dev_event.device_info.is_none());
+        }
+
+        #[test]
+        fn test_udev_event_to_device_event_unknown_action() {
+            let uevent = UdevEvent {
+                action: "bind".into(),
+                sys_path: PathBuf::from("/sys/devices/block/sdb"),
+                dev_path: Some(PathBuf::from("/dev/sdb")),
+                subsystem: "block".into(),
+                dev_type: Some("disk".into()),
+                properties: HashMap::new(),
+            };
+            // bind/unbind are not mapped to DeviceEventKind
+            assert!(udev_event_to_device_event(&uevent).is_none());
+        }
+
+        #[test]
+        fn test_udev_event_to_device_event_no_devpath() {
+            let uevent = UdevEvent {
+                action: "add".into(),
+                sys_path: PathBuf::from("/sys/devices/input0"),
+                dev_path: None,
+                subsystem: "input".into(),
+                dev_type: None,
+                properties: HashMap::new(),
+            };
+            assert!(udev_event_to_device_event(&uevent).is_none());
+        }
+
+        // Hardware tests — require root/CAP_NET_ADMIN
+
+        #[test]
+        #[ignore]
+        fn test_udev_monitor_create() {
+            let monitor = UdevMonitor::new().expect("failed to create UdevMonitor");
+            assert!(monitor.socket_fd >= 0);
+            monitor.stop();
+        }
+
+        #[test]
+        #[ignore]
+        fn test_udev_monitor_poll_timeout() {
+            let monitor = UdevMonitor::new().expect("failed to create UdevMonitor");
+            // Non-blocking poll should return None immediately
+            let result = monitor.poll(0).expect("poll failed");
+            assert!(result.is_none());
+            monitor.stop();
+        }
+
+        #[test]
+        #[ignore]
+        fn test_udev_monitor_subscribe_and_stop() {
+            let monitor = UdevMonitor::new().expect("failed to create UdevMonitor");
+            let _rx = monitor.subscribe();
+            // Let it run briefly
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            monitor.stop();
+            // Should wind down without hanging
+        }
     }
 }

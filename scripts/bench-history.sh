@@ -20,7 +20,7 @@ if [ ! -f "$HISTORY_FILE" ]; then
 fi
 
 echo "┌─────────────────────────────────────────────┐"
-echo "│  yantra benchmark suite                     │"
+echo "│  yukti benchmark suite                     │"
 echo "├─────────────────────────────────────────────┤"
 echo "│  commit : $COMMIT                              │"
 echo "│  branch : $BRANCH                              │"
@@ -29,7 +29,7 @@ echo "└───────────────────────�
 echo ""
 
 # Run benchmarks and capture output, stripping ANSI escape codes
-BENCH_OUTPUT=$(cargo bench --bench yantra_bench 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+BENCH_OUTPUT=$(cargo bench --bench yukti_bench 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
 
 # Parse criterion output into arrays
 declare -a BENCH_NAMES=()

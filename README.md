@@ -1,11 +1,11 @@
-# Yantra
+# Yukti
 
-> **Yantra** (Sanskrit: यन्त्र — device, instrument, machine) — device abstraction layer for AGNOS
+> **Yukti** (Sanskrit: यन्त्र — device, instrument, machine) — device abstraction layer for AGNOS
 
-[![CI](https://github.com/MacCracken/yantra/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/yantra/actions/workflows/ci.yml)
+[![CI](https://github.com/MacCracken/yukti/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/yukti/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![crates.io](https://img.shields.io/crates/v/yantra.svg)](https://crates.io/crates/yantra)
-[![docs.rs](https://docs.rs/yantra/badge.svg)](https://docs.rs/yantra)
+[![crates.io](https://img.shields.io/crates/v/yukti.svg)](https://crates.io/crates/yukti)
+[![docs.rs](https://docs.rs/yukti/badge.svg)](https://docs.rs/yukti)
 
 Unified API for detecting, monitoring, and managing hardware devices on Linux — USB storage, optical drives, block devices, and udev hotplug events.
 
@@ -28,7 +28,7 @@ Optional: `ai` (daimon/hoosh integration, requires `reqwest`, `tokio`).
 
 ```toml
 [dependencies]
-yantra = "0.22"
+yukti = "0.22"
 ```
 
 ## Quick Start
@@ -36,7 +36,7 @@ yantra = "0.22"
 ### Enumerate Devices
 
 ```rust
-use yantra::{LinuxDeviceManager, Device};
+use yukti::{LinuxDeviceManager, Device};
 
 let mgr = LinuxDeviceManager::new();
 for dev in mgr.enumerate().unwrap() {
@@ -47,7 +47,7 @@ for dev in mgr.enumerate().unwrap() {
 ### Monitor Hotplug Events
 
 ```rust
-use yantra::{LinuxDeviceManager, Device};
+use yukti::{LinuxDeviceManager, Device};
 
 let mgr = LinuxDeviceManager::new();
 let rx = mgr.start_monitor().unwrap();
@@ -60,7 +60,7 @@ for event in rx.iter() {
 ### Mount a Device
 
 ```rust
-use yantra::storage::{MountOptions, mount};
+use yukti::storage::{MountOptions, mount};
 use std::path::Path;
 
 let result = mount(
@@ -76,7 +76,7 @@ println!("Mounted {} at {}", result.fs_type, result.mount_point.display());
 ### Optical Drive
 
 ```rust
-use yantra::optical::{open_tray, read_toc, is_dvd_video};
+use yukti::optical::{open_tray, read_toc, is_dvd_video};
 use std::path::Path;
 
 let dev = Path::new("/dev/sr0");
@@ -89,8 +89,8 @@ open_tray(dev).unwrap();
 ### Filesystem & Device Queries
 
 ```rust
-use yantra::storage::{Filesystem, filesystem_usage};
-use yantra::device::{query_permissions, query_device_health};
+use yukti::storage::{Filesystem, filesystem_usage};
+use yukti::device::{query_permissions, query_device_health};
 use std::path::Path;
 
 let fs: Filesystem = "ext4".into();
@@ -115,7 +115,7 @@ if let Some(temp) = health.temperature_celsius {
 | `optical` | `DiscType` (10), `TrayState`, `DiscToc`, `open_tray()`, `close_tray()`, `drive_status()`, `read_toc()`, `is_dvd_video()` |
 | `udev` | `UdevEvent`, `UdevMonitor` (netlink, filtered, bounded), `classify_device()`, `enumerate_devices()` |
 | `linux` | `LinuxDeviceManager` — `Device` impl, `mount()`, `unmount()`, `eject()`, `start_monitor()`, `dispatch_event()` |
-| `error` | `YantraError` (15 variants) |
+| `error` | `YuktiError` (15 variants) |
 
 ## Feature Flags
 

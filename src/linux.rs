@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 use crate::device::{Device, DeviceId, DeviceInfo};
-use crate::error::{Result, YantraError};
+use crate::error::{Result, YuktiError};
 use crate::event::{DeviceEvent, EventListener};
 
 #[cfg(feature = "storage")]
@@ -65,7 +65,7 @@ impl LinuxDeviceManager {
         let mut guard = self.monitor.lock().unwrap();
         if guard.is_some() {
             warn!("start_monitor called but monitor already running");
-            return Err(YantraError::Udev("monitor already running".into()));
+            return Err(YuktiError::Udev("monitor already running".into()));
         }
         info!("starting udev hotplug monitor");
         let mon = UdevMonitor::new()?;
@@ -92,7 +92,7 @@ impl LinuxDeviceManager {
             Arc::clone(
                 devices
                     .get(id)
-                    .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?,
+                    .ok_or_else(|| YuktiError::DeviceNotFound { id: id.to_string() })?,
             )
         };
         let result = crate::storage::mount(&info.dev_path, options)?;
@@ -116,13 +116,13 @@ impl LinuxDeviceManager {
             Arc::clone(
                 devices
                     .get(id)
-                    .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?,
+                    .ok_or_else(|| YuktiError::DeviceNotFound { id: id.to_string() })?,
             )
         };
         let mount_point = info
             .mount_point
             .clone()
-            .ok_or_else(|| YantraError::UnmountFailed {
+            .ok_or_else(|| YuktiError::UnmountFailed {
                 mount_point: info.dev_path.clone(),
                 reason: "device is not mounted".into(),
             })?;
@@ -147,7 +147,7 @@ impl LinuxDeviceManager {
             Arc::clone(
                 devices
                     .get(id)
-                    .ok_or_else(|| YantraError::DeviceNotFound { id: id.to_string() })?,
+                    .ok_or_else(|| YuktiError::DeviceNotFound { id: id.to_string() })?,
             )
         };
 
@@ -221,7 +221,7 @@ impl Device for LinuxDeviceManager {
         let all = self.enumerate()?;
         all.into_iter().find(|d| d.id == *id).ok_or_else(|| {
             error!(id = %id, "device not found after refresh");
-            YantraError::DeviceNotFound { id: id.to_string() }
+            YuktiError::DeviceNotFound { id: id.to_string() }
         })
     }
 }
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_enumerate_empty_sysfs() {
-        let dir = std::env::temp_dir().join("yantra_test_empty_sysfs");
+        let dir = std::env::temp_dir().join("yukti_test_empty_sysfs");
         let _ = std::fs::create_dir_all(dir.join("block"));
         let mgr = LinuxDeviceManager::with_sysfs_root(dir.clone());
         let devices = mgr.enumerate().unwrap();

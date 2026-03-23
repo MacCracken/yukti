@@ -6,7 +6,7 @@ use std::path::Path;
 #[cfg(target_os = "linux")]
 use tracing::{debug, error, info};
 
-use crate::error::{Result, YantraError};
+use crate::error::{Result, YuktiError};
 
 /// ENOMEDIUM errno value (not in all libc versions).
 #[cfg(target_os = "linux")]
@@ -84,35 +84,35 @@ fn open_optical_device(dev_path: &Path) -> Result<std::fs::File> {
         .map_err(|e| {
             let raw = e.raw_os_error().unwrap_or(0);
             match raw {
-                libc::EACCES | libc::EPERM => YantraError::PermissionDenied {
+                libc::EACCES | libc::EPERM => YuktiError::PermissionDenied {
                     operation: "open".into(),
                     path: dev_path.to_path_buf(),
                 },
-                ENOMEDIUM => YantraError::NoMedia {
+                ENOMEDIUM => YuktiError::NoMedia {
                     device: dev_path.display().to_string(),
                 },
-                _ => YantraError::Io(e),
+                _ => YuktiError::Io(e),
             }
         })
 }
 
 // ---------------------------------------------------------------------------
-// Linux helper: map ioctl errno to YantraError
+// Linux helper: map ioctl errno to YuktiError
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "linux")]
-fn map_ioctl_error(dev_path: &Path, op: &str) -> YantraError {
+fn map_ioctl_error(dev_path: &Path, op: &str) -> YuktiError {
     let err = std::io::Error::last_os_error();
     let raw = err.raw_os_error().unwrap_or(0);
     match raw {
-        libc::EACCES | libc::EPERM => YantraError::PermissionDenied {
+        libc::EACCES | libc::EPERM => YuktiError::PermissionDenied {
             operation: op.into(),
             path: dev_path.to_path_buf(),
         },
-        ENOMEDIUM => YantraError::NoMedia {
+        ENOMEDIUM => YuktiError::NoMedia {
             device: dev_path.display().to_string(),
         },
-        _ => YantraError::TrayFailed {
+        _ => YuktiError::TrayFailed {
             reason: format!("{op}: {err}"),
         },
     }
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn test_is_dvd_video_uppercase() {
-        let dir = std::env::temp_dir().join("yantra_test_dvd_upper");
+        let dir = std::env::temp_dir().join("yukti_test_dvd_upper");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("VIDEO_TS")).unwrap();
         assert!(is_dvd_video(&dir));
@@ -712,7 +712,7 @@ mod tests {
 
     #[test]
     fn test_is_dvd_video_lowercase() {
-        let dir = std::env::temp_dir().join("yantra_test_dvd_lower");
+        let dir = std::env::temp_dir().join("yukti_test_dvd_lower");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("video_ts")).unwrap();
         assert!(is_dvd_video(&dir));
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn test_is_dvd_video_absent() {
-        let dir = std::env::temp_dir().join("yantra_test_dvd_absent");
+        let dir = std::env::temp_dir().join("yukti_test_dvd_absent");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!is_dvd_video(&dir));
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_is_dvd_video_file_not_dir() {
-        let dir = std::env::temp_dir().join("yantra_test_dvd_file");
+        let dir = std::env::temp_dir().join("yukti_test_dvd_file");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // Create a file named VIDEO_TS, not a directory
@@ -741,7 +741,7 @@ mod tests {
 
     #[test]
     fn test_is_dvd_video_nonexistent_mount() {
-        let dir = Path::new("/nonexistent/yantra_test_dvd_video");
+        let dir = Path::new("/nonexistent/yukti_test_dvd_video");
         assert!(!is_dvd_video(dir));
     }
 
@@ -829,7 +829,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_open_device_nonexistent() {
-        let dev = std::path::Path::new("/dev/sr_nonexistent_yantra_test");
+        let dev = std::path::Path::new("/dev/sr_nonexistent_yukti_test");
         let result = open_optical_device(dev);
         assert!(result.is_err());
     }

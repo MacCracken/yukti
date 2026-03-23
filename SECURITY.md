@@ -2,7 +2,7 @@
 
 ## Scope
 
-Yantra is a Linux device abstraction layer that interacts with hardware via sysfs, `/proc/mounts`, netlink sockets, and `libc` syscalls (mount, umount2, ioctl). It requires elevated privileges for mount/eject operations.
+Yukti is a Linux device abstraction layer that interacts with hardware via sysfs, `/proc/mounts`, netlink sockets, and `libc` syscalls (mount, umount2, ioctl). It requires elevated privileges for mount/eject operations.
 
 ## Attack Surface
 
@@ -37,7 +37,7 @@ Please report security issues to **security@agnos.dev**.
 
 - `unsafe` code limited to `libc` syscalls and ioctls — each block has a `// SAFETY:` comment
 - All public types are `Send + Sync` where applicable
-- Permission errors surface as `YantraError::PermissionDenied`, never silently ignored
+- Permission errors surface as `YuktiError::PermissionDenied`, never silently ignored
 - No network I/O in core library (`ai` feature is opt-in)
 - Structured logging via `tracing` — no `println!`
 - Hardware-dependent tests isolated with `#[ignore]`

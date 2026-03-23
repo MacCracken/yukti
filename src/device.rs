@@ -737,7 +737,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_query_device_health_nonexistent() {
-        let health = query_device_health("nonexistent_yantra_test_device");
+        let health = query_device_health("nonexistent_yukti_test_device");
         assert!(health.rotational.is_none());
         assert!(health.temperature_celsius.is_none());
         assert!(health.scheduler.is_none());
@@ -746,13 +746,13 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_query_device_health_fake_sysfs() {
-        let dir = std::env::temp_dir().join("yantra_test_health_sysfs");
+        let dir = std::env::temp_dir().join("yukti_test_health_sysfs");
         let _ = std::fs::remove_dir_all(&dir);
 
         // We can't easily test query_device_health with a fake sysfs root
         // because it hardcodes /sys/block/. Instead, verify the function
         // handles missing paths gracefully.
-        let health = query_device_health("yantra_fake_block_device_12345");
+        let health = query_device_health("yukti_fake_block_device_12345");
         assert!(health.rotational.is_none());
         assert!(health.temperature_celsius.is_none());
         assert!(health.scheduler.is_none());
@@ -786,7 +786,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_query_permissions_nonexistent() {
-        let perms = query_permissions(std::path::Path::new("/dev/yantra_nonexistent_device_xyz"));
+        let perms = query_permissions(std::path::Path::new("/dev/yukti_nonexistent_device_xyz"));
         assert!(perms.is_none());
     }
 

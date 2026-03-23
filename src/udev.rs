@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use crate::device::{DeviceCapabilities, DeviceClass, DeviceId, DeviceInfo};
-use crate::error::{Result, YantraError};
+use crate::error::{Result, YuktiError};
 #[cfg(target_os = "linux")]
 use crate::event::{DeviceEvent, DeviceEventKind, EventListener};
 
@@ -154,7 +154,7 @@ pub fn device_info_from_udev(event: &UdevEvent) -> Result<DeviceInfo> {
     let dev_path = event
         .dev_path
         .clone()
-        .ok_or_else(|| YantraError::Udev("no dev_path in event".into()))?;
+        .ok_or_else(|| YuktiError::Udev("no dev_path in event".into()))?;
 
     let (class, capabilities) = classify_and_extract(event);
     let id = DeviceId::new(format!(
@@ -233,7 +233,7 @@ pub fn enumerate_devices(sysfs_root: &Path) -> Result<Vec<DeviceInfo>> {
     let block_dir = sysfs_root.join("block");
     debug!(path = %block_dir.display(), "enumerating block devices");
     let entries = std::fs::read_dir(&block_dir)
-        .map_err(|e| YantraError::Udev(format!("failed to read {}: {}", block_dir.display(), e)))?;
+        .map_err(|e| YuktiError::Udev(format!("failed to read {}: {}", block_dir.display(), e)))?;
 
     let mut devices = Vec::new();
 
@@ -456,7 +456,7 @@ fn udev_event_to_device_event(uevent: &UdevEvent) -> Option<DeviceEvent> {
 /// Real netlink-based udev monitor.
 ///
 /// Listens on a `NETLINK_KOBJECT_UEVENT` socket for kernel device events
-/// and converts them into yantra's `DeviceEvent` type.
+/// and converts them into yukti's `DeviceEvent` type.
 #[cfg(target_os = "linux")]
 pub struct UdevMonitor {
     socket_fd: std::os::unix::io::RawFd,
@@ -486,7 +486,7 @@ impl UdevMonitor {
             )
         };
         if fd < 0 {
-            return Err(YantraError::UdevSocket(format!(
+            return Err(YuktiError::UdevSocket(format!(
                 "socket() failed: {}",
                 std::io::Error::last_os_error()
             )));
@@ -521,7 +521,7 @@ impl UdevMonitor {
             unsafe {
                 libc::close(fd);
             }
-            return Err(YantraError::UdevSocket(format!("bind() failed: {}", err)));
+            return Err(YuktiError::UdevSocket(format!("bind() failed: {}", err)));
         }
 
         // Set receive buffer size
@@ -568,7 +568,7 @@ impl UdevMonitor {
         // SAFETY: poll() on a valid fd with a correctly initialised pollfd.
         let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
         if ret < 0 {
-            return Err(YantraError::UdevSocket(format!(
+            return Err(YuktiError::UdevSocket(format!(
                 "poll() failed: {}",
                 std::io::Error::last_os_error()
             )));
@@ -1238,7 +1238,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_read_sysfs_attr_success() {
-        let dir = std::env::temp_dir().join("yantra_test_sysfs_attr");
+        let dir = std::env::temp_dir().join("yukti_test_sysfs_attr");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("vendor"), "  ATA  \n").unwrap();
@@ -1249,7 +1249,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_read_sysfs_attr_missing() {
-        let dir = std::env::temp_dir().join("yantra_test_sysfs_missing");
+        let dir = std::env::temp_dir().join("yukti_test_sysfs_missing");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert!(read_sysfs_attr(&dir, "nonexistent").is_none());
@@ -1258,7 +1258,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_read_sysfs_attr_empty_file() {
-        let dir = std::env::temp_dir().join("yantra_test_sysfs_empty");
+        let dir = std::env::temp_dir().join("yukti_test_sysfs_empty");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("empty"), "").unwrap();
@@ -1269,7 +1269,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_read_sysfs_attr_nested() {
-        let dir = std::env::temp_dir().join("yantra_test_sysfs_nested");
+        let dir = std::env::temp_dir().join("yukti_test_sysfs_nested");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("device")).unwrap();
         std::fs::write(dir.join("device/model"), "Samsung SSD\n").unwrap();
@@ -1284,7 +1284,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_enumerate_devices_empty_block_dir() {
-        let root = std::env::temp_dir().join("yantra_test_enum_empty");
+        let root = std::env::temp_dir().join("yukti_test_enum_empty");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("block")).unwrap();
         let devices = enumerate_devices(&root).unwrap();
@@ -1294,7 +1294,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_enumerate_devices_single_disk() {
-        let root = std::env::temp_dir().join("yantra_test_enum_single");
+        let root = std::env::temp_dir().join("yukti_test_enum_single");
         let _ = std::fs::remove_dir_all(&root);
         let sda = root.join("block/sda");
         std::fs::create_dir_all(&sda).unwrap();
@@ -1311,7 +1311,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_enumerate_devices_with_partitions() {
-        let root = std::env::temp_dir().join("yantra_test_enum_parts");
+        let root = std::env::temp_dir().join("yukti_test_enum_parts");
         let _ = std::fs::remove_dir_all(&root);
         let sda = root.join("block/sda");
         let sda1 = sda.join("sda1");
@@ -1347,7 +1347,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_enumerate_devices_with_vendor_model() {
-        let root = std::env::temp_dir().join("yantra_test_enum_vendor");
+        let root = std::env::temp_dir().join("yukti_test_enum_vendor");
         let _ = std::fs::remove_dir_all(&root);
         let sda = root.join("block/sda");
         std::fs::create_dir_all(sda.join("device")).unwrap();
@@ -1364,7 +1364,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_enumerate_devices_removable() {
-        let root = std::env::temp_dir().join("yantra_test_enum_removable");
+        let root = std::env::temp_dir().join("yukti_test_enum_removable");
         let _ = std::fs::remove_dir_all(&root);
         let sdb = root.join("block/sdb");
         std::fs::create_dir_all(&sdb).unwrap();
@@ -1445,7 +1445,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_sysfs_usb_ids_populated() {
-        let root = std::env::temp_dir().join("yantra_test_sysfs_usb_ids");
+        let root = std::env::temp_dir().join("yukti_test_sysfs_usb_ids");
         let _ = std::fs::remove_dir_all(&root);
         let sdb = root.join("block/sdb");
         std::fs::create_dir_all(sdb.join("device")).unwrap();

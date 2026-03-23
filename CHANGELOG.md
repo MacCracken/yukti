@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LinuxDeviceManager::mount()`, `unmount()`, `eject()` by device ID with state tracking
 - `LinuxDeviceManager::start_monitor()` / `stop_monitor()` — background hotplug monitoring
 - `LinuxDeviceManager::dispatch_event()` — listener dispatch with class-based filtering
-- `error` module: `YantraError` with 15 variants including `AlreadyMounted`, `Timeout`, `UdevSocket`, `UdevParse`
+- `error` module: `YuktiError` with 15 variants including `AlreadyMounted`, `Timeout`, `UdevSocket`, `UdevParse`
 - `From<&str>` and `From<String>` for `DeviceId` and `Filesystem`
 - `#[non_exhaustive]` on all 9 public enums
 - `tracing` instrumentation on all I/O operations (mount, unmount, eject, tray, monitor, enumerate)
@@ -52,5 +52,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/detect.rs` — device detection, filesystem parsing, disc type detection
 - 175 tests (12 hardware tests `#[ignore]`d), clippy clean with `-D warnings`
 
-[Unreleased]: https://github.com/MacCracken/yantra/compare/v0.22.3...HEAD
-[0.22.3]: https://github.com/MacCracken/yantra/releases/tag/v0.22.3
+[Unreleased]: https://github.com/MacCracken/yukti/compare/v0.22.3...HEAD
+[0.22.3]: https://github.com/MacCracken/yukti/releases/tag/v0.22.3

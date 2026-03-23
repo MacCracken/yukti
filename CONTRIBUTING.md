@@ -1,6 +1,6 @@
-# Contributing to Yantra
+# Contributing to Yukti
 
-Thank you for your interest in contributing to Yantra.
+Thank you for your interest in contributing to Yukti.
 
 ## Development Workflow
 

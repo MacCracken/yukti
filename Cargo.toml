@@ -1,14 +1,14 @@
 [package]
-name = "yantra"
+name = "yukti"
 version = "0.22.3"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-only"
 description = "Device abstraction layer for AGNOS — USB, optical, block devices, udev hotplug"
-homepage = "https://github.com/MacCracken/yantra"
-repository = "https://github.com/MacCracken/yantra"
+homepage = "https://github.com/MacCracken/yukti"
+repository = "https://github.com/MacCracken/yukti"
 readme = "README.md"
-documentation = "https://docs.rs/yantra"
+documentation = "https://docs.rs/yukti"
 keywords = ["device", "usb", "udev", "hotplug", "hardware"]
 categories = ["hardware-support", "os"]
 exclude = [".claude/", ".github/", "bench-history.csv", "BENCHMARKS.md", "docs/", "scripts/"]
@@ -40,7 +40,7 @@ tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
-name = "yantra_bench"
+name = "yukti_bench"
 harness = false
 required-features = ["udev", "storage", "optical"]
 

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 use crate::device::{DeviceId, DeviceInfo};
-use crate::error::{Result, YantraError};
+use crate::error::{Result, YuktiError};
 
 /// Filesystem type detected from a device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -153,14 +153,14 @@ pub fn filesystem_usage(mount_point: &Path) -> Result<FilesystemUsage> {
     use std::os::unix::ffi::OsStrExt;
 
     let c_path = CString::new(mount_point.as_os_str().as_bytes())
-        .map_err(|e| YantraError::Parse(format!("invalid mount point path: {e}")))?;
+        .map_err(|e| YuktiError::Parse(format!("invalid mount point path: {e}")))?;
 
     let mut stat: std::mem::MaybeUninit<libc::statvfs> = std::mem::MaybeUninit::uninit();
     // SAFETY: statvfs writes into the provided buffer; the path is a valid CString.
     let ret = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
     if ret != 0 {
         let err = std::io::Error::last_os_error();
-        return Err(YantraError::Io(err));
+        return Err(YuktiError::Io(err));
     }
     // SAFETY: statvfs returned 0, so the struct is fully initialised.
     let stat = unsafe { stat.assume_init() };
@@ -364,7 +364,7 @@ pub fn is_mounted(dev_path: &Path) -> bool {
 pub fn validate_mount_point(path: &Path) -> Result<()> {
     // Must be absolute
     if !path.is_absolute() {
-        return Err(YantraError::MountFailed {
+        return Err(YuktiError::MountFailed {
             device: String::new(),
             reason: format!("mount point must be absolute: {}", path.display()),
         });
@@ -372,7 +372,7 @@ pub fn validate_mount_point(path: &Path) -> Result<()> {
     // Must not be a system directory
     for f in FORBIDDEN_MOUNTS {
         if path == Path::new(f) {
-            return Err(YantraError::MountFailed {
+            return Err(YuktiError::MountFailed {
                 device: String::new(),
                 reason: format!("cannot mount on system directory: {f}"),
             });
@@ -415,7 +415,7 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
     use std::os::unix::ffi::OsStrExt;
 
     if let Some(mp) = find_mount_point(dev_path) {
-        return Err(YantraError::AlreadyMounted {
+        return Err(YuktiError::AlreadyMounted {
             device: dev_path.display().to_string(),
             mount_point: mp,
         });
@@ -442,7 +442,7 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
 
     // Create mount point directory if needed
     if !mount_point.exists() {
-        std::fs::create_dir_all(&mount_point).map_err(|e| YantraError::MountFailed {
+        std::fs::create_dir_all(&mount_point).map_err(|e| YuktiError::MountFailed {
             device: dev_str.clone(),
             reason: format!("failed to create mount point: {e}"),
         })?;
@@ -451,12 +451,12 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
     let flags = parse_mount_flags(&options.options, options.read_only);
 
     let c_source =
-        CString::new(dev_path.as_os_str().as_bytes()).map_err(|e| YantraError::MountFailed {
+        CString::new(dev_path.as_os_str().as_bytes()).map_err(|e| YuktiError::MountFailed {
             device: dev_str.clone(),
             reason: format!("invalid device path: {e}"),
         })?;
     let c_target =
-        CString::new(mount_point.as_os_str().as_bytes()).map_err(|e| YantraError::MountFailed {
+        CString::new(mount_point.as_os_str().as_bytes()).map_err(|e| YuktiError::MountFailed {
             device: dev_str.clone(),
             reason: format!("invalid mount point: {e}"),
         })?;
@@ -473,7 +473,7 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
         None
     } else {
         Some(
-            CString::new(data_str.as_bytes()).map_err(|e| YantraError::MountFailed {
+            CString::new(data_str.as_bytes()).map_err(|e| YuktiError::MountFailed {
                 device: dev_str.clone(),
                 reason: format!("invalid mount data: {e}"),
             })?,
@@ -545,20 +545,20 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
     }
 }
 
-/// Map errno from mount syscall to a YantraError.
+/// Map errno from mount syscall to a YuktiError.
 #[cfg(target_os = "linux")]
-fn map_mount_errno(errno: i32, device: &str) -> YantraError {
+fn map_mount_errno(errno: i32, device: &str) -> YuktiError {
     match errno {
-        libc::EPERM | libc::EACCES => YantraError::PermissionDenied {
+        libc::EPERM | libc::EACCES => YuktiError::PermissionDenied {
             operation: "mount".into(),
             path: PathBuf::from(device),
         },
-        libc::EBUSY => YantraError::DeviceBusy {
+        libc::EBUSY => YuktiError::DeviceBusy {
             path: PathBuf::from(device),
         },
         _ => {
             let err = std::io::Error::from_raw_os_error(errno);
-            YantraError::MountFailed {
+            YuktiError::MountFailed {
                 device: device.to_string(),
                 reason: err.to_string(),
             }
@@ -566,20 +566,20 @@ fn map_mount_errno(errno: i32, device: &str) -> YantraError {
     }
 }
 
-/// Map errno from umount syscall to a YantraError.
+/// Map errno from umount syscall to a YuktiError.
 #[cfg(target_os = "linux")]
-fn map_umount_errno(errno: i32, mount_point: &Path) -> YantraError {
+fn map_umount_errno(errno: i32, mount_point: &Path) -> YuktiError {
     match errno {
-        libc::EPERM | libc::EACCES => YantraError::PermissionDenied {
+        libc::EPERM | libc::EACCES => YuktiError::PermissionDenied {
             operation: "unmount".into(),
             path: mount_point.to_path_buf(),
         },
-        libc::EBUSY => YantraError::DeviceBusy {
+        libc::EBUSY => YuktiError::DeviceBusy {
             path: mount_point.to_path_buf(),
         },
         _ => {
             let err = std::io::Error::from_raw_os_error(errno);
-            YantraError::UnmountFailed {
+            YuktiError::UnmountFailed {
                 mount_point: mount_point.to_path_buf(),
                 reason: err.to_string(),
             }
@@ -599,7 +599,7 @@ pub fn unmount(mount_point: &Path) -> Result<()> {
     info!(mount_point = %mount_point.display(), "unmounting");
 
     let c_target = CString::new(mount_point.as_os_str().as_bytes()).map_err(|e| {
-        YantraError::UnmountFailed {
+        YuktiError::UnmountFailed {
             mount_point: mount_point.to_path_buf(),
             reason: format!("invalid mount point path: {e}"),
         }
@@ -691,17 +691,16 @@ pub fn eject(dev_path: &Path) -> Result<()> {
     if dev_name.starts_with("sr") {
         debug!(device = %dev_str, "optical drive detected, using CDROMEJECT ioctl");
         // Optical drive — use CDROMEJECT ioctl
-        let c_path = CString::new(dev_path.as_os_str().as_bytes()).map_err(|e| {
-            YantraError::EjectFailed {
+        let c_path =
+            CString::new(dev_path.as_os_str().as_bytes()).map_err(|e| YuktiError::EjectFailed {
                 device: dev_str.clone(),
                 reason: format!("invalid device path: {e}"),
-            }
-        })?;
+            })?;
 
         // SAFETY: open() with a valid NUL-terminated CString path and read-only non-blocking flags.
         let raw_fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
         if raw_fd < 0 {
-            return Err(YantraError::EjectFailed {
+            return Err(YuktiError::EjectFailed {
                 device: dev_str,
                 reason: std::io::Error::last_os_error().to_string(),
             });
@@ -711,7 +710,7 @@ pub fn eject(dev_path: &Path) -> Result<()> {
         // SAFETY: CDROMEJECT ioctl on a valid fd owned by OwnedFd; no pointer args.
         let ret = unsafe { libc::ioctl(fd.0, CDROMEJECT, 0) };
         if ret != 0 {
-            return Err(YantraError::EjectFailed {
+            return Err(YuktiError::EjectFailed {
                 device: dev_str,
                 reason: std::io::Error::last_os_error().to_string(),
             });
@@ -723,7 +722,7 @@ pub fn eject(dev_path: &Path) -> Result<()> {
         debug!(device = %dev_str, sysfs_path = %delete_path, "USB/block device, writing to sysfs delete");
         std::fs::write(&delete_path, b"1").map_err(|e| {
             error!(device = %dev_str, sysfs_path = %delete_path, error = %e, "sysfs delete failed");
-            YantraError::EjectFailed {
+            YuktiError::EjectFailed {
                 device: dev_str,
                 reason: format!("failed to write to {delete_path}: {e}"),
             }
@@ -1128,7 +1127,7 @@ mod tests {
     fn test_mount_real_device() {
         // Requires root and a real device at /dev/sdb1
         let opts = MountOptions {
-            mount_point: Some(PathBuf::from("/tmp/yantra_test_mount")),
+            mount_point: Some(PathBuf::from("/tmp/yukti_test_mount")),
             read_only: true,
             options: vec!["nosuid".into(), "nodev".into()],
             fs_type: Some("vfat".into()),
@@ -1143,8 +1142,8 @@ mod tests {
     #[test]
     #[ignore]
     fn test_unmount_real_device() {
-        // Requires a mounted filesystem at /tmp/yantra_test_mount
-        let result = unmount(Path::new("/tmp/yantra_test_mount"));
+        // Requires a mounted filesystem at /tmp/yukti_test_mount
+        let result = unmount(Path::new("/tmp/yukti_test_mount"));
         // We don't assert success — just that it doesn't panic
         let _ = result;
     }

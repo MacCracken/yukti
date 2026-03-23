@@ -1,6 +1,6 @@
-//! Yantra — Device abstraction layer for AGNOS
+//! Yukti — Device abstraction layer for AGNOS
 //!
-//! Sanskrit: यन्त्र (yantra) — device, instrument, machine
+//! Sanskrit: यन्त्र (yukti) — device, instrument, machine
 //!
 //! Provides a unified API for detecting, monitoring, and managing hardware
 //! devices: USB storage, optical drives, block devices, and udev hotplug events.
@@ -35,7 +35,7 @@ pub use device::{
     Device, DeviceCapabilities, DeviceCapability, DeviceClass, DeviceHealth, DeviceId, DeviceInfo,
     DevicePermissions, DeviceState,
 };
-pub use error::YantraError;
+pub use error::YuktiError;
 pub use event::{DeviceEvent, DeviceEventKind, EventListener};
 
 #[cfg(target_os = "linux")]

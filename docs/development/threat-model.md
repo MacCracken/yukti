@@ -2,12 +2,12 @@
 
 ## Trust Boundaries
 
-Yantra operates at the **library + kernel boundary**. It trusts the calling application to:
+Yukti operates at the **library + kernel boundary**. It trusts the calling application to:
 - Only mount/eject devices the user has authorized
 - Install a `tracing` subscriber if logging is desired
 - Manage listener lifecycle (avoid unbounded listener lists)
 
-Yantra does NOT trust:
+Yukti does NOT trust:
 - Contents of `/proc/mounts` (parsed defensively with bounded field splitting)
 - Sysfs attribute values (read as `Option<String>`, never unwrapped)
 - Netlink uevent messages (parsed with fallback to `None` on malformed data)

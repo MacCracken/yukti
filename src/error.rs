@@ -1,11 +1,11 @@
-//! Error types for yantra.
+//! Error types for yukti.
 
 use std::path::PathBuf;
 
-/// All errors that yantra can produce.
+/// All errors that yukti can produce.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum YantraError {
+pub enum YuktiError {
     #[error("device not found: {id}")]
     DeviceNotFound { id: String },
 
@@ -61,7 +61,7 @@ pub enum YantraError {
     Parse(String),
 }
 
-pub type Result<T> = std::result::Result<T, YantraError>;
+pub type Result<T> = std::result::Result<T, YuktiError>;
 
 #[cfg(test)]
 mod tests {
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn test_device_not_found() {
-        let e = YantraError::DeviceNotFound {
+        let e = YuktiError::DeviceNotFound {
             id: "usb-001".into(),
         };
         assert!(e.to_string().contains("usb-001"));
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_device_busy() {
-        let e = YantraError::DeviceBusy {
+        let e = YuktiError::DeviceBusy {
             path: PathBuf::from("/dev/sdb1"),
         };
         assert!(e.to_string().contains("/dev/sdb1"));
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_mount_failed() {
-        let e = YantraError::MountFailed {
+        let e = YuktiError::MountFailed {
             device: "/dev/sdb1".into(),
             reason: "bad superblock".into(),
         };
@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn test_unmount_failed() {
-        let e = YantraError::UnmountFailed {
+        let e = YuktiError::UnmountFailed {
             mount_point: PathBuf::from("/mnt/usb"),
             reason: "device busy".into(),
         };
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_eject_failed() {
-        let e = YantraError::EjectFailed {
+        let e = YuktiError::EjectFailed {
             device: "/dev/sr0".into(),
             reason: "tray locked".into(),
         };
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_tray_failed() {
-        let e = YantraError::TrayFailed {
+        let e = YuktiError::TrayFailed {
             reason: "mechanical error".into(),
         };
         assert!(e.to_string().contains("mechanical error"));
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn test_permission_denied() {
-        let e = YantraError::PermissionDenied {
+        let e = YuktiError::PermissionDenied {
             operation: "mount".into(),
             path: PathBuf::from("/dev/sda"),
         };
@@ -134,13 +134,13 @@ mod tests {
 
     #[test]
     fn test_udev_error() {
-        let e = YantraError::Udev("netlink failed".into());
+        let e = YuktiError::Udev("netlink failed".into());
         assert!(e.to_string().contains("netlink failed"));
     }
 
     #[test]
     fn test_no_media() {
-        let e = YantraError::NoMedia {
+        let e = YuktiError::NoMedia {
             device: "/dev/sr0".into(),
         };
         assert!(e.to_string().contains("no media"));
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_unsupported_filesystem() {
-        let e = YantraError::UnsupportedFilesystem {
+        let e = YuktiError::UnsupportedFilesystem {
             fs_type: "hammerfs".into(),
         };
         assert!(e.to_string().contains("hammerfs"));
@@ -157,19 +157,19 @@ mod tests {
     #[test]
     fn test_io_error_from() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let e: YantraError = io_err.into();
+        let e: YuktiError = io_err.into();
         assert!(e.to_string().contains("file not found"));
     }
 
     #[test]
     fn test_parse_error() {
-        let e = YantraError::Parse("invalid integer".into());
+        let e = YuktiError::Parse("invalid integer".into());
         assert!(e.to_string().contains("invalid integer"));
     }
 
     #[test]
     fn test_already_mounted() {
-        let e = YantraError::AlreadyMounted {
+        let e = YuktiError::AlreadyMounted {
             device: "/dev/sdb1".into(),
             mount_point: PathBuf::from("/mnt/usb"),
         };
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_timeout() {
-        let e = YantraError::Timeout {
+        let e = YuktiError::Timeout {
             operation: "mount /dev/sdb1".into(),
         };
         let msg = e.to_string();
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_udev_socket_error() {
-        let e = YantraError::UdevSocket("bind() failed: Address in use".into());
+        let e = YuktiError::UdevSocket("bind() failed: Address in use".into());
         let msg = e.to_string();
         assert!(msg.contains("udev socket error"));
         assert!(msg.contains("bind() failed"));
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_udev_parse_error() {
-        let e = YantraError::UdevParse("invalid uevent format".into());
+        let e = YuktiError::UdevParse("invalid uevent format".into());
         let msg = e.to_string();
         assert!(msg.contains("udev parse error"));
         assert!(msg.contains("invalid uevent format"));
@@ -210,7 +210,7 @@ mod tests {
         let ok: Result<i32> = Ok(42);
         assert!(ok.is_ok());
 
-        let err: Result<i32> = Err(YantraError::Parse("bad".into()));
+        let err: Result<i32> = Err(YuktiError::Parse("bad".into()));
         assert!(err.is_err());
     }
 }

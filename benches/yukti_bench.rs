@@ -3,14 +3,14 @@ use std::path::PathBuf;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
-use yantra::device::{
+use yukti::device::{
     DeviceCapabilities, DeviceCapability, DeviceClass, DeviceId, DeviceInfo, query_device_health,
     query_permissions,
 };
-use yantra::event::{DeviceEvent, DeviceEventKind, EventCollector, EventListener};
-use yantra::optical::{DiscToc, DiscType, TocEntry, TrackType, detect_disc_type, is_dvd_video};
-use yantra::storage::{Filesystem, MountOptions, default_mount_point, validate_mount_point};
-use yantra::udev::{
+use yukti::event::{DeviceEvent, DeviceEventKind, EventCollector, EventListener};
+use yukti::optical::{DiscToc, DiscType, TocEntry, TrackType, detect_disc_type, is_dvd_video};
+use yukti::storage::{Filesystem, MountOptions, default_mount_point, validate_mount_point};
+use yukti::udev::{
     UdevEvent, classify_and_extract, classify_device, device_info_from_udev, extract_capabilities,
 };
 

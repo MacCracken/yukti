@@ -74,7 +74,7 @@ cargo tarpaulin --all-features --out html
 ./scripts/bench-history.sh
 
 # Just criterion (no history)
-cargo bench --bench yantra_bench
+cargo bench --bench yukti_bench
 
 # Via Makefile
 make bench

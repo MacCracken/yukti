@@ -3,14 +3,14 @@
 ## Module Map
 
 ```
-yantra
+yukti
 ├── device          — DeviceInfo, DeviceId, DeviceClass, DeviceCapabilities (bitflags), Device trait
 ├── event           — DeviceEvent, DeviceEventKind, EventListener trait, EventCollector
 ├── storage         — Filesystem, mount/unmount/eject, /proc/mounts parsing       [feature: storage]
 ├── optical         — DiscType, TrayState, DiscToc, tray control, TOC reading     [feature: optical]
 ├── udev            — UdevEvent, UdevMonitor (netlink), device classification     [feature: udev]
 ├── linux           — LinuxDeviceManager (Device trait impl, lifecycle management)
-└── error           — YantraError (11 variants)
+└── error           — YuktiError (11 variants)
 ```
 
 ## Feature Flags

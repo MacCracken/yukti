@@ -5,13 +5,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use yantra::device::{DeviceCapability, DeviceClass, DeviceId, DeviceInfo};
-use yantra::optical::{DiscType, detect_disc_type};
-use yantra::storage::{Filesystem, default_mount_point, validate_mount_point};
-use yantra::udev::{UdevEvent, classify_device, device_info_from_udev};
+use yukti::device::{DeviceCapability, DeviceClass, DeviceId, DeviceInfo};
+use yukti::optical::{DiscType, detect_disc_type};
+use yukti::storage::{Filesystem, default_mount_point, validate_mount_point};
+use yukti::udev::{UdevEvent, classify_device, device_info_from_udev};
 
 fn main() {
-    println!("=== Yantra Device Detection Example ===\n");
+    println!("=== Yukti Device Detection Example ===\n");
 
     // --- 1. Create a DeviceInfo manually ---
     println!("--- Manual DeviceInfo ---");

@@ -486,6 +486,7 @@ pub fn mount(dev_path: &Path, options: &MountOptions) -> Result<MountResult> {
 
     let try_mount = |fs_type_str: &str| -> std::result::Result<(), i32> {
         let c_fstype = CString::new(fs_type_str).unwrap();
+        // SAFETY: mount() with valid NUL-terminated CString args and correctly computed flags.
         let ret = unsafe {
             libc::mount(
                 c_source.as_ptr(),
@@ -604,6 +605,7 @@ pub fn unmount(mount_point: &Path) -> Result<()> {
         }
     })?;
 
+    // SAFETY: umount2() with a valid NUL-terminated CString path and no special flags.
     let ret = unsafe { libc::umount2(c_target.as_ptr(), 0) };
     if ret != 0 {
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
@@ -632,6 +634,7 @@ struct OwnedFd(libc::c_int);
 #[cfg(target_os = "linux")]
 impl Drop for OwnedFd {
     fn drop(&mut self) {
+        // SAFETY: closing a valid file descriptor we own; only called once via Drop.
         unsafe {
             libc::close(self.0);
         }
@@ -695,6 +698,7 @@ pub fn eject(dev_path: &Path) -> Result<()> {
             }
         })?;
 
+        // SAFETY: open() with a valid NUL-terminated CString path and read-only non-blocking flags.
         let raw_fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
         if raw_fd < 0 {
             return Err(YantraError::EjectFailed {
@@ -704,6 +708,7 @@ pub fn eject(dev_path: &Path) -> Result<()> {
         }
         let fd = OwnedFd(raw_fd);
 
+        // SAFETY: CDROMEJECT ioctl on a valid fd owned by OwnedFd; no pointer args.
         let ret = unsafe { libc::ioctl(fd.0, CDROMEJECT, 0) };
         if ret != 0 {
             return Err(YantraError::EjectFailed {

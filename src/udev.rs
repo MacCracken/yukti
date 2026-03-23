@@ -1725,5 +1725,26 @@ pub(crate) mod tests {
             monitor.stop();
             // Should wind down without hanging
         }
+
+        #[test]
+        #[ignore]
+        fn test_udev_monitor_subscribe_bounded() {
+            let monitor = UdevMonitor::new().expect("failed to create UdevMonitor");
+            let rx = monitor.subscribe_bounded(4);
+            // With no hardware events, the channel should be empty and recv should time out.
+            let result = rx.recv_timeout(std::time::Duration::from_millis(200));
+            assert!(
+                result.is_err(),
+                "expected timeout with no hardware events, got: {result:?}"
+            );
+            monitor.stop();
+            // After stop, the background thread should exit and the channel should disconnect.
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let result = rx.recv_timeout(std::time::Duration::from_millis(100));
+            assert!(
+                result.is_err(),
+                "expected disconnected after stop, got: {result:?}"
+            );
+        }
     }
 }

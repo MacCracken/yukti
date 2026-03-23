@@ -6,101 +6,113 @@
 
 | | Run 1 | Run 2 | Run 3 | 
 |---|---|---|---|
-| **Date** | `2026-03-23T00:12:52Z` | `2026-03-23T00:52:26Z` | `2026-03-23T01:22:55Z` | 
-| **Commit** | `fa77790` | `bbc793a` | `bbc793a` | 
+| **Date** | `2026-03-23T00:52:26Z` | `2026-03-23T01:22:55Z` | `2026-03-23T01:54:22Z` | 
+| **Commit** | `bbc793a` | `bbc793a` | `0145265` | 
 | **Toolchain** | `rustc 1.93.0 (254b59607 2026-01-19)` | `rustc 1.93.0 (254b59607 2026-01-19)` | `rustc 1.93.0 (254b59607 2026-01-19)` | 
 
 ## Results
 
 ### device_id
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 10.46 ns | 11.53 ns | 11.53 ns | +10.1% |
-| display | 18.25 ns | 18.25 ns | 18.25 ns | -0.0% |
+| create | 11.53 ns | 11.53 ns | 10.12 ns | -12.2% |
+| display | 18.25 ns | 18.25 ns | 17.23 ns | -5.6% |
+| from_str | — | — | 11.06 ns | — |
 
 ### device_info
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 77.48 ns | 87.64 ns | 87.64 ns | +13.1% |
-| display_name_label | 2.15 ns | 2.07 ns | 2.07 ns | -4.0% |
-| display_name_fallback | 25.21 ns | 26.92 ns | 26.92 ns | +6.8% |
-| size_display_zero | 1.67 ns | 1.85 ns | 1.85 ns | +10.7% |
-| size_display_gb | 157.36 ns | 166.50 ns | 166.50 ns | +5.8% |
-| has_capability_hit | 517.50 ps | 551.00 ps | 551.00 ps | +6.5% |
-| has_capability_miss | 520.30 ps | 547.80 ps | 547.80 ps | +5.3% |
-| is_removable | 1.76 ns | 1.80 ns | 1.80 ns | +2.4% |
-| is_mounted | 981.50 ps | 1.04 ns | 1.04 ns | +5.5% |
+| create | 87.64 ns | 87.64 ns | 81.73 ns | -6.7% |
+| display_name_label | 2.07 ns | 2.07 ns | 1.96 ns | -5.1% |
+| display_name_fallback | 26.92 ns | 26.92 ns | 25.05 ns | -7.0% |
+| size_display_zero | 1.85 ns | 1.85 ns | 1.98 ns | +7.0% |
+| size_display_gb | 166.50 ns | 166.50 ns | 166.72 ns | +0.1% |
+| has_capability_hit | 551.00 ps | 551.00 ps | 534.70 ps | -3.0% |
+| has_capability_miss | 547.80 ps | 547.80 ps | 538.60 ps | -1.7% |
+| is_removable | 1.80 ns | 1.80 ns | 1.81 ns | +0.7% |
+| is_mounted | 1.04 ns | 1.04 ns | 1.01 ns | -2.1% |
 
 ### capabilities
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| from_slice_5 | 1.92 ns | 2.07 ns | 2.07 ns | +7.9% |
-| to_vec_5 | 18.48 ns | 18.05 ns | 18.05 ns | -2.3% |
-| contains_check | 483.50 ps | 524.40 ps | 524.40 ps | +8.5% |
-| bitwise_or_all | 476.30 ps | 503.50 ps | 503.50 ps | +5.7% |
+| from_slice_5 | 2.07 ns | 2.07 ns | 1.94 ns | -6.4% |
+| to_vec_5 | 18.05 ns | 18.05 ns | 18.24 ns | +1.1% |
+| contains_check | 524.40 ps | 524.40 ps | 517.70 ps | -1.3% |
+| bitwise_or_all | 503.50 ps | 503.50 ps | 499.60 ps | -0.8% |
 
 ### device_event
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 79.26 ns | 84.12 ns | 84.12 ns | +6.1% |
-| is_attach | 517.20 ps | 532.60 ps | 532.60 ps | +3.0% |
-| is_removable | 539.10 ps | 557.40 ps | 557.40 ps | +3.4% |
+| create | 84.12 ns | 84.12 ns | 85.39 ns | +1.5% |
+| is_attach | 532.60 ps | 532.60 ps | 535.90 ps | +0.6% |
+| is_removable | 557.40 ps | 557.40 ps | 554.70 ps | -0.5% |
 
 ### event_collector
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| push_100 | 7.55 µs | 8.38 µs | 8.38 µs | +11.0% |
+| push_100 | 8.38 µs | 8.38 µs | 7.78 µs | -7.1% |
 
 ### serialization
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| serialize_device_info | 612.63 ns | 711.83 ns | 711.83 ns | +16.2% |
-| deserialize_device_info | 823.87 ns | 981.70 ns | 981.70 ns | +19.2% |
-| serialize_event | 357.95 ns | 370.41 ns | 370.41 ns | +3.5% |
-| deserialize_event | 395.64 ns | 448.63 ns | 448.63 ns | +13.4% |
+| serialize_device_info | 711.83 ns | 711.83 ns | 693.42 ns | -2.6% |
+| deserialize_device_info | 981.70 ns | 981.70 ns | 973.15 ns | -0.9% |
+| serialize_event | 370.41 ns | 370.41 ns | 389.37 ns | +5.1% |
+| deserialize_event | 448.63 ns | 448.63 ns | 455.49 ns | +1.5% |
 
 ### storage
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| filesystem_parse | 2.93 ns | 2.75 ns | 2.75 ns | -6.4% |
-| filesystem_parse_case | 2.98 ns | 2.77 ns | 2.77 ns | -7.0% |
-| filesystem_parse_unknown | 14.12 ns | 15.55 ns | 15.55 ns | +10.2% |
-| validate_mount_point_ok | 335.55 ns | 365.06 ns | 365.06 ns | +8.8% |
-| validate_mount_point_forbidden | 145.18 ns | 143.86 ns | 143.86 ns | -0.9% |
-| validate_mount_point_deep | 370.57 ns | 387.77 ns | 387.77 ns | +4.6% |
-| default_mount_point | 46.90 ns | 53.14 ns | 53.14 ns | +13.3% |
-| mount_options_default | 24.43 ns | 26.11 ns | 26.11 ns | +6.9% |
+| filesystem_parse | 2.75 ns | 2.75 ns | 3.43 ns | +24.8% |
+| filesystem_parse_case | 2.77 ns | 2.77 ns | 3.49 ns | +25.9% |
+| filesystem_parse_unknown | 15.55 ns | 15.55 ns | 15.74 ns | +1.2% |
+| validate_mount_point_ok | 365.06 ns | 365.06 ns | 379.71 ns | +4.0% |
+| validate_mount_point_forbidden | 143.86 ns | 143.86 ns | 149.98 ns | +4.3% |
+| validate_mount_point_deep | 387.77 ns | 387.77 ns | 399.65 ns | +3.1% |
+| default_mount_point | 53.14 ns | 53.14 ns | 51.22 ns | -3.6% |
+| mount_options_default | 26.11 ns | 26.11 ns | 29.08 ns | +11.4% |
+| mount_options_builder | — | — | 117.22 ns | — |
+| filesystem_parse_f2fs | — | — | 9.01 ns | — |
+| filesystem_parse_nfs | — | — | 4.43 ns | — |
 
 ### optical
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| detect_disc_type_cd | 1.94 ns | 2.34 ns | 2.34 ns | +20.7% |
-| detect_disc_type_dvd | 3.61 ns | 3.79 ns | 3.79 ns | +5.0% |
-| detect_disc_type_bluray | 2.67 ns | 3.07 ns | 3.07 ns | +14.6% |
-| detect_disc_type_unknown | 3.42 ns | 3.56 ns | 3.56 ns | +4.2% |
-| toc_audio_count | 2.18 ns | 2.28 ns | 2.28 ns | +4.3% |
-| toc_audio_duration | 3.14 ns | 2.98 ns | 2.98 ns | -5.2% |
+| detect_disc_type_cd | 2.34 ns | 2.34 ns | 2.01 ns | -14.1% |
+| detect_disc_type_dvd | 3.79 ns | 3.79 ns | 3.83 ns | +1.1% |
+| detect_disc_type_bluray | 3.07 ns | 3.07 ns | 2.75 ns | -10.2% |
+| detect_disc_type_unknown | 3.56 ns | 3.56 ns | 3.85 ns | +8.3% |
+| toc_audio_count | 2.28 ns | 2.28 ns | 2.25 ns | -1.1% |
+| toc_audio_duration | 2.98 ns | 2.98 ns | 3.18 ns | +6.7% |
+| is_dvd_video | — | — | 4.29 µs | — |
+
+### device_queries
+
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+|-----------|------|------|------|------|
+| query_permissions | — | — | 1.23 µs | — |
+| query_device_health_miss | — | — | 6.73 µs | — |
 
 ### udev
 
-| Benchmark | `fa77790` | `bbc793a` | `bbc793a` | Δ first→last |
+| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
 |-----------|------|------|------|------|
-| classify_usb | 15.34 ns | 15.94 ns | 15.94 ns | +3.9% |
-| classify_optical | 27.85 ns | 27.65 ns | 27.65 ns | -0.7% |
-| classify_dm | 12.02 ns | 12.32 ns | 12.32 ns | +2.5% |
-| extract_capabilities_usb | 49.12 ns | 50.28 ns | 50.28 ns | +2.4% |
-| extract_capabilities_optical | 94.85 ns | 94.20 ns | 94.20 ns | -0.7% |
-| classify_and_extract_usb | 68.14 ns | 66.58 ns | 66.58 ns | -2.3% |
-| device_info_from_udev | 721.89 ns | 746.20 ns | 746.20 ns | +3.4% |
-| device_info_from_udev_optical | 525.30 ns | 562.93 ns | 562.93 ns | +7.2% |
+| classify_usb | 15.94 ns | 15.94 ns | 17.49 ns | +9.7% |
+| classify_optical | 27.65 ns | 27.65 ns | 30.82 ns | +11.5% |
+| classify_dm | 12.32 ns | 12.32 ns | 13.15 ns | +6.8% |
+| extract_capabilities_usb | 50.28 ns | 50.28 ns | 53.87 ns | +7.1% |
+| extract_capabilities_optical | 94.20 ns | 94.20 ns | 103.67 ns | +10.1% |
+| classify_and_extract_usb | 66.58 ns | 66.58 ns | 69.94 ns | +5.0% |
+| device_info_from_udev | 746.20 ns | 746.20 ns | 828.28 ns | +11.0% |
+| device_info_from_udev_optical | 562.93 ns | 562.93 ns | 637.30 ns | +13.2% |
 
 ---
 

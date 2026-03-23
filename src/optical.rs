@@ -130,6 +130,7 @@ pub fn open_tray(dev_path: &Path) -> Result<()> {
     info!(device = %dev_path.display(), "opening tray");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
+    // SAFETY: CDROMEJECT ioctl on a valid fd obtained from open_optical_device(); no pointer args.
     let ret = unsafe { libc::ioctl(fd, ioctl::CDROMEJECT as libc::c_ulong) };
     if ret < 0 {
         error!(device = %dev_path.display(), "open tray ioctl failed");
@@ -147,6 +148,7 @@ pub fn close_tray(dev_path: &Path) -> Result<()> {
     info!(device = %dev_path.display(), "closing tray");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
+    // SAFETY: CDROMCLOSETRAY ioctl on a valid fd obtained from open_optical_device(); no pointer args.
     let ret = unsafe { libc::ioctl(fd, ioctl::CDROMCLOSETRAY as libc::c_ulong) };
     if ret < 0 {
         error!(device = %dev_path.display(), "close tray ioctl failed");
@@ -164,6 +166,7 @@ pub fn drive_status(dev_path: &Path) -> Result<TrayState> {
     debug!(device = %dev_path.display(), "querying drive status");
     let file = open_optical_device(dev_path)?;
     let fd = file.as_raw_fd();
+    // SAFETY: CDROM_DRIVE_STATUS ioctl on a valid fd obtained from open_optical_device(); no pointer args.
     let ret = unsafe { libc::ioctl(fd, ioctl::CDROM_DRIVE_STATUS as libc::c_ulong) };
     if ret < 0 {
         error!(device = %dev_path.display(), "drive status ioctl failed");
@@ -195,6 +198,7 @@ pub fn read_toc(dev_path: &Path) -> Result<DiscToc> {
         first_track: 0,
         last_track: 0,
     };
+    // SAFETY: CDROMREADTOCHDR ioctl on a valid fd; hdr is a correctly laid-out #[repr(C)] struct.
     let ret = unsafe {
         libc::ioctl(
             fd,
@@ -224,6 +228,7 @@ pub fn read_toc(dev_path: &Path) -> Result<DiscToc> {
             addr: ffi::CdromAddr { lba: 0 },
             datamode: 0,
         };
+        // SAFETY: CDROMREADTOCENTRY ioctl on a valid fd; entry is a correctly laid-out #[repr(C)] struct.
         let ret = unsafe {
             libc::ioctl(
                 fd,
@@ -234,6 +239,7 @@ pub fn read_toc(dev_path: &Path) -> Result<DiscToc> {
         if ret < 0 {
             return Err(map_ioctl_error(dev_path, "read TOC entry"));
         }
+        // SAFETY: we requested CDROM_LBA format, so the lba union field is the active variant.
         let lba = unsafe { entry.addr.lba };
         // Bit 2 of adr_ctrl indicates data track (control field bit 2).
         let is_data = (entry.adr_ctrl & 0x04) != 0;

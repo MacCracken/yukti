@@ -3,9 +3,12 @@ use std::path::PathBuf;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
-use yantra::device::{DeviceCapabilities, DeviceCapability, DeviceClass, DeviceId, DeviceInfo};
+use yantra::device::{
+    DeviceCapabilities, DeviceCapability, DeviceClass, DeviceId, DeviceInfo, query_device_health,
+    query_permissions,
+};
 use yantra::event::{DeviceEvent, DeviceEventKind, EventCollector, EventListener};
-use yantra::optical::{DiscToc, DiscType, TocEntry, TrackType, detect_disc_type};
+use yantra::optical::{DiscToc, DiscType, TocEntry, TrackType, detect_disc_type, is_dvd_video};
 use yantra::storage::{Filesystem, MountOptions, default_mount_point, validate_mount_point};
 use yantra::udev::{
     UdevEvent, classify_and_extract, classify_device, device_info_from_udev, extract_capabilities,
@@ -123,6 +126,9 @@ fn bench_device_id(c: &mut Criterion) {
     group.bench_function("display", |b| {
         let id = DeviceId::new("block:sdb1");
         b.iter(|| black_box(&id).to_string())
+    });
+    group.bench_function("from_str", |b| {
+        b.iter(|| DeviceId::from(black_box("block:sdb1")))
     });
 
     group.finish();
@@ -347,6 +353,21 @@ fn bench_storage(c: &mut Criterion) {
         b.iter(|| default_mount_point(black_box(&info)))
     });
     group.bench_function("mount_options_default", |b| b.iter(MountOptions::default));
+    group.bench_function("mount_options_builder", |b| {
+        b.iter(|| {
+            MountOptions::new()
+                .mount_point("/mnt/test")
+                .read_only(true)
+                .fs_type("ext4")
+                .option("noexec")
+        })
+    });
+    group.bench_function("filesystem_parse_f2fs", |b| {
+        b.iter(|| Filesystem::from_str_type(black_box("f2fs")))
+    });
+    group.bench_function("filesystem_parse_nfs", |b| {
+        b.iter(|| Filesystem::from_str_type(black_box("nfs")))
+    });
 
     group.finish();
 }
@@ -373,6 +394,24 @@ fn bench_optical(c: &mut Criterion) {
     group.bench_function("toc_audio_duration", |b| {
         let toc = make_toc();
         b.iter(|| black_box(&toc).total_audio_duration())
+    });
+    group.bench_function("is_dvd_video", |b| {
+        let p = std::path::Path::new("/tmp");
+        b.iter(|| is_dvd_video(black_box(p)))
+    });
+
+    group.finish();
+}
+
+fn bench_device_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("device_queries");
+
+    group.bench_function("query_permissions", |b| {
+        let p = std::path::Path::new("/dev/null");
+        b.iter(|| query_permissions(black_box(p)))
+    });
+    group.bench_function("query_device_health_miss", |b| {
+        b.iter(|| query_device_health(black_box("nonexistent_dev")))
     });
 
     group.finish();
@@ -427,6 +466,7 @@ criterion_group!(
     bench_serialization,
     bench_storage,
     bench_optical,
+    bench_device_queries,
     bench_udev,
 );
 criterion_main!(benches);

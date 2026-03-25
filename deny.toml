@@ -1,5 +1,7 @@
 [graph]
-all-features = true
+# Use "full" instead of all-features: the "udev-rules" feature depends on agnosys
+# which is a private (publish = false) git dependency.
+features = ["full"]
 
 [advisories]
 version = 2
@@ -29,4 +31,4 @@ highlight = "all"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = ["https://github.com/MacCracken/agnosys"]

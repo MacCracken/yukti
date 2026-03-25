@@ -26,6 +26,8 @@ pub mod storage;
 #[cfg(feature = "udev")]
 pub mod udev;
 
+pub mod udev_rules;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 

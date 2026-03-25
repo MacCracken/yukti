@@ -32,7 +32,7 @@ jobs:
       - name: Clippy (no default features)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
       - name: Clippy (all features)
-        run: cargo clippy --all-features --all-targets -- -D warnings
+        run: cargo clippy --features full --all-targets -- -D warnings
       - name: Type check
         run: cargo check
 
@@ -65,7 +65,7 @@ jobs:
       - name: Test (default features)
         run: cargo test
       - name: Test (all features)
-        run: cargo test --all-features
+        run: cargo test --features full
       - name: Doc tests
         run: cargo test --doc
 
@@ -90,9 +90,9 @@ jobs:
           toolchain: "1.89"
       - uses: Swatinem/rust-cache@v2
       - name: Check with MSRV
-        run: cargo check --all-features
+        run: cargo check --features full
       - name: Test with MSRV
-        run: cargo test --all-features
+        run: cargo test --features full
 
   coverage:
     name: Coverage
@@ -107,7 +107,7 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
       - name: Generate coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --features full --lcov --output-path lcov.info
       - name: Upload coverage
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: codecov/codecov-action@v4
@@ -140,7 +140,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build docs
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --features full
         env:
           RUSTDOCFLAGS: "-D warnings"
 

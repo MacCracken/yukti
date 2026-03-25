@@ -930,12 +930,12 @@ mod tests {
 
     #[test]
     fn test_is_mounted_stub() {
-        assert!(!is_mounted(Path::new("/dev/sdb1")));
+        assert!(!is_mounted(Path::new("/dev/yukti_nonexistent_dev")));
     }
 
     #[test]
     fn test_find_mount_point_stub() {
-        assert!(find_mount_point(Path::new("/dev/sdb1")).is_none());
+        assert!(find_mount_point(Path::new("/dev/yukti_nonexistent_dev")).is_none());
     }
 
     #[test]

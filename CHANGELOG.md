@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.3] — 2026-03-25
+
+### Added
+- **`udev-rules` feature**: udev rule management via agnosys integration
+  - `udev_rules` module with `render_rule()`, `validate_rule()`, `write_rule()`, `remove_rule()`, `reload_rules()`
+  - `trigger_device()`, `query_device()`, `list_devices()` via udevadm
+  - Feature-gated behind `dep:agnosys` (optional git dependency, not in `full` or `default`)
+  - 13 unit tests
+- `full` feature combining `udev`, `storage`, `optical`, `ai`
+
+### Changed
+- CI: `--all-features` replaced with `--features full` to avoid requiring private path dependencies
+- `deny.toml`: switched to `features = ["full"]`, allow agnosys git source
+- Release workflow: strip private deps before `cargo publish`
+
 ## [0.22.3] — 2026-03-22
 
 ### Added

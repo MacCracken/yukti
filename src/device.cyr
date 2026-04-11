@@ -16,7 +16,8 @@ enum DeviceClass {
     DC_NETWORK = 4;
     DC_LOOP = 5;
     DC_DEVICE_MAPPER = 6;
-    DC_UNKNOWN = 7;
+    DC_GPU = 7;
+    DC_UNKNOWN = 8;
 }
 
 pub fn device_class_to_str(class) {
@@ -27,6 +28,7 @@ pub fn device_class_to_str(class) {
     if (class == DC_NETWORK) { return "network"; }
     if (class == DC_LOOP) { return "loop"; }
     if (class == DC_DEVICE_MAPPER) { return "device-mapper"; }
+    if (class == DC_GPU) { return "gpu"; }
     return "unknown";
 }
 

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-04-11
+
+### Added
+- **`gpu.cyr`** — GPU device discovery via `/sys/class/drm/`. Enumerates GPU
+  devices, reads PCI vendor/device IDs, driver name, and PCI slot from sysfs.
+  Known vendors: AMD (0x1002), Intel (0x8086), NVIDIA (0x10DE), VirtIO (0x1AF4).
+  API: `enumerate_gpus()`, `gpu_count()`, `gpu_info_report(g)`, plus accessors
+  for card name, dev path, sys path, vendor/device ID, driver, PCI slot, and
+  render node. Unblocks mabda GPU library port (pre-flight GPU detection).
+- **`DC_GPU`** device class added to `DeviceClass` enum (value 7, `DC_UNKNOWN` → 8)
+
 ## [1.1.2] — 2026-04-11
 
 ### Fixed

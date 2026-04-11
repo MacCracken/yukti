@@ -1369,6 +1369,13 @@ fn main() {
     test_network_list_mounted();
     test_network_probe_constants();
 
+    # GPU discovery tests (5)
+    test_gpu_vendor_name();
+    test_gpu_enumerate();
+    test_gpu_count();
+    test_gpu_info_report();
+    test_gpu_device_class();
+
     var r = assert_summary();
     syscall(60, r);
 }
@@ -1637,6 +1644,58 @@ fn test_network_probe_constants() {
     # Values are 0 or 1 — either is valid
     assert(smb == 0 || smb == 1, "smb probe valid");
     assert(nfs == 0 || nfs == 1, "nfs probe valid");
+    return 0;
+}
+
+# ===================================================================
+# GPU discovery tests
+# ===================================================================
+
+fn test_gpu_vendor_name() {
+    test_group("gpu");
+    assert(streq(gpu_vendor_name(0x1002), "AMD") == 1, "AMD vendor");
+    assert(streq(gpu_vendor_name(0x8086), "Intel") == 1, "Intel vendor");
+    assert(streq(gpu_vendor_name(0x10DE), "NVIDIA") == 1, "NVIDIA vendor");
+    assert(streq(gpu_vendor_name(0x1AF4), "VirtIO") == 1, "VirtIO vendor");
+    assert(streq(gpu_vendor_name(0x9999), "Unknown") == 1, "unknown vendor");
+    return 0;
+}
+
+fn test_gpu_enumerate() {
+    var gpus = enumerate_gpus();
+    assert(gpus != 0, "enumerate returns vec");
+    # May be 0 or more GPUs depending on system
+    var n = vec_len(gpus);
+    assert(n >= 0, "gpu count non-negative");
+    if (n > 0) {
+        var g = vec_get(gpus, 0);
+        assert(gpu_info_card_name(g) != 0, "card name set");
+        assert(gpu_info_dev_path(g) != 0, "dev path set");
+        assert(gpu_info_sys_path(g) != 0, "sys path set");
+    }
+    return 0;
+}
+
+fn test_gpu_count() {
+    var n = gpu_count();
+    assert(n >= 0, "gpu_count non-negative");
+    return 0;
+}
+
+fn test_gpu_info_report() {
+    var gpus = enumerate_gpus();
+    if (vec_len(gpus) > 0) {
+        var g = vec_get(gpus, 0);
+        var report = gpu_info_report(g);
+        assert(report != 0, "report not null");
+        assert(str_len(report) > 0, "report non-empty");
+    }
+    return 0;
+}
+
+fn test_gpu_device_class() {
+    assert_eq(DC_GPU, 7, "DC_GPU = 7");
+    assert(streq(device_class_to_str(DC_GPU), "gpu") == 1, "gpu class str");
     return 0;
 }
 

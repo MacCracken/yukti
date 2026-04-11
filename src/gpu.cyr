@@ -1,0 +1,256 @@
+# yukti/gpu.cyr — GPU device discovery via sysfs
+#
+# Enumerates GPU devices from /sys/class/drm/ and provides
+# vendor/device/driver identification for GPU capability detection.
+#
+# GpuInfo struct layout (64 bytes):
+#   +0:  card_name   (Str — e.g. "card0")
+#   +8:  dev_path    (Str — e.g. "/dev/dri/card0")
+#   +16: sys_path    (Str — e.g. "/sys/class/drm/card0")
+#   +24: vendor_id   (i64 — PCI vendor, e.g. 0x1002 = AMD)
+#   +32: device_id   (i64 — PCI device ID)
+#   +40: driver      (Str — e.g. "amdgpu", "i915", "nvidia")
+#   +48: pci_slot    (Str — e.g. "0000:04:00.0")
+#   +56: render_node (Str — e.g. "/dev/dri/renderD128", 0 if none)
+
+# ---------------------------------------------------------------------------
+# Known GPU vendor IDs
+# ---------------------------------------------------------------------------
+
+enum GpuVendor {
+    GPU_VENDOR_AMD    = 0x1002;
+    GPU_VENDOR_INTEL  = 0x8086;
+    GPU_VENDOR_NVIDIA = 0x10DE;
+    GPU_VENDOR_VIRTIO = 0x1AF4;
+}
+
+# gpu_vendor_name(vendor_id) → human-readable vendor name
+pub fn gpu_vendor_name(vid) {
+    if (vid == GPU_VENDOR_AMD)    { return "AMD"; }
+    if (vid == GPU_VENDOR_INTEL)  { return "Intel"; }
+    if (vid == GPU_VENDOR_NVIDIA) { return "NVIDIA"; }
+    if (vid == GPU_VENDOR_VIRTIO) { return "VirtIO"; }
+    return "Unknown";
+}
+
+# ---------------------------------------------------------------------------
+# GpuInfo accessors
+# ---------------------------------------------------------------------------
+
+pub fn gpu_info_card_name(g)   { return load64(g); }
+pub fn gpu_info_dev_path(g)    { return load64(g + 8); }
+pub fn gpu_info_sys_path(g)    { return load64(g + 16); }
+pub fn gpu_info_vendor_id(g)   { return load64(g + 24); }
+pub fn gpu_info_device_id(g)   { return load64(g + 32); }
+pub fn gpu_info_driver(g)      { return load64(g + 40); }
+pub fn gpu_info_pci_slot(g)    { return load64(g + 48); }
+pub fn gpu_info_render_node(g) { return load64(g + 56); }
+
+# ---------------------------------------------------------------------------
+# Parse hex value from sysfs file content (e.g. "0x1002\n" → 0x1002)
+# ---------------------------------------------------------------------------
+
+fn _parse_hex_attr(s) {
+    if (s == 0) { return 0; }
+    var cstr = str_cstr(s);
+    var i = 0;
+    # Skip "0x" prefix if present
+    if (load8(cstr) == 0x30) {
+        if (load8(cstr + 1) == 0x78) { i = 2; }
+        elif (load8(cstr + 1) == 0x58) { i = 2; }
+    }
+    var val = 0;
+    var c = load8(cstr + i);
+    while (c != 0) {
+        if (c == 10) { c = 0; }
+        elif (c == 13) { c = 0; }
+        elif (c >= 0x30) {
+            if (c <= 0x39) {
+                val = val * 16 + (c - 0x30);
+            }
+            elif (c >= 0x61) {
+                if (c <= 0x66) { val = val * 16 + (c - 0x61 + 10); }
+            }
+            elif (c >= 0x41) {
+                if (c <= 0x46) { val = val * 16 + (c - 0x41 + 10); }
+            }
+        }
+        if (c != 0) { i = i + 1; c = load8(cstr + i); }
+    }
+    return val;
+}
+
+# ---------------------------------------------------------------------------
+# Parse uevent key=value for a specific key
+# ---------------------------------------------------------------------------
+
+fn _parse_uevent_key(uevent_str, key_cstr) {
+    if (uevent_str == 0) { return 0; }
+    var text = str_cstr(uevent_str);
+    var text_len = str_len(uevent_str);
+    var key_len = strlen(key_cstr);
+    # Walk each line
+    var i = 0;
+    while (i < text_len) {
+        # Find end of current line
+        var line_end = i;
+        while (line_end < text_len) {
+            if (load8(text + line_end) == 10) { line_end = text_len; }
+            else { line_end = line_end + 1; }
+        }
+        if (line_end > text_len) { line_end = line_end - 1; }
+        var line_len = line_end - i;
+        # Check if line starts with key=
+        if (line_len > key_len) {
+            var eq = 1;
+            for (var k = 0; k < key_len; k = k + 1) {
+                if (load8(text + i + k) != load8(key_cstr + k)) { eq = 0; }
+            }
+            if (eq == 1) {
+                if (load8(text + i + key_len) == 0x3D) {
+                    var vstart = i + key_len + 1;
+                    var vlen = line_end - vstart;
+                    if (vlen > 0) {
+                        return str_from_buf(text + vstart, vlen);
+                    }
+                }
+            }
+        }
+        # Advance past newline
+        i = line_end;
+        if (i < text_len) { i = i + 1; }
+    }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# enumerate_gpus — discover GPU devices from /sys/class/drm/
+# ---------------------------------------------------------------------------
+# Returns a vec of GpuInfo pointers.
+# Only includes primary card devices (card0, card1, ...), not outputs or render nodes.
+
+pub fn enumerate_gpus() {
+    return enumerate_gpus_sysfs(str_from("/sys"));
+}
+
+pub fn enumerate_gpus_sysfs(sysfs_root) {
+    var results = vec_new();
+
+    var sb = str_builder_new();
+    str_builder_add_str(sb, sysfs_root);
+    str_builder_add_cstr(sb, "/class/drm");
+    var drm_dir = str_builder_build(sb);
+
+    var entries = dir_list(drm_dir);
+    if (entries == 0) { return results; }
+
+    var count = vec_len(entries);
+    for (var i = 0; i < count; i = i + 1) {
+        var name = vec_get(entries, i);  # Str from dir_list
+
+        # Only match "card[0-9]" (skip card0-DP-1, renderD128, version)
+        var name_cstr = str_cstr(name);
+        if (load8(name_cstr) != 0x63) { continue; }     # 'c'
+        if (load8(name_cstr + 1) != 0x61) { continue; }  # 'a'
+        if (load8(name_cstr + 2) != 0x72) { continue; }  # 'r'
+        if (load8(name_cstr + 3) != 0x64) { continue; }  # 'd'
+        var digit = load8(name_cstr + 4);
+        if (digit < 0x30) { continue; }
+        if (digit > 0x39) { continue; }
+        # Ensure no more chars after digit(s) — reject "card0-DP-1"
+        var j = 5;
+        var valid = 1;
+        while (load8(name_cstr + j) != 0) {
+            var ch = load8(name_cstr + j);
+            if (ch < 0x30) { valid = 0; j = 100; }
+            elif (ch > 0x39) { valid = 0; j = 100; }
+            j = j + 1;
+        }
+        if (valid == 0) { continue; }
+
+        # Build paths
+        sb = str_builder_new();
+        str_builder_add_str(sb, drm_dir);
+        str_builder_add_cstr(sb, "/");
+        str_builder_add_str(sb, name);
+        var sys_path = str_builder_build(sb);
+
+        sb = str_builder_new();
+        str_builder_add_cstr(sb, "/dev/dri/");
+        str_builder_add_str(sb, name);
+        var dev_path = str_builder_build(sb);
+
+        # Read sysfs attributes
+        var vendor_str = _read_sysfs_attr(sys_path, "device/vendor");
+        var device_str = _read_sysfs_attr(sys_path, "device/device");
+        var vendor_id = _parse_hex_attr(vendor_str);
+        var device_id = _parse_hex_attr(device_str);
+
+        # Read uevent for driver and PCI slot
+        var uevent = _read_sysfs_attr(sys_path, "device/uevent");
+        var driver = 0;
+        var pci_slot = 0;
+        if (uevent != 0) {
+            driver = _parse_uevent_key(uevent, "DRIVER");
+            pci_slot = _parse_uevent_key(uevent, "PCI_SLOT_NAME");
+        }
+
+        # Find matching render node (renderD128 for card0, renderD129 for card1, etc.)
+        var card_num = digit - 0x30;
+        var render_num = 128 + card_num;
+        var rnbuf[24];
+        var rnlen = fmt_int_buf(render_num, &rnbuf);
+        store8(&rnbuf + rnlen, 0);  # null-terminate
+        sb = str_builder_new();
+        str_builder_add_cstr(sb, "/dev/dri/renderD");
+        str_builder_add_cstr(sb, &rnbuf);
+        var render_node = str_builder_build(sb);
+
+        # Build GpuInfo
+        var g = alloc(64);
+        store64(g, name);
+        store64(g + 8, dev_path);
+        store64(g + 16, sys_path);
+        store64(g + 24, vendor_id);
+        store64(g + 32, device_id);
+        store64(g + 40, driver);
+        store64(g + 48, pci_slot);
+        store64(g + 56, render_node);
+
+        vec_push(results, g);
+    }
+    return results;
+}
+
+# ---------------------------------------------------------------------------
+# gpu_count — quick check for how many GPUs are available
+# ---------------------------------------------------------------------------
+
+pub fn gpu_count() {
+    var gpus = enumerate_gpus();
+    return vec_len(gpus);
+}
+
+# ---------------------------------------------------------------------------
+# gpu_info_report — format a GpuInfo as a human-readable string
+# ---------------------------------------------------------------------------
+
+pub fn gpu_info_report(g) {
+    var sb = str_builder_new();
+    var vid = gpu_info_vendor_id(g);
+    str_builder_add_cstr(sb, gpu_vendor_name(vid));
+    var driver = gpu_info_driver(g);
+    if (driver != 0) {
+        str_builder_add_cstr(sb, " (");
+        str_builder_add_str(sb, driver);
+        str_builder_add_cstr(sb, ")");
+    }
+    str_builder_add_cstr(sb, " @ ");
+    var slot = gpu_info_pci_slot(g);
+    if (slot != 0) {
+        str_builder_add_str(sb, slot);
+    } else {
+        str_builder_add_str(sb, gpu_info_card_name(g));
+    }
+    return str_builder_build(sb);
+}

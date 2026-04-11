@@ -1,9 +1,9 @@
 name = "yukti"
-version = "1.1.2"
+version = "1.2.0"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "yukti"
-description = "Device abstraction — USB, optical, block devices, udev hotplug, mount/eject"
+description = "Device abstraction — USB, optical, block, GPU, network, udev hotplug, mount/eject"
 repository = "https://github.com/MacCracken/yukti"
 
 [lib]
@@ -20,6 +20,7 @@ modules = [
     "src/partition.cyr",
     "src/device_db.cyr",
     "src/network.cyr",
+    "src/gpu.cyr",
 ]
 
 [[bench]]

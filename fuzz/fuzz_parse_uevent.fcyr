@@ -1,0 +1,92 @@
+# Fuzz target: parse_uevent
+# Feeds random byte sequences to the uevent parser to test robustness.
+# The parser must not crash on any input.
+
+include "src/lib.cyr"
+
+fn fuzz_one(buf, len) {
+    # parse_uevent should gracefully handle any byte sequence
+    var result = parse_uevent(buf, len);
+    # If it parsed successfully, validate the result is usable
+    if (result != 0) {
+        var action = ue_action(result);
+        var sys_path = ue_sys_path(result);
+        var subsystem = ue_subsystem(result);
+        # Access properties without crashing
+        var props = ue_properties(result);
+        # Try to classify the event
+        classify_device(result);
+    }
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+
+    # Test with known-good input
+    var good = "add@/devices/pci/usb/block/sdb\0ACTION=add\0DEVPATH=/devices/pci/usb/block/sdb\0SUBSYSTEM=block\0DEVTYPE=disk\0DEVNAME=sdb\0";
+    fuzz_one(good, strlen(good));
+
+    # Test with empty input
+    fuzz_one("", 0);
+
+    # Test with just nulls
+    var nulls[16];
+    store64(&nulls, 0);
+    store64(&nulls + 8, 0);
+    fuzz_one(&nulls, 16);
+
+    # Test with no action@devpath header
+    var noheader = "ACTION=add\0DEVPATH=/block/sda\0SUBSYSTEM=block\0";
+    fuzz_one(noheader, strlen(noheader));
+
+    # Test with garbage bytes
+    var garbage = "asdfjkl;asdfjkl;qwerty\0\0\0zxcvbnm";
+    fuzz_one(garbage, 32);
+
+    # Test with only header, no key=value
+    var headeronly = "add@/devices/pci\0";
+    fuzz_one(headeronly, strlen(headeronly));
+
+    # Test with malformed key=value (no =)
+    var noequals = "add@/dev\0NOSEPARATOR\0SUBSYSTEM=block\0";
+    fuzz_one(noequals, strlen(noequals));
+
+    # Test with very long values
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "add@/dev/sda\0DEVPATH=");
+    for (var i = 0; i < 200; i = i + 1) {
+        str_builder_add_cstr(sb, "AAAA");
+    }
+    str_builder_add_cstr(sb, "\0SUBSYSTEM=block\0");
+    var long_val = str_builder_build(sb);
+    fuzz_one(str_data(long_val), str_len(long_val));
+
+    # Random mutation fuzzing
+    var base = "add@/devices/pci0000:00/usb1/block/sdb\0ACTION=add\0DEVPATH=/devices/pci0000:00/usb1/block/sdb\0SUBSYSTEM=block\0DEVTYPE=disk\0DEVNAME=sdb\0";
+    var baselen = strlen(base);
+    var mutbuf[256];
+    memcpy(&mutbuf, base, baselen);
+
+    for (var round = 0; round < 1000; round = round + 1) {
+        # Simple mutation: flip random bytes
+        var pos = (round * 7 + 13) % baselen;
+        var orig = load8(&mutbuf + pos);
+        store8(&mutbuf + pos, (orig + round) & 0xFF);
+
+        fuzz_one(&mutbuf, baselen);
+
+        # Restore
+        store8(&mutbuf + pos, orig);
+    }
+
+    # Truncation fuzzing
+    for (var tlen = 0; tlen < baselen; tlen = tlen + 1) {
+        fuzz_one(base, tlen);
+    }
+
+    syscall(1, 1, "fuzz_parse_uevent: passed\n", 26);
+    syscall(60, 0);
+}
+
+main();

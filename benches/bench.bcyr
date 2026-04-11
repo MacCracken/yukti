@@ -1,129 +1,219 @@
-# yukti benchmarks
-# Performance measurement for hot-path operations
+# yukti benchmarks — comprehensive performance measurement
+# Covers all hot-path operations matching Rust criterion benchmarks
 
 include "src/lib.cyr"
+include "lib/bench.cyr"
 
-fn bench_classify_device() {
-    var b = bench_new("classify_device (USB)");
+# ── Shared state for benchmarks ───────────────────────────────────────
+
+var _b_info = 0;
+var _b_usb_event = 0;
+var _b_opt_event = 0;
+var _b_dm_event = 0;
+var _b_mount_table = 0;
+var _b_toc = 0;
+var _b_event = 0;
+
+fn setup() {
+    # Device info
+    var id = device_id_new_cstr("block:sdb1");
+    _b_info = device_info_new(id, str_from("/dev/sdb1"), DC_USB_STORAGE);
+    di_set_label(_b_info, str_from("MY_USB"));
+    di_set_model(_b_info, str_from("SanDisk Cruzer"));
+    di_set_vendor(_b_info, str_from("SanDisk"));
+    di_set_serial(_b_info, str_from("ABC123"));
+    di_set_size_bytes(_b_info, 17179869184);
+    di_set_caps(_b_info, CAP_READ | CAP_WRITE | CAP_REMOVABLE | CAP_HOTPLUG | CAP_EJECT);
+
+    # USB udev event
     var usb_props = map_new();
     map_set(usb_props, "ID_BUS", str_from("usb"));
+    map_set(usb_props, "ID_VENDOR", str_from("SanDisk"));
+    map_set(usb_props, "ID_MODEL", str_from("Cruzer_Blade"));
+    map_set(usb_props, "ID_SERIAL_SHORT", str_from("ABC123"));
+    map_set(usb_props, "ID_FS_TYPE", str_from("vfat"));
+    map_set(usb_props, "ID_FS_LABEL", str_from("MYUSB"));
     map_set(usb_props, "ID_USB_DRIVER", str_from("usb-storage"));
-    var usb = udev_event_new(str_from("add"), str_from("/sys/block/sdb/sdb1"),
-                              str_from("/dev/sdb1"), str_from("block"),
-                              str_from("partition"), usb_props);
-    bench_run(b, 100000, |_| {
-        classify_device(usb);
-        return 0;
-    });
-    bench_report(b);
+    map_set(usb_props, "ID_PART_ENTRY_SIZE", str_from("31457280"));
+    _b_usb_event = udev_event_new(str_from("add"),
+        str_from("/sys/devices/pci0000:00/usb1/1-1/block/sdb/sdb1"),
+        str_from("/dev/sdb1"), str_from("block"),
+        str_from("partition"), usb_props);
+
+    # Optical udev event
+    var opt_props = map_new();
+    map_set(opt_props, "ID_CDROM", str_from("1"));
+    map_set(opt_props, "ID_CDROM_DVD", str_from("1"));
+    map_set(opt_props, "ID_CDROM_DVD_RW", str_from("1"));
+    map_set(opt_props, "ID_FS_TYPE", str_from("iso9660"));
+    map_set(opt_props, "ID_FS_LABEL", str_from("MOVIE_DISC"));
+    _b_opt_event = udev_event_new(str_from("change"),
+        str_from("/sys/devices/pci0000:00/ata1/host0/block/sr0"),
+        str_from("/dev/sr0"), str_from("block"),
+        str_from("disk"), opt_props);
+
+    # DM udev event
+    _b_dm_event = udev_event_new(str_from("add"),
+        str_from("/sys/devices/virtual/block/dm-0"),
+        str_from("/dev/dm-0"), str_from("block"),
+        str_from("disk"), map_new());
+
+    # Mount table
+    _b_mount_table = str_from("/dev/sda1 / ext4 rw 0 0\n/dev/sda2 /home ext4 rw 0 0\n/dev/sdb1 /mnt/usb vfat rw 0 0\ntmpfs /tmp tmpfs rw 0 0\nproc /proc proc rw 0 0\nsysfs /sys sysfs rw 0 0\n");
+
+    # TOC
+    var tracks = vec_new();
+    vec_push(tracks, toc_entry_new(1, TT_AUDIO, 0, 22050, 18050));
+    vec_push(tracks, toc_entry_new(2, TT_AUDIO, 22050, 18000, 24000));
+    vec_push(tracks, toc_entry_new(3, TT_DATA, 40050, 100000, 0));
+    _b_toc = disc_toc_new(DT_CD_MIXED, tracks, 700000000);
+
+    # Event
+    _b_event = device_event_new(device_id_new_cstr("block:sdb1"), DC_USB_STORAGE,
+                                 EK_ATTACHED, str_from("/dev/sdb1"));
     return 0;
 }
 
-fn bench_classify_and_extract() {
-    var b = bench_new("classify_and_extract (optical)");
-    var props = map_new();
-    map_set(props, "ID_CDROM", str_from("1"));
-    map_set(props, "ID_CDROM_DVD_RW", str_from("1"));
-    var opt = udev_event_new(str_from("add"), str_from("/sys/block/sr0"),
-                              str_from("/dev/sr0"), str_from("block"),
-                              str_from("disk"), props);
-    bench_run(b, 100000, |_| {
-        classify_and_extract(opt);
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# ── Benchmark functions (zero-arg, use globals) ───────────────────────
 
-fn bench_filesystem_from_str() {
-    var b = bench_new("filesystem_from_str");
-    bench_run(b, 100000, |_| {
-        filesystem_from_str("ext4");
-        filesystem_from_str("VFAT");
-        filesystem_from_str("iso9660");
-        filesystem_from_str("crypto_luks");
-        filesystem_from_str("unknown_fs");
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# device_id
+fn _b_device_id_create() { device_id_new_cstr("block:sdb1"); return 0; }
+fn _b_device_id_eq() { var a = device_id_new_cstr("block:sdb1"); var c = device_id_new_cstr("block:sdb1"); device_id_eq(a, c); return 0; }
 
-fn bench_detect_disc_type() {
-    var b = bench_new("detect_disc_type");
-    bench_run(b, 100000, |_| {
-        detect_disc_type("cd", 1, 0);
-        detect_disc_type("dvd-rom", 0, 1);
-        detect_disc_type("bd", 0, 1);
-        detect_disc_type("blank", 0, 0);
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# device_info
+fn _b_device_info_create() { device_info_new(device_id_new_cstr("block:sdb1"), str_from("/dev/sdb1"), DC_USB_STORAGE); return 0; }
+fn _b_display_name_label() { device_info_display_name(_b_info); return 0; }
+fn _b_display_name_fb() { var i = device_info_new(device_id_new_cstr("t"), str_from("/dev/sdc1"), DC_USB_STORAGE); device_info_display_name(i); return 0; }
+fn _b_size_zero() { var sb = str_builder_new(); var i = device_info_new(device_id_new_cstr("t"), str_from("/dev/sda"), DC_BLOCK_INTERNAL); device_info_size_display(i, sb); return 0; }
+fn _b_size_gb() { var sb = str_builder_new(); device_info_size_display(_b_info, sb); return 0; }
+fn _b_has_cap_hit() { device_info_has_cap(_b_info, CAP_EJECT); return 0; }
+fn _b_has_cap_miss() { device_info_has_cap(_b_info, CAP_BURN); return 0; }
+fn _b_is_removable() { device_info_is_removable(_b_info); return 0; }
+fn _b_is_mounted() { device_info_is_mounted(_b_info); return 0; }
 
-fn bench_device_info_new() {
-    var b = bench_new("device_info_new");
-    bench_run(b, 100000, |_| {
-        var id = device_id_new_cstr("block:sdb1");
-        var info = device_info_new(id, str_from("/dev/sdb1"), DC_USB_STORAGE);
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# capabilities
+fn _b_cap_check() { has_cap(CAP_READ | CAP_WRITE | CAP_REMOVABLE, CAP_WRITE); return 0; }
+fn _b_cap_all() { var c = CAP_READ | CAP_WRITE | CAP_EJECT | CAP_MEDIA_CHANGE | CAP_REMOVABLE | CAP_TRIM | CAP_HOTPLUG | CAP_TRAY_CONTROL | CAP_AUDIO_PLAYBACK | CAP_BURN; return 0; }
 
-fn bench_capabilities() {
-    var b = bench_new("has_cap (bitflag check)");
-    var caps = CAP_READ | CAP_WRITE | CAP_EJECT | CAP_REMOVABLE | CAP_HOTPLUG;
-    bench_run(b, 1000000, |_| {
-        has_cap(caps, CAP_READ);
-        has_cap(caps, CAP_WRITE);
-        has_cap(caps, CAP_EJECT);
-        has_cap(caps, CAP_TRIM);
-        has_cap(caps, CAP_BURN);
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# device_event
+fn _b_event_create() { device_event_new(device_id_new_cstr("block:sdb1"), DC_USB_STORAGE, EK_ATTACHED, str_from("/dev/sdb1")); return 0; }
+fn _b_event_is_attach() { device_event_is_attach(_b_event); return 0; }
+fn _b_event_is_removable() { device_event_is_removable(_b_event); return 0; }
+fn _b_collector_push() { var c = event_collector_new(); for (var i = 0; i < 100; i = i + 1) { event_collector_push(c, _b_event); } return 0; }
 
-fn bench_validate_mount_point() {
-    var b = bench_new("validate_mount_point");
-    bench_run(b, 100000, |_| {
-        validate_mount_point("/mnt/usb");
-        validate_mount_point("/run/media/test");
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# storage
+fn _b_fs_parse() { filesystem_from_str("ext4"); return 0; }
+fn _b_fs_parse_ci() { filesystem_from_str("EXT4"); return 0; }
+fn _b_fs_parse_unk() { filesystem_from_str("zfs"); return 0; }
+fn _b_validate_ok() { validate_mount_point("/mnt/usb"); return 0; }
+fn _b_validate_forbidden() { validate_mount_point("/usr"); return 0; }
+fn _b_validate_deep() { validate_mount_point("/run/media/user/long-device-name-here"); return 0; }
+fn _b_default_mp() { default_mount_point(_b_info); return 0; }
+fn _b_mount_opts() { mount_options_new(); return 0; }
+fn _b_find_mount() { find_mount_in("/dev/sdb1", _b_mount_table); return 0; }
+fn _b_find_mount_miss() { find_mount_in("/dev/sdc1", _b_mount_table); return 0; }
+fn _b_unescape() { unescape_mount_path("/mnt/my\\040drive\\040name", 22); return 0; }
 
-fn bench_find_mount_in() {
-    var b = bench_new("find_mount_in");
-    var table = str_from("/dev/sda1 / ext4 rw 0 0\n/dev/sda2 /home ext4 rw 0 0\n/dev/sdb1 /mnt/usb vfat rw 0 0\ntmpfs /tmp tmpfs rw 0 0\n");
-    bench_run(b, 100000, |_| {
-        find_mount_in("/dev/sdb1", table);
-        return 0;
-    });
-    bench_report(b);
-    return 0;
-}
+# optical
+fn _b_detect_cd() { detect_disc_type("cd", 1, 0); return 0; }
+fn _b_detect_dvd() { detect_disc_type("dvd-rom", 0, 1); return 0; }
+fn _b_detect_bd() { detect_disc_type("bd", 0, 1); return 0; }
+fn _b_detect_unk() { detect_disc_type("floppy", 0, 0); return 0; }
+fn _b_toc_audio() { toc_audio_track_count(_b_toc); return 0; }
+fn _b_toc_dur() { toc_total_audio_duration_x100(_b_toc); return 0; }
+
+# device queries
+fn _b_query_perms() { query_permissions("/dev/null"); return 0; }
+fn _b_query_health() { query_device_health(str_from("nonexistent_dev")); return 0; }
+
+# udev
+fn _b_classify_usb() { classify_device(_b_usb_event); return 0; }
+fn _b_classify_opt() { classify_device(_b_opt_event); return 0; }
+fn _b_classify_dm() { classify_device(_b_dm_event); return 0; }
+fn _b_extract_usb() { extract_capabilities(_b_usb_event, DC_USB_STORAGE); return 0; }
+fn _b_extract_opt() { extract_capabilities(_b_opt_event, DC_OPTICAL); return 0; }
+fn _b_cae() { classify_and_extract(_b_usb_event); return 0; }
+fn _b_info_udev() { device_info_from_udev(_b_usb_event); return 0; }
+fn _b_info_udev_opt() { device_info_from_udev(_b_opt_event); return 0; }
+fn _b_parse_uevent() { parse_uevent("add@/devices/pci/usb/block/sdb\0ACTION=add\0DEVPATH=/devices/pci/usb/block/sdb\0SUBSYSTEM=block\0DEVTYPE=disk\0DEVNAME=sdb\0", 120); return 0; }
+
+# serialization
+fn _b_to_json() { var sb = str_builder_new(); device_info_to_json(_b_info, sb); str_builder_build(sb); return 0; }
+
+# ── Main ───────────────────────────────────────────────────────────────
 
 fn main() {
     alloc_init();
+    setup();
 
-    syscall(1, 1, "yukti benchmarks\n", 17);
-    syscall(1, 1, "================\n\n", 19);
+    syscall(1, 1, "yukti benchmarks (45 operations)\n", 33);
+    syscall(1, 1, "=================================\n\n", 35);
 
-    bench_classify_device();
-    bench_classify_and_extract();
-    bench_filesystem_from_str();
-    bench_detect_disc_type();
-    bench_device_info_new();
-    bench_capabilities();
-    bench_validate_mount_point();
-    bench_find_mount_in();
+    var b = 0;
+
+    # device_id (2)
+    b = bench_new("device_id/create"); bench_run_batch(b, &_b_device_id_create, 10000, 100); bench_report(b);
+    b = bench_new("device_id/eq"); bench_run_batch(b, &_b_device_id_eq, 10000, 100); bench_report(b);
+
+    # device_info (9)
+    b = bench_new("device_info/create"); bench_run_batch(b, &_b_device_info_create, 10000, 100); bench_report(b);
+    b = bench_new("device_info/display_name_label"); bench_run_batch(b, &_b_display_name_label, 10000, 100); bench_report(b);
+    b = bench_new("device_info/display_name_fallback"); bench_run_batch(b, &_b_display_name_fb, 10000, 100); bench_report(b);
+    b = bench_new("device_info/size_display_zero"); bench_run_batch(b, &_b_size_zero, 10000, 100); bench_report(b);
+    b = bench_new("device_info/size_display_gb"); bench_run_batch(b, &_b_size_gb, 10000, 100); bench_report(b);
+    b = bench_new("device_info/has_cap_hit"); bench_run_batch(b, &_b_has_cap_hit, 100000, 100); bench_report(b);
+    b = bench_new("device_info/has_cap_miss"); bench_run_batch(b, &_b_has_cap_miss, 100000, 100); bench_report(b);
+    b = bench_new("device_info/is_removable"); bench_run_batch(b, &_b_is_removable, 100000, 100); bench_report(b);
+    b = bench_new("device_info/is_mounted"); bench_run_batch(b, &_b_is_mounted, 100000, 100); bench_report(b);
+
+    # capabilities (2)
+    b = bench_new("capabilities/contains_check"); bench_run_batch(b, &_b_cap_check, 100000, 100); bench_report(b);
+    b = bench_new("capabilities/bitwise_or_all"); bench_run_batch(b, &_b_cap_all, 100000, 100); bench_report(b);
+
+    # device_event (4)
+    b = bench_new("device_event/create"); bench_run_batch(b, &_b_event_create, 10000, 100); bench_report(b);
+    b = bench_new("device_event/is_attach"); bench_run_batch(b, &_b_event_is_attach, 100000, 100); bench_report(b);
+    b = bench_new("device_event/is_removable"); bench_run_batch(b, &_b_event_is_removable, 100000, 100); bench_report(b);
+    b = bench_new("event_collector/push_100"); bench_run_batch(b, &_b_collector_push, 100, 100); bench_report(b);
+
+    # storage (11)
+    b = bench_new("storage/filesystem_parse"); bench_run_batch(b, &_b_fs_parse, 10000, 100); bench_report(b);
+    b = bench_new("storage/filesystem_parse_case"); bench_run_batch(b, &_b_fs_parse_ci, 10000, 100); bench_report(b);
+    b = bench_new("storage/filesystem_parse_unknown"); bench_run_batch(b, &_b_fs_parse_unk, 10000, 100); bench_report(b);
+    b = bench_new("storage/validate_mount_ok"); bench_run_batch(b, &_b_validate_ok, 10000, 100); bench_report(b);
+    b = bench_new("storage/validate_mount_forbidden"); bench_run_batch(b, &_b_validate_forbidden, 10000, 100); bench_report(b);
+    b = bench_new("storage/validate_mount_deep"); bench_run_batch(b, &_b_validate_deep, 10000, 100); bench_report(b);
+    b = bench_new("storage/default_mount_point"); bench_run_batch(b, &_b_default_mp, 10000, 100); bench_report(b);
+    b = bench_new("storage/mount_options_create"); bench_run_batch(b, &_b_mount_opts, 10000, 100); bench_report(b);
+    b = bench_new("storage/find_mount_in"); bench_run_batch(b, &_b_find_mount, 10000, 100); bench_report(b);
+    b = bench_new("storage/find_mount_in_miss"); bench_run_batch(b, &_b_find_mount_miss, 10000, 100); bench_report(b);
+    b = bench_new("storage/unescape_mount_path"); bench_run_batch(b, &_b_unescape, 10000, 100); bench_report(b);
+
+    # optical (6)
+    b = bench_new("optical/detect_disc_type_cd"); bench_run_batch(b, &_b_detect_cd, 10000, 100); bench_report(b);
+    b = bench_new("optical/detect_disc_type_dvd"); bench_run_batch(b, &_b_detect_dvd, 10000, 100); bench_report(b);
+    b = bench_new("optical/detect_disc_type_bluray"); bench_run_batch(b, &_b_detect_bd, 10000, 100); bench_report(b);
+    b = bench_new("optical/detect_disc_type_unknown"); bench_run_batch(b, &_b_detect_unk, 10000, 100); bench_report(b);
+    b = bench_new("optical/toc_audio_count"); bench_run_batch(b, &_b_toc_audio, 10000, 100); bench_report(b);
+    b = bench_new("optical/toc_audio_duration"); bench_run_batch(b, &_b_toc_dur, 10000, 100); bench_report(b);
+
+    # device queries (2)
+    b = bench_new("device_queries/query_permissions"); bench_run_batch(b, &_b_query_perms, 1000, 100); bench_report(b);
+    b = bench_new("device_queries/query_health_miss"); bench_run_batch(b, &_b_query_health, 1000, 100); bench_report(b);
+
+    # udev (9)
+    b = bench_new("udev/classify_usb"); bench_run_batch(b, &_b_classify_usb, 10000, 100); bench_report(b);
+    b = bench_new("udev/classify_optical"); bench_run_batch(b, &_b_classify_opt, 10000, 100); bench_report(b);
+    b = bench_new("udev/classify_dm"); bench_run_batch(b, &_b_classify_dm, 10000, 100); bench_report(b);
+    b = bench_new("udev/extract_caps_usb"); bench_run_batch(b, &_b_extract_usb, 10000, 100); bench_report(b);
+    b = bench_new("udev/extract_caps_optical"); bench_run_batch(b, &_b_extract_opt, 10000, 100); bench_report(b);
+    b = bench_new("udev/classify_and_extract"); bench_run_batch(b, &_b_cae, 10000, 100); bench_report(b);
+    b = bench_new("udev/device_info_from_udev"); bench_run_batch(b, &_b_info_udev, 10000, 100); bench_report(b);
+    b = bench_new("udev/device_info_from_udev_opt"); bench_run_batch(b, &_b_info_udev_opt, 10000, 100); bench_report(b);
+    b = bench_new("udev/parse_uevent"); bench_run_batch(b, &_b_parse_uevent, 10000, 100); bench_report(b);
+
+    # serialization (1)
+    b = bench_new("serialization/device_info_json"); bench_run_batch(b, &_b_to_json, 10000, 100); bench_report(b);
 
     syscall(1, 1, "\ndone\n", 6);
     syscall(60, 0);

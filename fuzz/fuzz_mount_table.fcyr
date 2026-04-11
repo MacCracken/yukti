@@ -1,0 +1,109 @@
+# Fuzz target: find_mount_in
+# Feeds random/malformed mount table data to the parser.
+# The parser must not crash on any input.
+
+include "src/lib.cyr"
+
+fn fuzz_one(dev_path, table_cstr) {
+    var table = str_from(table_cstr);
+    var result = find_mount_in(dev_path, table);
+    # Result is either 0 (not found) or a Str — both are valid
+    if (result != 0) {
+        # Verify the result is a valid Str
+        var rlen = str_len(result);
+        var rdata = str_data(result);
+    }
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+
+    # Known-good table
+    fuzz_one("/dev/sda1", "/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /mnt/usb vfat rw 0 0\n");
+
+    # Empty table
+    fuzz_one("/dev/sda1", "");
+
+    # Table with only comments
+    fuzz_one("/dev/sda1", "# comment line\n# another comment\n");
+
+    # Table with empty lines
+    fuzz_one("/dev/sda1", "\n\n\n");
+
+    # Table with incomplete lines
+    fuzz_one("/dev/sda1", "/dev/sda1\n");
+    fuzz_one("/dev/sda1", "onlyonefield\n");
+
+    # Table with octal escapes
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/my\\040drive ext4 rw 0 0\n");
+
+    # Table with malformed octal (incomplete)
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/\\04 ext4 rw 0 0\n");
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/\\0 ext4 rw 0 0\n");
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/\\ ext4 rw 0 0\n");
+
+    # Table with non-octal after backslash
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/\\999 ext4 rw 0 0\n");
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/\\abc ext4 rw 0 0\n");
+
+    # Very long lines
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/dev/sda1 /mnt/");
+    for (var i = 0; i < 500; i = i + 1) {
+        str_builder_add_cstr(sb, "x");
+    }
+    str_builder_add_cstr(sb, " ext4 rw 0 0\n");
+    var long_table = str_builder_build(sb);
+    fuzz_one("/dev/sda1", str_cstr(long_table));
+
+    # Many entries
+    var big_sb = str_builder_new();
+    for (var i = 0; i < 100; i = i + 1) {
+        str_builder_add_cstr(big_sb, "/dev/sd");
+        str_builder_add_int(big_sb, i);
+        str_builder_add_cstr(big_sb, " /mnt/vol");
+        str_builder_add_int(big_sb, i);
+        str_builder_add_cstr(big_sb, " ext4 rw 0 0\n");
+    }
+    var big_table = str_builder_build(big_sb);
+    fuzz_one("/dev/sd50", str_cstr(big_table));
+    fuzz_one("/dev/sd999", str_cstr(big_table));
+
+    # Table with tabs and mixed whitespace
+    fuzz_one("/dev/sda1", "/dev/sda1\t/\text4\trw\t0\t0\n");
+
+    # Table with special characters in paths
+    fuzz_one("/dev/sda1", "/dev/sda1 /mnt/日本語 ext4 rw 0 0\n");
+
+    # Mutation fuzzing on a known table
+    var base = "/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /mnt/usb vfat rw 0 0\n/dev/sr0 /media/cdrom iso9660 ro 0 0\n";
+    var baselen = strlen(base);
+    var mutbuf[256];
+    memcpy(&mutbuf, base, baselen);
+    store8(&mutbuf + baselen, 0);
+
+    for (var round = 0; round < 500; round = round + 1) {
+        var pos = (round * 11 + 7) % baselen;
+        var orig = load8(&mutbuf + pos);
+        store8(&mutbuf + pos, (orig + round * 3) & 0xFF);
+
+        fuzz_one("/dev/sda1", &mutbuf);
+        fuzz_one("/dev/sdb1", &mutbuf);
+
+        store8(&mutbuf + pos, orig);
+    }
+
+    # Truncation fuzzing
+    for (var tlen = 0; tlen < baselen; tlen = tlen + 1) {
+        var trunc[256];
+        memcpy(&trunc, base, tlen);
+        store8(&trunc + tlen, 0);
+        fuzz_one("/dev/sda1", &trunc);
+    }
+
+    syscall(1, 1, "fuzz_mount_table: passed\n", 25);
+    syscall(60, 0);
+}
+
+main();

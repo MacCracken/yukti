@@ -266,7 +266,7 @@ pub fn unescape_mount_path(s, s_len) {
 # ---------------------------------------------------------------------------
 
 pub fn find_mount_in(dev_path_cstr, mount_table) {
-    var lines = str_split(mount_table, "\n");
+    var lines = str_split(mount_table, 10);
     var nlines = vec_len(lines);
 
     for (var i = 0; i < nlines; i = i + 1) {
@@ -276,7 +276,7 @@ pub fn find_mount_in(dev_path_cstr, mount_table) {
         if (load8(str_data(trimmed)) == 35) { continue; }
 
         # Split line by spaces: device mountpoint fstype options dump pass
-        var fields = str_split(trimmed, " ");
+        var fields = str_split(trimmed, 32);
         if (vec_len(fields) < 2) { continue; }
 
         var device_field = vec_get(fields, 0);
@@ -297,9 +297,10 @@ pub fn find_mount_in(dev_path_cstr, mount_table) {
 # ---------------------------------------------------------------------------
 
 pub fn find_mount_point(dev_path_cstr) {
-    var data = file_read_all("/proc/mounts");
-    if (data == 0) { return 0; }
-    var table = str_from(data);
+    var readbuf[8192];
+    var nbytes = file_read_all("/proc/mounts", &readbuf, 8192);
+    if (nbytes <= 0) { return 0; }
+    var table = str_from_buf(&readbuf, nbytes);
     return find_mount_in(dev_path_cstr, table);
 }
 
@@ -381,7 +382,7 @@ fn parse_mount_flags(options_str, read_only) {
 
     if (options_str == 0) { return flags; }
 
-    var parts = str_split(options_str, ",");
+    var parts = str_split(options_str, 44);
     var n = vec_len(parts);
     for (var i = 0; i < n; i = i + 1) {
         var opt = vec_get(parts, i);
@@ -574,12 +575,12 @@ pub fn storage_eject(dev_path_cstr) {
         # USB/block: strip partition suffix to get base device name
         var base_name = dev_name;
         # For nvme/mmcblk: strip p<digits> suffix
-        if (str_contains(dev_name, "nvme")) {
+        if (str_contains_cstr(dev_name, "nvme")) {
             var p_idx = str_last_index_of(dev_name, "p");
             if (p_idx > 0) {
                 base_name = str_substr(dev_name, 0, p_idx);
             }
-        } elif (str_contains(dev_name, "mmcblk")) {
+        } elif (str_contains_cstr(dev_name, "mmcblk")) {
             var p_idx = str_last_index_of(dev_name, "p");
             if (p_idx > 0) {
                 base_name = str_substr(dev_name, 0, p_idx);

@@ -189,8 +189,11 @@ pub fn remove_rule(name, rules_dir_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn reload_rules() {
-    var r = run("udevadm", "control --reload-rules");
-    if (r != 0) {
+    var r = run("udevadm", "control", "--reload-rules");
+    if (is_ok(r) == 0) {
+        return err_udev(str_from("failed to reload rules"));
+    }
+    if (payload(r) != 0) {
         return err_udev(str_from("failed to reload rules"));
     }
     return Ok(0);
@@ -206,8 +209,8 @@ pub fn trigger_device(syspath_cstr) {
     str_builder_add_cstr(sb, syspath_cstr);
     var args = str_builder_build(sb);
 
-    var r = run("udevadm", str_cstr(args));
-    if (r != 0) {
+    var r = run("udevadm", str_cstr(args), 0);
+    if (is_ok(r) == 0) {
         return err_udev(str_from("failed to trigger device"));
     }
     return Ok(0);
@@ -224,7 +227,11 @@ pub fn query_device(syspath_cstr) {
     str_builder_add_cstr(sb, syspath_cstr);
     var args = str_builder_build(sb);
 
-    var n = run_capture("udevadm", str_cstr(args), &buf, 4096);
+    var cap_r = run_capture("udevadm", str_cstr(args), 0, &buf, 4096);
+    if (is_ok(cap_r) == 0) {
+        return err_udev(str_from("device query failed"));
+    }
+    var n = payload(cap_r);
     if (n <= 0) {
         return err_udev(str_from("device query failed"));
     }
@@ -239,11 +246,11 @@ pub fn query_device(syspath_cstr) {
     );
 
     # Parse KEY=VALUE lines
-    var lines = str_split(output, "\n");
+    var lines = str_split(output, 10);
     var nlines = vec_len(lines);
     for (var i = 0; i < nlines; i = i + 1) {
         var line = str_trim(vec_get(lines, i));
-        var eq = str_index_of(line, "=");
+        var eq = str_index_of(line, 61);
         if (eq < 0) { continue; }
         var key = str_substr(line, 0, eq);
         var val = str_substr(line, eq + 1, str_len(line));
@@ -268,13 +275,15 @@ pub fn list_devices(subsystem) {
     str_builder_add_cstr(args_sb, "info --export-db");
     var args = str_builder_build(args_sb);
 
-    var n = run_capture("udevadm", str_cstr(args), &buf, 8192);
+    var cap_r2 = run_capture("udevadm", str_cstr(args), 0, &buf, 8192);
+    if (is_ok(cap_r2) == 0) { return vec_new(); }
+    var n = payload(cap_r2);
     if (n <= 0) { return vec_new(); }
 
     # Parse output: device blocks separated by blank lines
     var output = str_from_buf(&buf, n);
     var devices = vec_new();
-    var lines = str_split(output, "\n");
+    var lines = str_split(output, 10);
     var nlines = vec_len(lines);
 
     var cur_syspath = 0;
@@ -316,7 +325,7 @@ pub fn list_devices(subsystem) {
             cur_syspath = str_substr(line, 3, str_len(line));
         } elif (str_starts_with(line, "E: ")) {
             var kv = str_substr(line, 3, str_len(line));
-            var eq = str_index_of(kv, "=");
+            var eq = str_index_of(kv, 61);
             if (eq >= 0) {
                 var key = str_substr(kv, 0, eq);
                 var val = str_substr(kv, eq + 1, str_len(kv));

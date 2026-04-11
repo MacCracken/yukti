@@ -37,9 +37,9 @@ fn test_error_to_str() {
     var sb = str_builder_new();
     yukti_err_to_str(e, sb);
     var s = str_builder_build(sb);
-    assert(str_contains(s, "permission denied"), "err to_str kind");
-    assert(str_contains(s, "mount"), "err to_str detail");
-    assert(str_contains(s, "/dev/sda"), "err to_str context");
+    assert(str_contains_cstr(s, "permission denied"), "err to_str kind");
+    assert(str_contains_cstr(s, "mount"), "err to_str detail");
+    assert(str_contains_cstr(s, "/dev/sda"), "err to_str context");
     return 0;
 }
 
@@ -194,15 +194,15 @@ fn test_device_info_size_display() {
     sb = str_builder_new();
     device_info_size_display(info, sb);
     s = str_builder_build(sb);
-    assert(str_contains(s, "512"), "size 512");
-    assert(str_contains(s, "B"), "size B");
+    assert(str_contains_cstr(s, "512"), "size 512");
+    assert(str_contains_cstr(s, "B"), "size B");
 
     di_set_size_bytes(info, 1024);
     sb = str_builder_new();
     device_info_size_display(info, sb);
     s = str_builder_build(sb);
-    assert(str_contains(s, "1"), "size 1KB");
-    assert(str_contains(s, "KB"), "size KB unit");
+    assert(str_contains_cstr(s, "1"), "size 1KB");
+    assert(str_contains_cstr(s, "KB"), "size KB unit");
     return 0;
 }
 
@@ -583,10 +583,10 @@ fn test_render_rule() {
 
     var rule = make_test_rule();
     var rendered = render_rule(rule);
-    assert(str_contains(rendered, "SUBSYSTEM"), "render has subsystem");
-    assert(str_contains(rendered, "usb"), "render has usb");
-    assert(str_contains(rendered, "MODE"), "render has mode");
-    assert(str_contains(rendered, "0666"), "render has 0666");
+    assert(str_contains_cstr(rendered, "SUBSYSTEM"), "render has subsystem");
+    assert(str_contains_cstr(rendered, "usb"), "render has usb");
+    assert(str_contains_cstr(rendered, "MODE"), "render has mode");
+    assert(str_contains_cstr(rendered, "0666"), "render has 0666");
     return 0;
 }
 

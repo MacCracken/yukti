@@ -95,8 +95,8 @@ pub fn classify_device(event) {
     # Block device subtypes
     if (str_eq_cstr(subsystem, "block")) {
         var sys_path = ue_sys_path(event);
-        if (str_contains(sys_path, "/dm-")) { return DC_DEVICE_MAPPER; }
-        if (str_contains(sys_path, "/loop")) { return DC_LOOP; }
+        if (str_contains_cstr(sys_path, "/dm-")) { return DC_DEVICE_MAPPER; }
+        if (str_contains_cstr(sys_path, "/loop")) { return DC_LOOP; }
         if (str_eq_cstr(dev_type, "disk")) { return DC_BLOCK_INTERNAL; }
         if (str_eq_cstr(dev_type, "partition")) { return DC_BLOCK_INTERNAL; }
     }
@@ -289,9 +289,10 @@ fn read_sysfs_attr(base_path, attr_cstr) {
     str_builder_add_cstr(sb, attr_cstr);
     var path = str_builder_build(sb);
 
-    var data = file_read_all(str_cstr(path));
-    if (data == 0) { return 0; }
-    return str_trim(str_from(data));
+    var attr_buf[256];
+    var attr_n = file_read_all(str_cstr(path), &attr_buf, 256);
+    if (attr_n <= 0) { return 0; }
+    return str_trim(str_from_buf(&attr_buf, attr_n));
 }
 
 # ---------------------------------------------------------------------------
@@ -304,7 +305,7 @@ pub fn enumerate_block_devices(sysfs_root) {
     str_builder_add_cstr(sb, "/block");
     var block_dir = str_builder_build(sb);
 
-    var entries = dir_list(str_cstr(block_dir));
+    var entries = dir_list(block_dir);
     if (entries == 0) { return vec_new(); }
     return entries;
 }
@@ -400,7 +401,7 @@ pub fn enumerate_devices(sysfs_root) {
     str_builder_add_cstr(sb, "/block");
     var block_dir = str_builder_build(sb);
 
-    var entries = dir_list(str_cstr(block_dir));
+    var entries = dir_list(block_dir);
     if (entries == 0) {
         return err_udev(str_from("failed to read /sys/block"));
     }
@@ -426,7 +427,7 @@ pub fn enumerate_devices(sysfs_root) {
         }
 
         # Enumerate partitions: subdirectories starting with dev_name
-        var sub_entries = dir_list(str_cstr(sys_path));
+        var sub_entries = dir_list(sys_path);
         if (sub_entries != 0) {
             var nsub = vec_len(sub_entries);
             for (var j = 0; j < nsub; j = j + 1) {
@@ -491,7 +492,7 @@ pub fn parse_uevent(buf, len) {
 
                 if (first_part) {
                     # Check for action@devpath header
-                    var at_idx = str_index_of(part, "@");
+                    var at_idx = str_index_of(part, 64);
                     if (at_idx >= 0) {
                         action = str_substr(part, 0, at_idx);
                         devpath = str_substr(part, at_idx + 1, str_len(part));
@@ -503,7 +504,7 @@ pub fn parse_uevent(buf, len) {
                 }
 
                 # Parse KEY=VALUE
-                var eq_idx = str_index_of(part, "=");
+                var eq_idx = str_index_of(part, 61);
                 if (eq_idx >= 0) {
                     var key = str_substr(part, 0, eq_idx);
                     var val = str_substr(part, eq_idx + 1, str_len(part));

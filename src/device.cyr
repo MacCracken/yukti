@@ -394,9 +394,12 @@ pub fn query_device_health(dev_name) {
     str_builder_add_cstr(sb, "/queue/rotational");
     var rot_path = str_builder_build(sb);
 
-    var rot_data = file_read_all(str_cstr(rot_path));
+    var rot_buf[64];
+    var rot_n = file_read_all(str_cstr(rot_path), &rot_buf, 64);
+    var rot_data = 0;
+    if (rot_n > 0) { rot_data = &rot_buf; }
     if (rot_data != 0) {
-        var rot_s = str_from(rot_data);
+        var rot_s = str_from_buf(rot_data, rot_n);
         var rot_trimmed = str_trim(rot_s);
         if (str_eq_cstr(rot_trimmed, "1")) {
             store64(health, 1);
@@ -412,9 +415,12 @@ pub fn query_device_health(dev_name) {
     str_builder_add_cstr(sb2, "/queue/scheduler");
     var sched_path = str_builder_build(sb2);
 
-    var sched_data = file_read_all(str_cstr(sched_path));
+    var sched_buf[256];
+    var sched_n = file_read_all(str_cstr(sched_path), &sched_buf, 256);
+    var sched_data = 0;
+    if (sched_n > 0) { sched_data = &sched_buf; }
     if (sched_data != 0) {
-        var sched_s = str_from(sched_data);
+        var sched_s = str_from_buf(sched_data, sched_n);
         store64(health + DH_SCHEDULER, str_trim(sched_s));
     }
 

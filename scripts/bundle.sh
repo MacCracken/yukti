@@ -26,15 +26,15 @@ cat > "$OUT" << HEADER
 HEADER
 
 # Append each module in dependency order (matching src/lib.cyr)
-for mod in error device event storage optical udev linux udev_rules partition device_db network; do
+for mod in error device event storage optical udev linux udev_rules partition device_db network gpu; do
     echo "" >> "$OUT"
     echo "# --- ${mod}.cyr ---" >> "$OUT"
     # Strip any include lines from individual modules
     grep -v "^include " "$REPO/src/${mod}.cyr" >> "$OUT"
 done
 
-# Strip consecutive blank lines (lint requires single blanks only)
-awk 'NF{blank=0} !NF{blank++} blank<=1' "$OUT" > "${OUT}.tmp"
+# Strip consecutive blank lines and trailing whitespace (lint clean)
+sed 's/[[:space:]]*$//' "$OUT" | awk 'NF{blank=0} !NF{blank++} blank<=1' > "${OUT}.tmp"
 mv "${OUT}.tmp" "$OUT"
 
 LINES=$(wc -l < "$OUT")

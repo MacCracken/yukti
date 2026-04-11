@@ -3,9 +3,8 @@
 # DeviceId, DeviceClass, DeviceState, DeviceCapabilities (bitflags),
 # DeviceInfo (primary device data structure), DeviceHealth, permissions.
 
-
 # ---------------------------------------------------------------------------
-# DeviceClass enum — 8 variants
+# DeviceClass enum — 9 variants
 # ---------------------------------------------------------------------------
 
 enum DeviceClass {

@@ -1,5 +1,5 @@
 name = "yukti"
-version = "1.0.0"
+version = "1.1.0"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "yukti"
@@ -17,6 +17,8 @@ modules = [
     "src/udev.cyr",
     "src/linux.cyr",
     "src/udev_rules.cyr",
+    "src/device_db.cyr",
+    "src/network.cyr",
 ]
 
 [[bench]]

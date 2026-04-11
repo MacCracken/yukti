@@ -63,7 +63,7 @@ pub fn linux_dm_dispatch_event(mgr, event) {
 
 pub fn linux_dm_enumerate(mgr) {
     var root = ldm_sysfs_root(mgr);
-    sakshi_info("enumerating devices", strlen("enumerating devices"));
+    sakshi_span_enter("enumerate", 9);
 
     var r = enumerate_devices(root);
     if (is_ok(r) == 0) { return r; }
@@ -82,7 +82,7 @@ pub fn linux_dm_enumerate(mgr) {
     }
     store64(mgr + LDM_DEVICES, new_cache);
 
-    sakshi_info("device cache updated", strlen("device cache updated"));
+    sakshi_span_exit();
     return Ok(devices);
 }
 
@@ -202,7 +202,7 @@ pub fn linux_dm_start_monitor(mgr) {
         return err_udev(str_from("monitor already running"));
     }
 
-    sakshi_info("starting udev hotplug monitor", strlen("starting udev hotplug monitor"));
+    sakshi_info("starting udev hotplug monitor", 31);
     var r = udev_monitor_new();
     if (is_ok(r) == 0) { return r; }
 
@@ -222,6 +222,6 @@ pub fn linux_dm_stop_monitor(mgr) {
         udev_monitor_close(mon);
         store64(mgr + LDM_MONITOR, 0);
     }
-    sakshi_info("udev monitor stopped", strlen("udev monitor stopped"));
+    sakshi_info("udev monitor stopped", 20);
     return 0;
 }

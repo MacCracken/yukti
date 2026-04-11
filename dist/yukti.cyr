@@ -1337,7 +1337,7 @@ pub fn storage_mount(dev_path_cstr, options) {
     var val_r = validate_mount_point(mount_cstr);
     if (is_ok(val_r) == 0) { return val_r; }
 
-    sakshi_info("mounting device", strlen("mounting device"));
+    sakshi_span_enter("mount", 5);
 
     # Create mount point directory: SYS_MKDIR = 83
     syscall(83, mount_cstr, 493);
@@ -1356,7 +1356,7 @@ pub fn storage_mount(dev_path_cstr, options) {
             var errno = 0 - r;
             return map_errno_to_err(errno, "mount", str_from(dev_path_cstr));
         }
-        sakshi_info("mount succeeded", strlen("mount succeeded"));
+        sakshi_span_exit();
         var dev_id = device_id_new_cstr(dev_path_cstr);
         return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
                                    filesystem_from_str(fs_cstr), read_only));
@@ -1369,7 +1369,7 @@ pub fn storage_mount(dev_path_cstr, options) {
         if (fs_try == 0) { break; }
         var r = syscall(165, dev_path_cstr, mount_cstr, fs_try, flags, 0);
         if (r == 0) {
-            sakshi_info("mount succeeded (auto)", strlen("mount succeeded (auto)"));
+            sakshi_span_exit();
             var dev_id = device_id_new_cstr(dev_path_cstr);
             return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
                                        filesystem_from_str(fs_try), read_only));
@@ -1385,13 +1385,13 @@ pub fn storage_mount(dev_path_cstr, options) {
 # ---------------------------------------------------------------------------
 
 pub fn storage_unmount(mount_point_cstr) {
-    sakshi_info("unmounting", strlen("unmounting"));
+    sakshi_span_enter("unmount", 7);
 
     # SYS_UMOUNT2 = 166, flags = 0
     var r = syscall(166, mount_point_cstr, 0);
     if (r < 0) {
         var errno = 0 - r;
-        sakshi_error("unmount failed", strlen("unmount failed"));
+        sakshi_span_exit();
         if (errno == 1) { return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr)); }
         if (errno == 13) { return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr)); }
         if (errno == 16) { return err_device_busy(str_from(mount_point_cstr)); }
@@ -1401,7 +1401,7 @@ pub fn storage_unmount(mount_point_cstr) {
         return err_unmount_failed(str_from(mount_point_cstr), str_builder_build(sb));
     }
 
-    sakshi_info("unmount succeeded", strlen("unmount succeeded"));
+    sakshi_span_exit();
 
     # Clean up mount directory if under /run/media/
     # SYS_RMDIR = 84
@@ -1427,7 +1427,7 @@ enum EjectConst {
 }
 
 pub fn storage_eject(dev_path_cstr) {
-    sakshi_info("ejecting device", strlen("ejecting device"));
+    sakshi_span_enter("eject", 5);
 
     # Unmount first if mounted
     var mp = find_mount_point(dev_path_cstr);
@@ -1501,7 +1501,7 @@ pub fn storage_eject(dev_path_cstr) {
         syscall(SYS_CLOSE, fd);
     }
 
-    sakshi_info("eject succeeded", strlen("eject succeeded"));
+    sakshi_span_exit();
     return Ok(0);
 }
 
@@ -1719,7 +1719,7 @@ fn map_ioctl_error(dev_path_cstr, op) {
 # ---------------------------------------------------------------------------
 
 pub fn open_tray(dev_path_cstr) {
-    sakshi_info("opening tray", strlen("opening tray"));
+    sakshi_span_enter("open_tray", 9);
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -1728,11 +1728,11 @@ pub fn open_tray(dev_path_cstr) {
     syscall(SYS_CLOSE, fd);
 
     if (ret < 0) {
-        sakshi_error("open tray failed", strlen("open tray failed"));
+        sakshi_span_exit();
         return err_tray_failed(str_from("eject ioctl failed"));
     }
 
-    sakshi_info("tray opened", strlen("tray opened"));
+    sakshi_span_exit();
     return Ok(0);
 }
 
@@ -1741,7 +1741,7 @@ pub fn open_tray(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn close_tray(dev_path_cstr) {
-    sakshi_info("closing tray", strlen("closing tray"));
+    sakshi_span_enter("close_tray", 10);
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -1750,11 +1750,11 @@ pub fn close_tray(dev_path_cstr) {
     syscall(SYS_CLOSE, fd);
 
     if (ret < 0) {
-        sakshi_error("close tray failed", strlen("close tray failed"));
+        sakshi_span_exit();
         return err_tray_failed(str_from("close tray ioctl failed"));
     }
 
-    sakshi_info("tray closed", strlen("tray closed"));
+    sakshi_span_exit();
     return Ok(0);
 }
 
@@ -1786,7 +1786,7 @@ pub fn drive_status(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn read_toc(dev_path_cstr) {
-    sakshi_info("reading disc TOC", strlen("reading disc TOC"));
+    sakshi_span_enter("read_toc", 8);
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -1896,7 +1896,7 @@ pub fn read_toc(dev_path_cstr) {
     # Classify disc type
     var dt = classify_toc_tracks(has_audio, has_data);
 
-    sakshi_info("TOC read complete", strlen("TOC read complete"));
+    sakshi_span_exit();
 
     return Ok(disc_toc_new(dt, tracks, total_size));
 }
@@ -2419,7 +2419,7 @@ pub fn enumerate_devices(sysfs_root) {
         }
     }
 
-    sakshi_info("enumeration complete", strlen("enumeration complete"));
+    sakshi_info("enumeration complete", 20);
     return Ok(devices);
 }
 
@@ -2615,7 +2615,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
     store64(mon + 8, 1);
     store64(mon + 16, filter_vec);
 
-    sakshi_info("udev monitor created", strlen("udev monitor created"));
+    sakshi_info("udev monitor created", 20);
     return Ok(mon);
 }
 
@@ -2645,7 +2645,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
 
 pub fn udev_monitor_stop(mon) {
     store64(mon + 8, 0);
-    sakshi_info("udev monitor stopping", strlen("udev monitor stopping"));
+    sakshi_info("udev monitor stopping", 21);
     return 0;
 }
 
@@ -2662,7 +2662,7 @@ pub fn udev_monitor_is_running(mon) {
 
 # Run event loop dispatching to a listener function pointer
 pub fn udev_monitor_run(mon, listener_fn) {
-    sakshi_info("udev monitor event loop started", strlen("udev monitor event loop started"));
+    sakshi_span_enter("udev_monitor", 12);
     while (udev_monitor_is_running(mon)) {
         var r = udev_monitor_poll(mon, 500);
         if (is_ok(r) == 0) { continue; }
@@ -2755,7 +2755,7 @@ pub fn linux_dm_dispatch_event(mgr, event) {
 
 pub fn linux_dm_enumerate(mgr) {
     var root = ldm_sysfs_root(mgr);
-    sakshi_info("enumerating devices", strlen("enumerating devices"));
+    sakshi_span_enter("enumerate", 9);
 
     var r = enumerate_devices(root);
     if (is_ok(r) == 0) { return r; }
@@ -2774,7 +2774,7 @@ pub fn linux_dm_enumerate(mgr) {
     }
     store64(mgr + LDM_DEVICES, new_cache);
 
-    sakshi_info("device cache updated", strlen("device cache updated"));
+    sakshi_span_exit();
     return Ok(devices);
 }
 
@@ -2894,7 +2894,7 @@ pub fn linux_dm_start_monitor(mgr) {
         return err_udev(str_from("monitor already running"));
     }
 
-    sakshi_info("starting udev hotplug monitor", strlen("starting udev hotplug monitor"));
+    sakshi_info("starting udev hotplug monitor", 31);
     var r = udev_monitor_new();
     if (is_ok(r) == 0) { return r; }
 
@@ -2914,7 +2914,7 @@ pub fn linux_dm_stop_monitor(mgr) {
         udev_monitor_close(mon);
         store64(mgr + LDM_MONITOR, 0);
     }
-    sakshi_info("udev monitor stopped", strlen("udev monitor stopped"));
+    sakshi_info("udev monitor stopped", 20);
     return 0;
 }
 
@@ -3259,4 +3259,667 @@ pub fn list_devices(subsystem) {
     }
 
     return devices;
+}
+
+# --- device_db.cyr ---
+# yukti/device_db.cyr — Device database persistence via patra
+#
+# Tracks device history, mount preferences, and metadata.
+# Stores in a local .patra database file.
+#
+# Tables:
+#   devices       — known devices (by serial/vendor+model)
+#   mount_history — mount/unmount events with timestamps
+#   preferences   — per-device mount preferences (mount point, read-only, fs type)
+
+# ---------------------------------------------------------------------------
+# Database lifecycle
+# ---------------------------------------------------------------------------
+
+var _yukti_db = 0;
+
+pub fn device_db_open(path) {
+    sakshi_span_enter("db_open", 7);
+    patra_init();
+    _yukti_db = patra_open(path);
+    if (_yukti_db == 0) {
+        sakshi_span_exit();
+        return err_io(str_from("failed to open device database"));
+    }
+
+    # Create tables if they don't exist
+    patra_exec(_yukti_db, "CREATE TABLE devices (serial STR, vendor STR, model STR, class INT, first_seen INT, last_seen INT, mount_count INT)");
+    patra_exec(_yukti_db, "CREATE TABLE mount_history (serial STR, dev_path STR, mount_point STR, fs_type STR, timestamp INT, action INT)");
+    patra_exec(_yukti_db, "CREATE TABLE preferences (serial STR, mount_point STR, read_only INT, fs_type STR, auto_mount INT)");
+
+    sakshi_span_exit();
+    return Ok(_yukti_db);
+}
+
+pub fn device_db_close() {
+    if (_yukti_db != 0) {
+        patra_close(_yukti_db);
+        _yukti_db = 0;
+    }
+    return 0;
+}
+
+pub fn device_db_handle() {
+    return _yukti_db;
+}
+
+# ---------------------------------------------------------------------------
+# Device key — serial if available, else vendor:model
+# ---------------------------------------------------------------------------
+
+fn device_key(info) {
+    var serial = di_serial(info);
+    if (serial != 0) {
+        if (str_len(serial) > 0) {
+            return serial;
+        }
+    }
+    # Fallback: vendor:model
+    var vendor = di_vendor(info);
+    var model = di_model(info);
+    if (vendor == 0) { vendor = str_from("unknown"); }
+    if (model == 0) { model = str_from("unknown"); }
+    var sb = str_builder_new();
+    str_builder_add_str(sb, vendor);
+    str_builder_add_cstr(sb, ":");
+    str_builder_add_str(sb, model);
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# Record device seen — upsert into devices table
+# ---------------------------------------------------------------------------
+
+pub fn device_db_record_seen(info) {
+    if (_yukti_db == 0) { return 0; }
+
+    var key = device_key(info);
+    var key_cstr = str_cstr(key);
+    var vendor = di_vendor(info);
+    var model = di_model(info);
+    var class = di_class(info);
+
+    # Get current timestamp
+    var ts[16];
+    syscall(228, 0, &ts);
+    var now = load64(&ts);
+
+    # Check if device exists
+    var sql_sb = str_builder_new();
+    str_builder_add_cstr(sql_sb, "SELECT mount_count FROM devices WHERE serial = '");
+    str_builder_add_str(sql_sb, key);
+    str_builder_add_cstr(sql_sb, "'");
+    var sql = str_builder_build(sql_sb);
+
+    var rs = patra_query(_yukti_db, str_cstr(sql));
+    if (rs != 0) {
+        if (patra_result_count(rs) > 0) {
+            # Update existing — bump last_seen and mount_count
+            var count = patra_result_get_int(rs, 0, 0);
+            patra_result_free(rs);
+
+            var upd_sb = str_builder_new();
+            str_builder_add_cstr(upd_sb, "UPDATE devices SET last_seen = ");
+            str_builder_add_int(upd_sb, now);
+            str_builder_add_cstr(upd_sb, " WHERE serial = '");
+            str_builder_add_str(upd_sb, key);
+            str_builder_add_cstr(upd_sb, "'");
+            patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
+            return 0;
+        }
+        patra_result_free(rs);
+    }
+
+    # Insert new device
+    var ins_sb = str_builder_new();
+    str_builder_add_cstr(ins_sb, "INSERT INTO devices VALUES ('");
+    str_builder_add_str(ins_sb, key);
+    str_builder_add_cstr(ins_sb, "', '");
+    if (vendor != 0) { str_builder_add_str(ins_sb, vendor); }
+    str_builder_add_cstr(ins_sb, "', '");
+    if (model != 0) { str_builder_add_str(ins_sb, model); }
+    str_builder_add_cstr(ins_sb, "', ");
+    str_builder_add_int(ins_sb, class);
+    str_builder_add_cstr(ins_sb, ", ");
+    str_builder_add_int(ins_sb, now);
+    str_builder_add_cstr(ins_sb, ", ");
+    str_builder_add_int(ins_sb, now);
+    str_builder_add_cstr(ins_sb, ", 0)");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(ins_sb)));
+
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Record mount/unmount event
+# ---------------------------------------------------------------------------
+
+enum MountAction {
+    ACTION_MOUNT = 1;
+    ACTION_UNMOUNT = 2;
+    ACTION_EJECT = 3;
+}
+
+pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
+    if (_yukti_db == 0) { return 0; }
+
+    var key = device_key(info);
+    var dev_path = di_dev_path(info);
+
+    var ts[16];
+    syscall(228, 0, &ts);
+    var now = load64(&ts);
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "INSERT INTO mount_history VALUES ('");
+    str_builder_add_str(sb, key);
+    str_builder_add_cstr(sb, "', '");
+    str_builder_add_str(sb, dev_path);
+    str_builder_add_cstr(sb, "', '");
+    if (mount_point != 0) { str_builder_add_str(sb, mount_point); }
+    str_builder_add_cstr(sb, "', '");
+    if (fs_type_str != 0) { str_builder_add_str(sb, fs_type_str); }
+    str_builder_add_cstr(sb, "', ");
+    str_builder_add_int(sb, now);
+    str_builder_add_cstr(sb, ", ");
+    str_builder_add_int(sb, action);
+    str_builder_add_cstr(sb, ")");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb)));
+
+    # Update mount_count in devices table
+    if (action == ACTION_MOUNT) {
+        var upd_sb = str_builder_new();
+        str_builder_add_cstr(upd_sb, "UPDATE devices SET mount_count = mount_count + 1, last_seen = ");
+        str_builder_add_int(upd_sb, now);
+        str_builder_add_cstr(upd_sb, " WHERE serial = '");
+        str_builder_add_str(upd_sb, key);
+        str_builder_add_cstr(upd_sb, "'");
+        patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
+    }
+
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Preferences — per-device mount configuration
+# ---------------------------------------------------------------------------
+
+pub fn device_db_set_preference(serial, mount_point, read_only, fs_type, auto_mount) {
+    if (_yukti_db == 0) { return 0; }
+
+    # Delete existing preference
+    var del_sb = str_builder_new();
+    str_builder_add_cstr(del_sb, "DELETE FROM preferences WHERE serial = '");
+    str_builder_add_str(del_sb, serial);
+    str_builder_add_cstr(del_sb, "'");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(del_sb)));
+
+    # Insert new preference
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "INSERT INTO preferences VALUES ('");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "', '");
+    if (mount_point != 0) { str_builder_add_str(sb, mount_point); }
+    str_builder_add_cstr(sb, "', ");
+    str_builder_add_int(sb, read_only);
+    str_builder_add_cstr(sb, ", '");
+    if (fs_type != 0) { str_builder_add_str(sb, fs_type); }
+    str_builder_add_cstr(sb, "', ");
+    str_builder_add_int(sb, auto_mount);
+    str_builder_add_cstr(sb, ")");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb)));
+
+    return 0;
+}
+
+# Get preference for a device. Returns alloc'd struct or 0.
+# Layout: 32 bytes [mount_point Str, read_only i64, fs_type Str, auto_mount i64]
+pub fn device_db_get_preference(serial) {
+    if (_yukti_db == 0) { return 0; }
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT mount_point, read_only, fs_type, auto_mount FROM preferences WHERE serial = '");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "'");
+
+    var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
+    if (rs == 0) { return 0; }
+    if (patra_result_count(rs) == 0) {
+        patra_result_free(rs);
+        return 0;
+    }
+
+    var pref = alloc(32);
+    var mp_raw = patra_result_get_str(rs, 0, 0);
+    if (mp_raw != 0) {
+        if (load8(mp_raw) != 0) {
+            store64(pref, str_from(mp_raw));
+        } else {
+            store64(pref, 0);
+        }
+    } else {
+        store64(pref, 0);
+    }
+    store64(pref + 8, patra_result_get_int(rs, 0, 1));
+    var fs_raw = patra_result_get_str(rs, 0, 2);
+    if (fs_raw != 0) {
+        if (load8(fs_raw) != 0) {
+            store64(pref + 16, str_from(fs_raw));
+        } else {
+            store64(pref + 16, 0);
+        }
+    } else {
+        store64(pref + 16, 0);
+    }
+    store64(pref + 24, patra_result_get_int(rs, 0, 3));
+    patra_result_free(rs);
+    return pref;
+}
+
+pub fn pref_mount_point(p) { return load64(p); }
+pub fn pref_read_only(p) { return load64(p + 8); }
+pub fn pref_fs_type(p) { return load64(p + 16); }
+pub fn pref_auto_mount(p) { return load64(p + 24); }
+
+# ---------------------------------------------------------------------------
+# Queries — device history
+# ---------------------------------------------------------------------------
+
+# Get mount count for a device
+pub fn device_db_mount_count(serial) {
+    if (_yukti_db == 0) { return 0; }
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT mount_count FROM devices WHERE serial = '");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "'");
+
+    var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
+    if (rs == 0) { return 0; }
+    if (patra_result_count(rs) == 0) {
+        patra_result_free(rs);
+        return 0;
+    }
+    var count = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return count;
+}
+
+# Get total known device count
+pub fn device_db_device_count() {
+    if (_yukti_db == 0) { return 0; }
+    var rs = patra_query(_yukti_db, "SELECT COUNT(*) FROM devices");
+    if (rs == 0) { return 0; }
+    var count = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return count;
+}
+
+# Check if a device has been seen before
+pub fn device_db_is_known(serial) {
+    if (_yukti_db == 0) { return 0; }
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT serial FROM devices WHERE serial = '");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "'");
+
+    var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
+    if (rs == 0) { return 0; }
+    var known = patra_result_count(rs) > 0;
+    patra_result_free(rs);
+    return known;
+}
+
+# --- network.cyr ---
+# yukti/network.cyr — Network filesystem mount helpers
+#
+# SMB/CIFS and NFS mount support via mount syscall.
+# Share detection via /proc/mounts and simple probing.
+
+# ---------------------------------------------------------------------------
+# Network filesystem types
+# ---------------------------------------------------------------------------
+
+enum NetFsType {
+    NET_FS_SMB = 0;
+    NET_FS_NFS = 1;
+    NET_FS_NFS4 = 2;
+}
+
+pub fn net_fs_to_str(nfs) {
+    if (nfs == NET_FS_SMB) { return "cifs"; }
+    if (nfs == NET_FS_NFS) { return "nfs"; }
+    if (nfs == NET_FS_NFS4) { return "nfs4"; }
+    return "unknown";
+}
+
+pub fn net_fs_to_kernel_type(nfs) {
+    if (nfs == NET_FS_SMB) { return "cifs"; }
+    if (nfs == NET_FS_NFS) { return "nfs"; }
+    if (nfs == NET_FS_NFS4) { return "nfs4"; }
+    return "nfs";
+}
+
+# ---------------------------------------------------------------------------
+# NetworkShare struct — describes a remote share
+# Layout: 48 bytes
+#   0: host (Str — IP or hostname)
+#   8: path (Str — remote path, e.g. /exports/data)
+#  16: fs_type (NetFsType)
+#  24: port (i64, 0 = default: 445 for SMB, 2049 for NFS)
+#  32: username (Str, 0 if none)
+#  40: password (Str, 0 if none)
+# ---------------------------------------------------------------------------
+
+enum NetShareField {
+    NS_HOST = 0;
+    NS_PATH = 8;
+    NS_FS_TYPE = 16;
+    NS_PORT = 24;
+    NS_USERNAME = 32;
+    NS_PASSWORD = 40;
+    NS_SIZE = 48;
+}
+
+pub fn network_share_new(host, path, fs_type) {
+    var ns = alloc(NS_SIZE);
+    store64(ns + NS_HOST, host);
+    store64(ns + NS_PATH, path);
+    store64(ns + NS_FS_TYPE, fs_type);
+    store64(ns + NS_PORT, 0);
+    store64(ns + NS_USERNAME, 0);
+    store64(ns + NS_PASSWORD, 0);
+    return ns;
+}
+
+pub fn ns_host(ns) { return load64(ns + NS_HOST); }
+pub fn ns_path(ns) { return load64(ns + NS_PATH); }
+pub fn ns_fs_type(ns) { return load64(ns + NS_FS_TYPE); }
+pub fn ns_port(ns) { return load64(ns + NS_PORT); }
+pub fn ns_username(ns) { return load64(ns + NS_USERNAME); }
+pub fn ns_password(ns) { return load64(ns + NS_PASSWORD); }
+
+pub fn ns_set_port(ns, port) { store64(ns + NS_PORT, port); return ns; }
+pub fn ns_set_username(ns, user) { store64(ns + NS_USERNAME, user); return ns; }
+pub fn ns_set_password(ns, pass) { store64(ns + NS_PASSWORD, pass); return ns; }
+
+# Default port for filesystem type
+pub fn ns_default_port(fs_type) {
+    if (fs_type == NET_FS_SMB) { return 445; }
+    if (fs_type == NET_FS_NFS) { return 2049; }
+    if (fs_type == NET_FS_NFS4) { return 2049; }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Build mount source string
+# SMB: //host/path
+# NFS: host:/path
+# ---------------------------------------------------------------------------
+
+pub fn network_mount_source(share) {
+    var sb = str_builder_new();
+    var fs = ns_fs_type(share);
+
+    if (fs == NET_FS_SMB) {
+        str_builder_add_cstr(sb, "//");
+        str_builder_add_str(sb, ns_host(share));
+        var path = ns_path(share);
+        if (load8(str_data(path)) != 47) {
+            str_builder_add_cstr(sb, "/");
+        }
+        str_builder_add_str(sb, path);
+    } else {
+        # NFS: host:/path
+        str_builder_add_str(sb, ns_host(share));
+        str_builder_add_cstr(sb, ":");
+        str_builder_add_str(sb, ns_path(share));
+    }
+
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# Build mount data options string for SMB/NFS
+# ---------------------------------------------------------------------------
+
+fn build_smb_options(share) {
+    var sb = str_builder_new();
+
+    var user = ns_username(share);
+    if (user != 0) {
+        str_builder_add_cstr(sb, "username=");
+        str_builder_add_str(sb, user);
+        var pass = ns_password(share);
+        if (pass != 0) {
+            str_builder_add_cstr(sb, ",password=");
+            str_builder_add_str(sb, pass);
+        }
+    } else {
+        str_builder_add_cstr(sb, "guest");
+    }
+
+    var port = ns_port(share);
+    if (port != 0) {
+        if (port != 445) {
+            str_builder_add_cstr(sb, ",port=");
+            str_builder_add_int(sb, port);
+        }
+    }
+
+    return str_builder_build(sb);
+}
+
+fn build_nfs_options(share) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "nolock");
+
+    var port = ns_port(share);
+    if (port != 0) {
+        if (port != 2049) {
+            str_builder_add_cstr(sb, ",port=");
+            str_builder_add_int(sb, port);
+        }
+    }
+
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# Mount a network share
+# ---------------------------------------------------------------------------
+
+pub fn network_mount(share, mount_point_cstr) {
+    sakshi_span_enter("net_mount", 9);
+
+    var source = network_mount_source(share);
+    var source_cstr = str_cstr(source);
+    var fs_type = ns_fs_type(share);
+    var kernel_type = net_fs_to_kernel_type(fs_type);
+
+    # Validate mount point
+    var val_r = validate_mount_point(mount_point_cstr);
+    if (is_ok(val_r) == 0) {
+        sakshi_span_exit();
+        return val_r;
+    }
+
+    # Create mount point directory
+    syscall(83, mount_point_cstr, 493);
+
+    # Build options
+    var options = 0;
+    if (fs_type == NET_FS_SMB) {
+        options = build_smb_options(share);
+    } else {
+        options = build_nfs_options(share);
+    }
+    var options_cstr = str_cstr(options);
+
+    # Mount syscall: mount(source, target, fstype, flags, data)
+    # MS_NOSUID=2 | MS_NODEV=4 = 6
+    var flags = 6;
+    var r = syscall(165, source_cstr, mount_point_cstr, kernel_type, flags, options_cstr);
+
+    if (r < 0) {
+        var errno = 0 - r;
+        sakshi_span_exit();
+        return map_errno_to_err(errno, "network mount", source);
+    }
+
+    sakshi_span_exit();
+
+    # Build a DeviceInfo for the network mount
+    var id = device_id_new(source);
+    var info = device_info_new(id, source, DC_NETWORK);
+    di_set_state(info, DS_MOUNTED);
+    di_set_mount_point(info, str_from(mount_point_cstr));
+    if (fs_type == NET_FS_SMB) {
+        di_set_fs_type(info, str_from("cifs"));
+    } elif (fs_type == NET_FS_NFS4) {
+        di_set_fs_type(info, str_from("nfs4"));
+    } else {
+        di_set_fs_type(info, str_from("nfs"));
+    }
+
+    var mr = mount_result_new(id, source, str_from(mount_point_cstr),
+                               filesystem_from_str(kernel_type), 0);
+    return Ok(mr);
+}
+
+# ---------------------------------------------------------------------------
+# Unmount a network share (delegates to storage_unmount)
+# ---------------------------------------------------------------------------
+
+pub fn network_unmount(mount_point_cstr) {
+    return storage_unmount(mount_point_cstr);
+}
+
+# ---------------------------------------------------------------------------
+# Detect mounted network shares from /proc/mounts
+# Returns vec of NetworkShare structs for currently mounted shares
+# ---------------------------------------------------------------------------
+
+pub fn network_list_mounted() {
+    var readbuf[8192];
+    var nbytes = file_read_all("/proc/mounts", &readbuf, 8192);
+    if (nbytes <= 0) { return vec_new(); }
+
+    var table = str_from_buf(&readbuf, nbytes);
+    var lines = str_split(table, 10);
+    var shares = vec_new();
+    var nlines = vec_len(lines);
+
+    for (var i = 0; i < nlines; i = i + 1) {
+        var line = str_trim(vec_get(lines, i));
+        if (str_len(line) == 0) { continue; }
+
+        var fields = str_split(line, 32);
+        if (vec_len(fields) < 3) { continue; }
+
+        var device = vec_get(fields, 0);
+        var mountpoint = vec_get(fields, 1);
+        var fstype = vec_get(fields, 2);
+
+        # Check for network filesystem types
+        var fs = 0 - 1;
+        if (str_eq_cstr(fstype, "cifs")) { fs = NET_FS_SMB; }
+        elif (str_eq_cstr(fstype, "nfs")) { fs = NET_FS_NFS; }
+        elif (str_eq_cstr(fstype, "nfs4")) { fs = NET_FS_NFS4; }
+
+        if (fs >= 0) {
+            # Parse source: //host/path (SMB) or host:/path (NFS)
+            var host = str_from("");
+            var path = str_from("");
+
+            if (fs == NET_FS_SMB) {
+                # //host/share → strip //, split on first /
+                if (str_starts_with(device, "//")) {
+                    var rest = str_substr(device, 2, str_len(device));
+                    var slash = str_index_of(rest, 47);
+                    if (slash >= 0) {
+                        host = str_substr(rest, 0, slash);
+                        path = str_substr(rest, slash, str_len(rest));
+                    } else {
+                        host = rest;
+                    }
+                }
+            } else {
+                # host:/path → split on :
+                var colon = str_index_of(device, 58);
+                if (colon >= 0) {
+                    host = str_substr(device, 0, colon);
+                    path = str_substr(device, colon + 1, str_len(device));
+                }
+            }
+
+            var share = network_share_new(host, path, fs);
+            vec_push(shares, share);
+        }
+    }
+
+    return shares;
+}
+
+# ---------------------------------------------------------------------------
+# Probe if a host is reachable on a given port (simple TCP connect test)
+# Returns 1 if reachable, 0 if not. Timeout ~2 seconds.
+# ---------------------------------------------------------------------------
+
+pub fn network_probe_host(host_cstr, port) {
+    # Create TCP socket
+    var fd = syscall(41, 2, 1, 0);
+    if (fd < 0) { return 0; }
+
+    # Build sockaddr_in
+    var addr[16];
+    store16(&addr, 2);
+
+    # Port in network byte order (big-endian)
+    store8(&addr + 2, (port >> 8) & 0xFF);
+    store8(&addr + 3, port & 0xFF);
+
+    # Parse IP from dotted notation (simple — 4 octets)
+    var ip = 0;
+    var octet = 0;
+    var shift = 0;
+    var hi = 0;
+    while (load8(host_cstr + hi) != 0) {
+        var c = load8(host_cstr + hi);
+        if (c == 46) {
+            ip = ip | (octet << shift);
+            shift = shift + 8;
+            octet = 0;
+        } else {
+            if (c >= 48) { if (c <= 57) { octet = octet * 10 + (c - 48); } }
+        }
+        hi = hi + 1;
+    }
+    ip = ip | (octet << shift);
+    store32(&addr + 4, ip);
+
+    # Non-blocking connect would be better, but simple blocking test works
+    var r = syscall(42, fd, &addr, 16);
+    syscall(3, fd);
+
+    if (r == 0) { return 1; }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Probe common network share ports
+# ---------------------------------------------------------------------------
+
+pub fn network_probe_smb(host_cstr) {
+    return network_probe_host(host_cstr, 445);
+}
+
+pub fn network_probe_nfs(host_cstr) {
+    return network_probe_host(host_cstr, 2049);
 }

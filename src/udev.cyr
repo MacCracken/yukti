@@ -456,7 +456,7 @@ pub fn enumerate_devices(sysfs_root) {
         }
     }
 
-    sakshi_info("enumeration complete", strlen("enumeration complete"));
+    sakshi_info("enumeration complete", 20);
     return Ok(devices);
 }
 
@@ -652,7 +652,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
     store64(mon + 8, 1);
     store64(mon + 16, filter_vec);
 
-    sakshi_info("udev monitor created", strlen("udev monitor created"));
+    sakshi_info("udev monitor created", 20);
     return Ok(mon);
 }
 
@@ -682,7 +682,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
 
 pub fn udev_monitor_stop(mon) {
     store64(mon + 8, 0);
-    sakshi_info("udev monitor stopping", strlen("udev monitor stopping"));
+    sakshi_info("udev monitor stopping", 21);
     return 0;
 }
 
@@ -699,7 +699,7 @@ pub fn udev_monitor_is_running(mon) {
 
 # Run event loop dispatching to a listener function pointer
 pub fn udev_monitor_run(mon, listener_fn) {
-    sakshi_info("udev monitor event loop started", strlen("udev monitor event loop started"));
+    sakshi_span_enter("udev_monitor", 12);
     while (udev_monitor_is_running(mon)) {
         var r = udev_monitor_poll(mon, 500);
         if (is_ok(r) == 0) { continue; }

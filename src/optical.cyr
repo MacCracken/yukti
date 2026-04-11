@@ -211,7 +211,7 @@ fn map_ioctl_error(dev_path_cstr, op) {
 # ---------------------------------------------------------------------------
 
 pub fn open_tray(dev_path_cstr) {
-    sakshi_info("opening tray", strlen("opening tray"));
+    sakshi_span_enter("open_tray", 9);
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -220,11 +220,11 @@ pub fn open_tray(dev_path_cstr) {
     syscall(SYS_CLOSE, fd);
 
     if (ret < 0) {
-        sakshi_error("open tray failed", strlen("open tray failed"));
+        sakshi_span_exit();
         return err_tray_failed(str_from("eject ioctl failed"));
     }
 
-    sakshi_info("tray opened", strlen("tray opened"));
+    sakshi_span_exit();
     return Ok(0);
 }
 
@@ -233,7 +233,7 @@ pub fn open_tray(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn close_tray(dev_path_cstr) {
-    sakshi_info("closing tray", strlen("closing tray"));
+    sakshi_span_enter("close_tray", 10);
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -242,11 +242,11 @@ pub fn close_tray(dev_path_cstr) {
     syscall(SYS_CLOSE, fd);
 
     if (ret < 0) {
-        sakshi_error("close tray failed", strlen("close tray failed"));
+        sakshi_span_exit();
         return err_tray_failed(str_from("close tray ioctl failed"));
     }
 
-    sakshi_info("tray closed", strlen("tray closed"));
+    sakshi_span_exit();
     return Ok(0);
 }
 
@@ -278,7 +278,7 @@ pub fn drive_status(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn read_toc(dev_path_cstr) {
-    sakshi_info("reading disc TOC", strlen("reading disc TOC"));
+    sakshi_span_enter("read_toc", 8);
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -388,7 +388,7 @@ pub fn read_toc(dev_path_cstr) {
     # Classify disc type
     var dt = classify_toc_tracks(has_audio, has_data);
 
-    sakshi_info("TOC read complete", strlen("TOC read complete"));
+    sakshi_span_exit();
 
     return Ok(disc_toc_new(dt, tracks, total_size));
 }

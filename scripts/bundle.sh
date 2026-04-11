@@ -26,7 +26,7 @@ cat > "$OUT" << HEADER
 HEADER
 
 # Append each module in dependency order (matching src/lib.cyr)
-for mod in error device event storage optical udev linux udev_rules; do
+for mod in error device event storage optical udev linux udev_rules device_db network; do
     echo "" >> "$OUT"
     echo "# --- ${mod}.cyr ---" >> "$OUT"
     # Strip any include lines from individual modules

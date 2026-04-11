@@ -1,0 +1,313 @@
+# yukti/device_db.cyr — Device database persistence via patra
+#
+# Tracks device history, mount preferences, and metadata.
+# Stores in a local .patra database file.
+#
+# Tables:
+#   devices       — known devices (by serial/vendor+model)
+#   mount_history — mount/unmount events with timestamps
+#   preferences   — per-device mount preferences (mount point, read-only, fs type)
+
+# ---------------------------------------------------------------------------
+# Database lifecycle
+# ---------------------------------------------------------------------------
+
+var _yukti_db = 0;
+
+pub fn device_db_open(path) {
+    sakshi_span_enter("db_open", 7);
+    patra_init();
+    _yukti_db = patra_open(path);
+    if (_yukti_db == 0) {
+        sakshi_span_exit();
+        return err_io(str_from("failed to open device database"));
+    }
+
+    # Create tables if they don't exist
+    patra_exec(_yukti_db, "CREATE TABLE devices (serial STR, vendor STR, model STR, class INT, first_seen INT, last_seen INT, mount_count INT)");
+    patra_exec(_yukti_db, "CREATE TABLE mount_history (serial STR, dev_path STR, mount_point STR, fs_type STR, timestamp INT, action INT)");
+    patra_exec(_yukti_db, "CREATE TABLE preferences (serial STR, mount_point STR, read_only INT, fs_type STR, auto_mount INT)");
+
+    sakshi_span_exit();
+    return Ok(_yukti_db);
+}
+
+pub fn device_db_close() {
+    if (_yukti_db != 0) {
+        patra_close(_yukti_db);
+        _yukti_db = 0;
+    }
+    return 0;
+}
+
+pub fn device_db_handle() {
+    return _yukti_db;
+}
+
+# ---------------------------------------------------------------------------
+# Device key — serial if available, else vendor:model
+# ---------------------------------------------------------------------------
+
+fn device_key(info) {
+    var serial = di_serial(info);
+    if (serial != 0) {
+        if (str_len(serial) > 0) {
+            return serial;
+        }
+    }
+    # Fallback: vendor:model
+    var vendor = di_vendor(info);
+    var model = di_model(info);
+    if (vendor == 0) { vendor = str_from("unknown"); }
+    if (model == 0) { model = str_from("unknown"); }
+    var sb = str_builder_new();
+    str_builder_add_str(sb, vendor);
+    str_builder_add_cstr(sb, ":");
+    str_builder_add_str(sb, model);
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# Record device seen — upsert into devices table
+# ---------------------------------------------------------------------------
+
+pub fn device_db_record_seen(info) {
+    if (_yukti_db == 0) { return 0; }
+
+    var key = device_key(info);
+    var key_cstr = str_cstr(key);
+    var vendor = di_vendor(info);
+    var model = di_model(info);
+    var class = di_class(info);
+
+    # Get current timestamp
+    var ts[16];
+    syscall(228, 0, &ts);
+    var now = load64(&ts);
+
+    # Check if device exists
+    var sql_sb = str_builder_new();
+    str_builder_add_cstr(sql_sb, "SELECT mount_count FROM devices WHERE serial = '");
+    str_builder_add_str(sql_sb, key);
+    str_builder_add_cstr(sql_sb, "'");
+    var sql = str_builder_build(sql_sb);
+
+    var rs = patra_query(_yukti_db, str_cstr(sql));
+    if (rs != 0) {
+        if (patra_result_count(rs) > 0) {
+            # Update existing — bump last_seen and mount_count
+            var count = patra_result_get_int(rs, 0, 0);
+            patra_result_free(rs);
+
+            var upd_sb = str_builder_new();
+            str_builder_add_cstr(upd_sb, "UPDATE devices SET last_seen = ");
+            str_builder_add_int(upd_sb, now);
+            str_builder_add_cstr(upd_sb, " WHERE serial = '");
+            str_builder_add_str(upd_sb, key);
+            str_builder_add_cstr(upd_sb, "'");
+            patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
+            return 0;
+        }
+        patra_result_free(rs);
+    }
+
+    # Insert new device
+    var ins_sb = str_builder_new();
+    str_builder_add_cstr(ins_sb, "INSERT INTO devices VALUES ('");
+    str_builder_add_str(ins_sb, key);
+    str_builder_add_cstr(ins_sb, "', '");
+    if (vendor != 0) { str_builder_add_str(ins_sb, vendor); }
+    str_builder_add_cstr(ins_sb, "', '");
+    if (model != 0) { str_builder_add_str(ins_sb, model); }
+    str_builder_add_cstr(ins_sb, "', ");
+    str_builder_add_int(ins_sb, class);
+    str_builder_add_cstr(ins_sb, ", ");
+    str_builder_add_int(ins_sb, now);
+    str_builder_add_cstr(ins_sb, ", ");
+    str_builder_add_int(ins_sb, now);
+    str_builder_add_cstr(ins_sb, ", 0)");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(ins_sb)));
+
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Record mount/unmount event
+# ---------------------------------------------------------------------------
+
+enum MountAction {
+    ACTION_MOUNT = 1;
+    ACTION_UNMOUNT = 2;
+    ACTION_EJECT = 3;
+}
+
+pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
+    if (_yukti_db == 0) { return 0; }
+
+    var key = device_key(info);
+    var dev_path = di_dev_path(info);
+
+    var ts[16];
+    syscall(228, 0, &ts);
+    var now = load64(&ts);
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "INSERT INTO mount_history VALUES ('");
+    str_builder_add_str(sb, key);
+    str_builder_add_cstr(sb, "', '");
+    str_builder_add_str(sb, dev_path);
+    str_builder_add_cstr(sb, "', '");
+    if (mount_point != 0) { str_builder_add_str(sb, mount_point); }
+    str_builder_add_cstr(sb, "', '");
+    if (fs_type_str != 0) { str_builder_add_str(sb, fs_type_str); }
+    str_builder_add_cstr(sb, "', ");
+    str_builder_add_int(sb, now);
+    str_builder_add_cstr(sb, ", ");
+    str_builder_add_int(sb, action);
+    str_builder_add_cstr(sb, ")");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb)));
+
+    # Update mount_count in devices table
+    if (action == ACTION_MOUNT) {
+        var upd_sb = str_builder_new();
+        str_builder_add_cstr(upd_sb, "UPDATE devices SET mount_count = mount_count + 1, last_seen = ");
+        str_builder_add_int(upd_sb, now);
+        str_builder_add_cstr(upd_sb, " WHERE serial = '");
+        str_builder_add_str(upd_sb, key);
+        str_builder_add_cstr(upd_sb, "'");
+        patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
+    }
+
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Preferences — per-device mount configuration
+# ---------------------------------------------------------------------------
+
+pub fn device_db_set_preference(serial, mount_point, read_only, fs_type, auto_mount) {
+    if (_yukti_db == 0) { return 0; }
+
+    # Delete existing preference
+    var del_sb = str_builder_new();
+    str_builder_add_cstr(del_sb, "DELETE FROM preferences WHERE serial = '");
+    str_builder_add_str(del_sb, serial);
+    str_builder_add_cstr(del_sb, "'");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(del_sb)));
+
+    # Insert new preference
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "INSERT INTO preferences VALUES ('");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "', '");
+    if (mount_point != 0) { str_builder_add_str(sb, mount_point); }
+    str_builder_add_cstr(sb, "', ");
+    str_builder_add_int(sb, read_only);
+    str_builder_add_cstr(sb, ", '");
+    if (fs_type != 0) { str_builder_add_str(sb, fs_type); }
+    str_builder_add_cstr(sb, "', ");
+    str_builder_add_int(sb, auto_mount);
+    str_builder_add_cstr(sb, ")");
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb)));
+
+    return 0;
+}
+
+# Get preference for a device. Returns alloc'd struct or 0.
+# Layout: 32 bytes [mount_point Str, read_only i64, fs_type Str, auto_mount i64]
+pub fn device_db_get_preference(serial) {
+    if (_yukti_db == 0) { return 0; }
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT mount_point, read_only, fs_type, auto_mount FROM preferences WHERE serial = '");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "'");
+
+    var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
+    if (rs == 0) { return 0; }
+    if (patra_result_count(rs) == 0) {
+        patra_result_free(rs);
+        return 0;
+    }
+
+    var pref = alloc(32);
+    var mp_raw = patra_result_get_str(rs, 0, 0);
+    if (mp_raw != 0) {
+        if (load8(mp_raw) != 0) {
+            store64(pref, str_from(mp_raw));
+        } else {
+            store64(pref, 0);
+        }
+    } else {
+        store64(pref, 0);
+    }
+    store64(pref + 8, patra_result_get_int(rs, 0, 1));
+    var fs_raw = patra_result_get_str(rs, 0, 2);
+    if (fs_raw != 0) {
+        if (load8(fs_raw) != 0) {
+            store64(pref + 16, str_from(fs_raw));
+        } else {
+            store64(pref + 16, 0);
+        }
+    } else {
+        store64(pref + 16, 0);
+    }
+    store64(pref + 24, patra_result_get_int(rs, 0, 3));
+    patra_result_free(rs);
+    return pref;
+}
+
+pub fn pref_mount_point(p) { return load64(p); }
+pub fn pref_read_only(p) { return load64(p + 8); }
+pub fn pref_fs_type(p) { return load64(p + 16); }
+pub fn pref_auto_mount(p) { return load64(p + 24); }
+
+# ---------------------------------------------------------------------------
+# Queries — device history
+# ---------------------------------------------------------------------------
+
+# Get mount count for a device
+pub fn device_db_mount_count(serial) {
+    if (_yukti_db == 0) { return 0; }
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT mount_count FROM devices WHERE serial = '");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "'");
+
+    var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
+    if (rs == 0) { return 0; }
+    if (patra_result_count(rs) == 0) {
+        patra_result_free(rs);
+        return 0;
+    }
+    var count = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return count;
+}
+
+# Get total known device count
+pub fn device_db_device_count() {
+    if (_yukti_db == 0) { return 0; }
+    var rs = patra_query(_yukti_db, "SELECT COUNT(*) FROM devices");
+    if (rs == 0) { return 0; }
+    var count = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return count;
+}
+
+# Check if a device has been seen before
+pub fn device_db_is_known(serial) {
+    if (_yukti_db == 0) { return 0; }
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT serial FROM devices WHERE serial = '");
+    str_builder_add_str(sb, serial);
+    str_builder_add_cstr(sb, "'");
+
+    var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
+    if (rs == 0) { return 0; }
+    var known = patra_result_count(rs) > 0;
+    patra_result_free(rs);
+    return known;
+}

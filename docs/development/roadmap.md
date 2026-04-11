@@ -1,11 +1,24 @@
 # Roadmap
 
+## Completed (v1.0.0)
+
+- [x] Full Cyrius port from Rust (April 2026)
+- [x] 407 test assertions, 45 benchmarks, 2 fuzz targets
+- [x] 152 KB static binary, zero dependencies
+- [x] All 8 modules: error, device, event, storage, optical, udev, linux, udev_rules
+- [x] Stdlib inclusion preparation (reviewed patra, sakshi)
+
 ## Next Release
+
+### Cyrius Stdlib Integration
+- [ ] Publish yukti as a Cyrius stdlib module (lib/yukti.cyr)
+- [ ] Integration with sakshi_full structured logging
+- [ ] Integration with patra for device database persistence
 
 ### Network Filesystem Mount Helpers
 - [ ] SMB/NFS mount with credential support via `MountOptions`
-- [ ] NAS autodiscovery (mDNS/SSDP/Avahi)
-- [ ] `DeviceClass::Network` with actual SMB/NFS share detection
+- [ ] NAS autodiscovery (mDNS/SSDP)
+- [ ] `DC_NETWORK` with actual SMB/NFS share detection
 
 ## Medium Term
 
@@ -18,19 +31,17 @@
 - [ ] Dual-layer/dual-sided disc type variants
 - [ ] Audio CD ripping support (raw sector reads)
 
-### AI Integration (`ai` feature)
-- [ ] Device classification hints via LLM — identify unknown device types from udev properties
-- [ ] Natural language device queries ("find all mounted USB drives larger than 8GB")
-- [ ] Smart automount policies — learn user patterns for mount options
-- [ ] Integration with daimon/hoosh agent runtime
+### Performance
+- [ ] Eliminate bump allocator waste with targeted freelist for hot paths
+- [ ] Pool DeviceInfo structs for enumeration (avoid per-device alloc)
 
 ## Long Term
 
 ### Ecosystem Integration
-- [ ] jalwa — hotplug → detect → mount → import pipeline
+- [ ] jalwa — hotplug -> detect -> mount -> import pipeline
 - [ ] argonaut — policy-driven automount on boot
-- [ ] aethersafha — D-Bus notifications for mount/unmount events
+- [ ] aethersafha — notifications for mount/unmount events
 
 ### Platform
-- [ ] FreeBSD support (devd instead of udev, geom instead of sysfs)
+- [ ] aarch64 support (cross-compile via Cyrius aarch64 backend)
 - [ ] Container-aware enumeration (detect host vs container devices)

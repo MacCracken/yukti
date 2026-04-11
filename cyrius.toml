@@ -1,5 +1,5 @@
 name = "yukti"
-version = "0.25.3"
+version = "1.0.0"
 license = "GPL-3.0-only"
 entry = "src/main.cyr"
 output = "yukti"

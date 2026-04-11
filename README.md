@@ -2,139 +2,165 @@
 
 > **Yukti** (Sanskrit: युक्ति — reasoning, contrivance, application) — device abstraction layer for AGNOS
 
-[![CI](https://github.com/MacCracken/yukti/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/yukti/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![crates.io](https://img.shields.io/crates/v/yukti.svg)](https://crates.io/crates/yukti)
-[![docs.rs](https://docs.rs/yukti/badge.svg)](https://docs.rs/yukti)
 
 Unified API for detecting, monitoring, and managing hardware devices on Linux — USB storage, optical drives, block devices, and udev hotplug events.
 
-**Linux-native, zero-alloc hot paths** — built on `libc` syscalls, bitflag capabilities, `tracing` instrumentation.
+**152 KB static binary. Zero dependencies. Direct syscalls.**
+
+Written in [Cyrius](https://github.com/MacCracken/cyrius) — ported from Rust (April 2026).
 
 ## Features
 
-| Module | Feature | Description |
-|--------|---------|-------------|
-| **device** | always | `DeviceInfo`, `DeviceClass` (8 types), `DeviceCapabilities` (O(1) bitflags), `DeviceHealth` |
-| **event** | always | `DeviceEvent` pub/sub with `EventListener` trait and class-based filtering |
-| **storage** | `storage` | `mount()` / `unmount()` / `eject()`, filesystem detection (17 types), `/proc/mounts` parsing |
-| **optical** | `optical` | Tray control, disc TOC reading, DVD Video detection, drive status via ioctl |
-| **udev** | `udev` | Netlink hotplug monitor, sysfs enumeration, device classification, uevent parsing |
-| **linux** | always | `LinuxDeviceManager` — ties it all together with `Arc` cache and lifecycle management |
-
-Default features: `udev`, `storage`, `optical`.
-
-Optional: `ai` (daimon/hoosh integration, requires `reqwest`, `tokio`).
-
-```toml
-[dependencies]
-yukti = "0.22"
-```
+| Module | Description |
+|--------|-------------|
+| **device** | `DeviceInfo`, `DeviceClass` (8 types), `DeviceCapabilities` (O(1) bitflags), `DeviceHealth` |
+| **event** | `DeviceEvent` pub/sub with function pointer listeners and class-based filtering |
+| **storage** | `mount()` / `unmount()` / `eject()`, filesystem detection (17 types), `/proc/mounts` parsing |
+| **optical** | Tray control, disc TOC reading, DVD Video detection, drive status via ioctl |
+| **udev** | Netlink hotplug monitor, sysfs enumeration, device classification, uevent parsing |
+| **linux** | `LinuxDeviceManager` — ties it all together with hashmap cache |
+| **udev_rules** | Rule rendering, validation, udevadm integration |
 
 ## Quick Start
 
-### Enumerate Devices
+```cyrius
+include "yukti/lib.cyr"
 
-```rust
-use yukti::{LinuxDeviceManager, Device};
+fn main() {
+    alloc_init();
 
-let mgr = LinuxDeviceManager::new();
-for dev in mgr.enumerate().unwrap() {
-    println!("{}: {} [{}] {}", dev.id, dev.display_name(), dev.class, dev.size_display());
+    # Enumerate all block devices
+    var mgr = linux_dm_new();
+    var r = linux_dm_enumerate(mgr);
+    if (is_ok(r)) {
+        var devices = payload(r);
+        var n = vec_len(devices);
+        for (var i = 0; i < n; i = i + 1) {
+            var info = vec_get(devices, i);
+            var name = device_info_display_name(info);
+            str_println(name);
+        }
+    }
+    syscall(60, 0);
 }
+main();
 ```
 
-### Monitor Hotplug Events
+## Build
 
-```rust
-use yukti::{LinuxDeviceManager, Device};
+Requires the [Cyrius compiler](https://github.com/MacCracken/cyrius) (cc3).
 
-let mgr = LinuxDeviceManager::new();
-let rx = mgr.start_monitor().unwrap();
+```sh
+# Build
+cat src/main.cyr | cc3 > build/yukti && chmod +x build/yukti
 
-for event in rx.iter() {
-    println!("{}: {} on {}", event.device_id, event.kind, event.dev_path.display());
-}
+# Run
+./build/yukti
+
+# Test (407 assertions)
+cat tests/yukti.tcyr | cc3 > build/yukti_test && chmod +x build/yukti_test
+./build/yukti_test
+
+# Benchmark (45 operations)
+cat benches/bench.bcyr | cc3 > build/yukti_bench && chmod +x build/yukti_bench
+./build/yukti_bench
+
+# Fuzz
+cat fuzz/fuzz_parse_uevent.fcyr | cc3 > build/fuzz_uevent && ./build/fuzz_uevent
+cat fuzz/fuzz_mount_table.fcyr | cc3 > build/fuzz_mount && ./build/fuzz_mount
 ```
 
-### Mount a Device
+## Example Output
 
-```rust
-use yukti::storage::{MountOptions, mount};
-use std::path::Path;
+```
+yukti device enumeration
+========================
 
-let result = mount(
-    Path::new("/dev/sdb1"),
-    &MountOptions::new()
-        .mount_point("/mnt/usb")
-        .read_only(true),
-).unwrap();
+ Found 3 device(s)
 
-println!("Mounted {} at {}", result.fs_type, result.mount_point.display());
+  [1] /dev/nvme0n1  block-internal  ready  1.8 TB  CT2000P3SSD8
+  [2] /dev/sda  block-internal  ready  1.8 TB  WD Blue SA510 2.
+  [3] /dev/zram0  block-internal  ready  29.8 GB  /dev/zram0
 ```
 
-### Optical Drive
+## API Overview
 
-```rust
-use yukti::optical::{open_tray, read_toc, is_dvd_video};
-use std::path::Path;
-
-let dev = Path::new("/dev/sr0");
-let toc = read_toc(dev).unwrap();
-println!("{}: {} tracks", toc.disc_type, toc.tracks.len());
-
-open_tray(dev).unwrap();
+### Device Detection
+```cyrius
+var mgr = linux_dm_new();
+var r = linux_dm_enumerate(mgr);
+var devices = payload(r);
 ```
 
-### Filesystem & Device Queries
-
-```rust
-use yukti::storage::{Filesystem, filesystem_usage};
-use yukti::device::{query_permissions, query_device_health};
-use std::path::Path;
-
-let fs: Filesystem = "ext4".into();
-assert!(fs.is_writable());
-
-let usage = filesystem_usage(Path::new("/")).unwrap();
-println!("{:.1}% used", usage.usage_percent);
-
-let health = query_device_health("nvme0n1");
-if let Some(temp) = health.temperature_celsius {
-    println!("NVMe temp: {temp}°C");
-}
+### Mount/Unmount
+```cyrius
+var opts = mount_options_new();
+var r = linux_dm_mount(mgr, device_id, opts);
+linux_dm_unmount(mgr, device_id);
+linux_dm_eject(mgr, device_id);
 ```
 
-## Modules
+### Hotplug Monitoring
+```cyrius
+var mon_r = udev_monitor_new();
+var mon = payload(mon_r);
+udev_monitor_run(mon, &my_event_handler);
+```
 
-| Module | Key Types |
-|--------|-----------|
-| `device` | `DeviceInfo`, `DeviceId`, `DeviceClass`, `DeviceCapabilities`, `DeviceState`, `DevicePermissions`, `DeviceHealth`, `Device` trait |
-| `event` | `DeviceEvent`, `DeviceEventKind`, `EventListener` trait, `EventCollector` |
-| `storage` | `Filesystem` (17 types), `MountOptions` (builder), `MountResult`, `FilesystemUsage`, `mount()`, `unmount()`, `eject()` |
-| `optical` | `DiscType` (10), `TrayState`, `DiscToc`, `open_tray()`, `close_tray()`, `drive_status()`, `read_toc()`, `is_dvd_video()` |
-| `udev` | `UdevEvent`, `UdevMonitor` (netlink, filtered, bounded), `classify_device()`, `enumerate_devices()` |
-| `linux` | `LinuxDeviceManager` — `Device` impl, `mount()`, `unmount()`, `eject()`, `start_monitor()`, `dispatch_event()` |
-| `error` | `YuktiError` (15 variants) |
+### Optical Drives
+```cyrius
+open_tray("/dev/sr0");
+close_tray("/dev/sr0");
+var status = drive_status("/dev/sr0");
+var toc = read_toc("/dev/sr0");
+```
 
-## Feature Flags
-
-| Feature | Default | Description |
-|---------|---------|-------------|
-| `udev` | Yes | Device enumeration and hotplug via sysfs + netlink |
-| `storage` | Yes | Mount/unmount/eject via `libc` syscalls |
-| `optical` | Yes | Tray control and TOC reading via CD-ROM ioctls |
-| `ai` | No | AI-assisted device management (planned) |
+### Filesystem Detection
+```cyrius
+var fs = filesystem_from_str("ext4");          # FS_EXT4
+var writable = filesystem_is_writable(fs);     # 1
+var optical = filesystem_is_optical(fs);       # 0
+```
 
 ## Consumers
 
-| Project | Integration |
-|---------|------------|
-| **jalwa** | Hotplug → detect → mount → auto-import music from USB/CD |
-| **file manager** | Device sidebar, mount/eject actions |
-| **aethersafha** | Desktop mount/unmount notifications |
-| **argonaut** | Policy-driven automount on boot |
+- **jalwa** — auto-import music from USB/CD (hotplug -> detect -> mount -> import)
+- **file manager** — device sidebar with mount/eject actions
+- **aethersafha** — desktop mount/unmount notifications
+- **argonaut** — policy-driven automount on boot
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  LinuxDeviceManager                    │
+│  enumerate() / get() / refresh() / mount() / eject()  │
+├──────────────┬───────────────┬────────────────────────┤
+│    udev      │   storage     │      optical           │
+│  netlink     │  mount/eject  │   tray/TOC/ioctl       │
+│  sysfs enum  │  /proc/mounts │   disc detection       │
+├──────────────┴───────────────┴────────────────────────┤
+│              device / event / error                    │
+│  DeviceInfo, DeviceClass, Capabilities, EventListener  │
+├───────────────────────────────────────────────────────┤
+│              Linux syscalls (direct)                   │
+│  mount(165), umount2(166), ioctl(16), socket(41)      │
+└───────────────────────────────────────────────────────┘
+```
+
+## Rust vs Cyrius
+
+See [BENCHMARKS-rust-v-cyrius.md](BENCHMARKS-rust-v-cyrius.md) for the full comparison. Original Rust source archived in `rust-old/`.
+
+| Metric | Rust | Cyrius |
+|--------|------|--------|
+| Binary size | 449 KB | 152 KB |
+| Dependencies | 47 crates | 0 |
+| Source lines | 6,166 | 3,359 |
+| Tests | 229 | 407 |
+| Benchmarks | 48 | 45 |
 
 ## License
 
-GPL-3.0-only — see [LICENSE](LICENSE) for details.
+GPL-3.0-only

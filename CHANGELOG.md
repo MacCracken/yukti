@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-04-11
+
+### Changed — **Cyrius Port**
+- **Complete rewrite from Rust to Cyrius** — sovereign, zero-dependency implementation
+- All 8 modules ported: error, device, event, storage, optical, udev, linux, udev_rules
+- Direct Linux syscalls replace libc wrappers: mount(165), umount2(166), ioctl(16), socket(41), stat(4)
+- Function pointer callbacks replace Rust trait objects for event listeners
+- Manual struct layout with alloc/store64/load64 replaces Rust structs
+- Enum integer constants replace Rust enums with derives
+- Tagged union Ok/Err replaces Rust Result<T, E>
+- sakshi structured logging replaces tracing crate
+- Bump allocator replaces Rust ownership/borrowing
+
+### Added
+- `src/main.cyr` — CLI device enumeration demo (prints device table)
+- `tests/yukti.tcyr` — **407 test assertions** (up from 229 in Rust)
+- `benches/bench.bcyr` — 45 batch-timed benchmarks with nanosecond precision
+- `fuzz/fuzz_parse_uevent.fcyr` — 1000 mutations + truncation fuzzing for uevent parser
+- `fuzz/fuzz_mount_table.fcyr` — 500 mutations + truncation fuzzing for mount table parser
+- `BENCHMARKS-rust-v-cyrius.md` — comprehensive Rust vs Cyrius performance comparison
+- Extended `lib/str.cyr` with: `str_from_buf`, `str_eq_cstr`, `str_cstr`, `str_substr`, `str_last_index_of`, `str_builder_add_str`, `str_builder_add_byte`, `str_contains_cstr`, `str_index_of_cstr`, `str_to_hex`
+- `WIFSIGNALED` and `WTERMSIG` macros to `lib/syscalls.cyr`
+
+### Metrics
+- **Binary size**: 152 KB static ELF (vs 449 KB Rust stripped)
+- **Source**: 3,359 lines (vs 6,166 Rust)
+- **Dependencies**: 0 (vs 47 Rust crates)
+- **Tests**: 407 assertions, 0 failures
+- **Benchmarks**: 45 operations, batch-timed
+- **Fuzz targets**: 2 (parse_uevent, mount_table)
+
+### Archived
+- Original Rust source moved to `rust-old/`
+- Cargo.toml, Cargo.lock, deny.toml, rust-toolchain.toml archived
+- Criterion benchmarks archived as `rust-old/yukti_bench.rs`
+- libfuzzer targets archived as `rust-old/fuzz/`
+
 ## [0.25.3] — 2026-03-25
 
 ### Added

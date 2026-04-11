@@ -1,4 +1,0 @@
-# Local development: override git dep with path to local checkout.
-# This file is gitignored — CI uses the git dep from Cargo.toml.
-[patch."https://github.com/MacCracken/agnosys"]
-agnosys = { path = "../agnosys" }

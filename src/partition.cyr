@@ -194,13 +194,13 @@ fn _parse_mbr_entries(buf) {
 
         var status = load8(buf + offset);
         var lba_start = load8(buf + offset + 8) |
-                        (load8(buf + offset + 9) << 8) |
-                        (load8(buf + offset + 10) << 16) |
-                        (load8(buf + offset + 11) << 24);
+        (load8(buf + offset + 9) << 8) |
+        (load8(buf + offset + 10) << 16) |
+        (load8(buf + offset + 11) << 24);
         var sector_count = load8(buf + offset + 12) |
-                           (load8(buf + offset + 13) << 8) |
-                           (load8(buf + offset + 14) << 16) |
-                           (load8(buf + offset + 15) << 24);
+        (load8(buf + offset + 13) << 8) |
+        (load8(buf + offset + 14) << 16) |
+        (load8(buf + offset + 15) << 24);
 
         var pe = partition_entry_new();
         store64(pe + PE_INDEX, i);

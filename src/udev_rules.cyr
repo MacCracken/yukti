@@ -238,10 +238,10 @@ pub fn query_device(syspath_cstr) {
     # Parse output into UdevDeviceInfo
     var output = str_from_buf(&buf, n);
     var info = udev_device_info_new(
-        str_from(syspath_cstr),
-        str_from(""),
-        str_from(""),
-        0, 0, 0
+    str_from(syspath_cstr),
+    str_from(""),
+    str_from(""),
+    0, 0, 0
     );
 
     # Parse KEY=VALUE lines
@@ -306,7 +306,7 @@ pub fn list_devices(subsystem) {
                 }
                 if (include) {
                     var di = udev_device_info_new(cur_syspath, cur_devpath, cur_subsystem,
-                                                   cur_devtype, cur_driver, cur_devnode);
+                    cur_devtype, cur_driver, cur_devnode);
                     vec_push(devices, di);
                 }
             }

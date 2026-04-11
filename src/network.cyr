@@ -212,7 +212,7 @@ pub fn network_mount(share, mount_point_cstr) {
     }
 
     var mr = mount_result_new(id, source, str_from(mount_point_cstr),
-                               filesystem_from_str(kernel_type), 0);
+    filesystem_from_str(kernel_type), 0);
     return Ok(mr);
 }
 

@@ -331,12 +331,12 @@ fn _build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
 
     # Create synthetic UdevEvent
     var event = udev_event_new(
-        str_from("add"),
-        sys_path,
-        dev_path,
-        str_from("block"),
-        str_from(dev_type_cstr),
-        props
+    str_from("add"),
+    sys_path,
+    dev_path,
+    str_from("block"),
+    str_from(dev_type_cstr),
+    props
     );
 
     var info_r = device_info_from_udev(event);
@@ -418,7 +418,8 @@ pub fn enumerate_devices(sysfs_root) {
                 var part_file = str_builder_build(chk_sb);
 
                 if (file_exists(str_cstr(part_file))) {
-                    var part_info = _build_device_info_from_sysfs(part_path, part_name, "partition");
+                    var part_info = _build_device_info_from_sysfs(
+                    part_path, part_name, "partition");
                     if (part_info != 0) {
                         vec_push(devices, part_info);
                     }

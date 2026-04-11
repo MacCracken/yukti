@@ -432,47 +432,47 @@ pub fn query_device_health(dev_name) {
 
 pub fn device_info_to_json(info, sb) {
     str_builder_add_cstr(sb, "{\"id\":\"");
-    str_builder_add_str(sb, device_id_str(di_id(info)));
-    str_builder_add_cstr(sb, "\",\"dev_path\":\"");
-    str_builder_add_str(sb, di_dev_path(info));
-    str_builder_add_cstr(sb, "\",\"class\":\"");
-    str_builder_add_cstr(sb, device_class_to_str(di_class(info)));
-    str_builder_add_cstr(sb, "\",\"state\":\"");
-    str_builder_add_cstr(sb, device_state_to_str(di_state(info)));
-    str_builder_add_cstr(sb, "\",\"size_bytes\":");
-    str_builder_add_int(sb, di_size_bytes(info));
+        str_builder_add_str(sb, device_id_str(di_id(info)));
+        str_builder_add_cstr(sb, "\",\"dev_path\":\"");
+        str_builder_add_str(sb, di_dev_path(info));
+        str_builder_add_cstr(sb, "\",\"class\":\"");
+        str_builder_add_cstr(sb, device_class_to_str(di_class(info)));
+        str_builder_add_cstr(sb, "\",\"state\":\"");
+        str_builder_add_cstr(sb, device_state_to_str(di_state(info)));
+        str_builder_add_cstr(sb, "\",\"size_bytes\":");
+        str_builder_add_int(sb, di_size_bytes(info));
 
-    var label = di_label(info);
-    if (label != 0) {
-        str_builder_add_cstr(sb, ",\"label\":\"");
-        str_builder_add_str(sb, label);
-        str_builder_add_cstr(sb, "\"");
-    }
+        var label = di_label(info);
+        if (label != 0) {
+            str_builder_add_cstr(sb, ",\"label\":\"");
+            str_builder_add_str(sb, label);
+            str_builder_add_cstr(sb, "\"");
+        }
 
-    var vendor = di_vendor(info);
-    if (vendor != 0) {
-        str_builder_add_cstr(sb, ",\"vendor\":\"");
-        str_builder_add_str(sb, vendor);
-        str_builder_add_cstr(sb, "\"");
-    }
+        var vendor = di_vendor(info);
+        if (vendor != 0) {
+            str_builder_add_cstr(sb, ",\"vendor\":\"");
+            str_builder_add_str(sb, vendor);
+            str_builder_add_cstr(sb, "\"");
+        }
 
-    var model = di_model(info);
-    if (model != 0) {
-        str_builder_add_cstr(sb, ",\"model\":\"");
-        str_builder_add_str(sb, model);
-        str_builder_add_cstr(sb, "\"");
-    }
+        var model = di_model(info);
+        if (model != 0) {
+            str_builder_add_cstr(sb, ",\"model\":\"");
+            str_builder_add_str(sb, model);
+            str_builder_add_cstr(sb, "\"");
+        }
 
-    var mp = di_mount_point(info);
-    if (mp != 0) {
-        str_builder_add_cstr(sb, ",\"mount_point\":\"");
-        str_builder_add_str(sb, mp);
-        str_builder_add_cstr(sb, "\"");
-    }
+        var mp = di_mount_point(info);
+        if (mp != 0) {
+            str_builder_add_cstr(sb, ",\"mount_point\":\"");
+            str_builder_add_str(sb, mp);
+            str_builder_add_cstr(sb, "\"");
+        }
 
-    str_builder_add_cstr(sb, ",\"capabilities\":");
-    str_builder_add_int(sb, di_caps(info));
+        str_builder_add_cstr(sb, ",\"capabilities\":");
+        str_builder_add_int(sb, di_caps(info));
 
-    str_builder_add_cstr(sb, "}");
+        str_builder_add_cstr(sb, "}");
     return 0;
 }

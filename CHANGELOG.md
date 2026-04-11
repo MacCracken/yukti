@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-04-11
+
+### Fixed
+- All source files pass `cyrfmt` (indentation, line wrapping)
+- All source files pass `cyrlint` (0 warnings — no double blank lines, no lines >100 chars)
+- Bundle script now strips consecutive blank lines automatically
+- SQL string literals split to stay under 100-char line limit
+
 ## [1.1.1] — 2026-04-11
 
 ### Fixed

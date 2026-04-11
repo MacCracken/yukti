@@ -192,8 +192,12 @@ fn _open_optical_device(dev_path_cstr) {
     var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
     if (fd < 0) {
         var errno = 0 - fd;
-        if (errno == 13) { return err_permission_denied(str_from("open"), str_from(dev_path_cstr)); }
-        if (errno == 1) { return err_permission_denied(str_from("open"), str_from(dev_path_cstr)); }
+        if (errno == 13) {
+            return err_permission_denied(str_from("open"), str_from(dev_path_cstr));
+        }
+        if (errno == 1) {
+            return err_permission_denied(str_from("open"), str_from(dev_path_cstr));
+        }
         if (errno == ENOMEDIUM) { return err_no_media(str_from(dev_path_cstr)); }
         return err_io(str_from(dev_path_cstr));
     }

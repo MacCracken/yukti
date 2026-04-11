@@ -245,13 +245,13 @@ pub fn unescape_mount_path(s, s_len) {
                 var d2 = load8(s + i + 2);
                 var d3 = load8(s + i + 3);
                 if (d1 >= 48) { if (d1 <= 55) {
-                if (d2 >= 48) { if (d2 <= 55) {
-                if (d3 >= 48) { if (d3 <= 55) {
-                    var val = (d1 - 48) * 64 + (d2 - 48) * 8 + (d3 - 48);
-                    str_builder_add_byte(sb, val);
-                    i = i + 4;
-                    continue;
-                } } } } } }
+                        if (d2 >= 48) { if (d2 <= 55) {
+                                if (d3 >= 48) { if (d3 <= 55) {
+                                        var val = (d1 - 48) * 64 + (d2 - 48) * 8 + (d3 - 48);
+                                        str_builder_add_byte(sb, val);
+                                        i = i + 4;
+                                        continue;
+                                    } } } } } }
             }
         }
         str_builder_add_byte(sb, c);
@@ -473,7 +473,7 @@ pub fn storage_mount(dev_path_cstr, options) {
         sakshi_span_exit();
         var dev_id = device_id_new_cstr(dev_path_cstr);
         return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
-                                   filesystem_from_str(fs_cstr), read_only));
+        filesystem_from_str(fs_cstr), read_only));
     }
 
     # Auto-detect filesystem type
@@ -486,7 +486,7 @@ pub fn storage_mount(dev_path_cstr, options) {
             sakshi_span_exit();
             var dev_id = device_id_new_cstr(dev_path_cstr);
             return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
-                                       filesystem_from_str(fs_try), read_only));
+            filesystem_from_str(fs_try), read_only));
         }
         last_errno = 0 - r;
     }
@@ -506,8 +506,12 @@ pub fn storage_unmount(mount_point_cstr) {
     if (r < 0) {
         var errno = 0 - r;
         sakshi_span_exit();
-        if (errno == 1) { return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr)); }
-        if (errno == 13) { return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr)); }
+        if (errno == 1) {
+            return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr));
+        }
+        if (errno == 13) {
+            return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr));
+        }
         if (errno == 16) { return err_device_busy(str_from(mount_point_cstr)); }
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "umount failed: errno ");

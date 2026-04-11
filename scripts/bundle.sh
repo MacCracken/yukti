@@ -33,6 +33,10 @@ for mod in error device event storage optical udev linux udev_rules partition de
     grep -v "^include " "$REPO/src/${mod}.cyr" >> "$OUT"
 done
 
+# Strip consecutive blank lines (lint requires single blanks only)
+awk 'NF{blank=0} !NF{blank++} blank<=1' "$OUT" > "${OUT}.tmp"
+mv "${OUT}.tmp" "$OUT"
+
 LINES=$(wc -l < "$OUT")
 BYTES=$(wc -c < "$OUT")
 echo "Done: ${LINES} lines, ${BYTES} bytes"

@@ -24,9 +24,32 @@ pub fn device_db_open(path) {
     }
 
     # Create tables if they don't exist
-    patra_exec(_yukti_db, "CREATE TABLE devices (serial STR, vendor STR, model STR, class INT, first_seen INT, last_seen INT, mount_count INT)");
-    patra_exec(_yukti_db, "CREATE TABLE mount_history (serial STR, dev_path STR, mount_point STR, fs_type STR, timestamp INT, action INT)");
-    patra_exec(_yukti_db, "CREATE TABLE preferences (serial STR, mount_point STR, read_only INT, fs_type STR, auto_mount INT)");
+    var s1 = "CREATE TABLE devices (serial STR, vendor STR, ";
+    var s2 = "model STR, class INT, first_seen INT, ";
+    var s3 = "last_seen INT, mount_count INT)";
+    var sb0 = str_builder_new();
+    str_builder_add_cstr(sb0, s1);
+    str_builder_add_cstr(sb0, s2);
+    str_builder_add_cstr(sb0, s3);
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb0)));
+
+    var h1 = "CREATE TABLE mount_history (serial STR, ";
+    var h2 = "dev_path STR, mount_point STR, ";
+    var h3 = "fs_type STR, timestamp INT, action INT)";
+    var sb1 = str_builder_new();
+    str_builder_add_cstr(sb1, h1);
+    str_builder_add_cstr(sb1, h2);
+    str_builder_add_cstr(sb1, h3);
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb1)));
+
+    var p1 = "CREATE TABLE preferences (serial STR, ";
+    var p2 = "mount_point STR, read_only INT, ";
+    var p3 = "fs_type STR, auto_mount INT)";
+    var sb2 = str_builder_new();
+    str_builder_add_cstr(sb2, p1);
+    str_builder_add_cstr(sb2, p2);
+    str_builder_add_cstr(sb2, p3);
+    patra_exec(_yukti_db, str_cstr(str_builder_build(sb2)));
 
     sakshi_span_exit();
     return Ok(_yukti_db);
@@ -170,7 +193,8 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     # Update mount_count in devices table
     if (action == ACTION_MOUNT) {
         var upd_sb = str_builder_new();
-        str_builder_add_cstr(upd_sb, "UPDATE devices SET mount_count = mount_count + 1, last_seen = ");
+        str_builder_add_cstr(upd_sb, "UPDATE devices SET ");
+        str_builder_add_cstr(upd_sb, "mount_count = mount_count + 1, last_seen = ");
         str_builder_add_int(upd_sb, now);
         str_builder_add_cstr(upd_sb, " WHERE serial = '");
         str_builder_add_str(upd_sb, key);
@@ -219,7 +243,9 @@ pub fn device_db_get_preference(serial) {
     if (_yukti_db == 0) { return 0; }
 
     var sb = str_builder_new();
-    str_builder_add_cstr(sb, "SELECT mount_point, read_only, fs_type, auto_mount FROM preferences WHERE serial = '");
+    str_builder_add_cstr(sb, "SELECT mount_point, read_only, ");
+    str_builder_add_cstr(sb, "fs_type, auto_mount ");
+    str_builder_add_cstr(sb, "FROM preferences WHERE serial = '");
     str_builder_add_str(sb, serial);
     str_builder_add_cstr(sb, "'");
 

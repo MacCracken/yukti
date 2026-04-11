@@ -1354,6 +1354,14 @@ fn main() {
     test_device_db_mount_count();
     test_device_db_is_known();
 
+    # Partition tests (10)
+    test_partition_constants();
+    test_mbr_type_strings();
+    test_partition_entry_new();
+    test_pt_type_strings();
+    test_guid_helpers();
+    test_read_partition_table_real();
+
     # Network filesystem tests (8)
     test_net_fs_types();
     test_network_share();
@@ -1363,6 +1371,103 @@ fn main() {
 
     var r = assert_summary();
     syscall(60, r);
+}
+
+# ===================================================================
+# Partition tests
+# ===================================================================
+
+fn test_partition_constants() {
+    test_group("partition");
+    assert_eq(SECTOR_SIZE, 512, "sector size");
+    assert_eq(MBR_SIG_OFFSET, 510, "mbr sig offset");
+    assert_eq(MBR_PART_OFFSET, 446, "mbr part offset");
+    assert_eq(MBR_PART_ENTRY_SIZE, 16, "mbr entry size");
+    assert_eq(MBR_MAX_PARTS, 4, "mbr max parts");
+    assert_eq(GPT_HEADER_LBA, 1, "gpt header lba");
+    assert_eq(GPT_ENTRY_SIZE, 128, "gpt entry size");
+    return 0;
+}
+
+fn test_mbr_type_strings() {
+    assert(streq(mbr_type_to_str(MBR_TYPE_LINUX), "Linux"), "mbr linux");
+    assert(streq(mbr_type_to_str(MBR_TYPE_NTFS), "NTFS/exFAT"), "mbr ntfs");
+    assert(streq(mbr_type_to_str(MBR_TYPE_FAT32), "FAT32"), "mbr fat32");
+    assert(streq(mbr_type_to_str(MBR_TYPE_EFI), "EFI System"), "mbr efi");
+    assert(streq(mbr_type_to_str(MBR_TYPE_LINUX_SWAP), "Linux swap"), "mbr swap");
+    assert(streq(mbr_type_to_str(MBR_TYPE_LINUX_LVM), "Linux LVM"), "mbr lvm");
+    assert(streq(mbr_type_to_str(MBR_TYPE_GPT_PROTECTIVE), "GPT Protective"), "mbr gpt prot");
+    assert(streq(mbr_type_to_str(MBR_TYPE_EMPTY), "Empty"), "mbr empty");
+    assert(streq(mbr_type_to_str(0xFF), "Unknown"), "mbr unknown");
+    return 0;
+}
+
+fn test_partition_entry_new() {
+    var pe = partition_entry_new();
+    assert_eq(pe_index(pe), 0, "pe idx 0");
+    assert_eq(pe_type_id(pe), 0, "pe type 0");
+    assert_eq(pe_start_lba(pe), 0, "pe lba 0");
+    assert_eq(pe_size_sectors(pe), 0, "pe sectors 0");
+    assert_eq(pe_size_bytes(pe), 0, "pe bytes 0");
+    assert_eq(pe_bootable(pe), 0, "pe not boot");
+    assert_eq(pe_is_efi(pe), 0, "pe not efi");
+    return 0;
+}
+
+fn test_pt_type_strings() {
+    assert(streq(pt_type_to_str(PT_MBR), "mbr"), "pt mbr");
+    assert(streq(pt_type_to_str(PT_GPT), "gpt"), "pt gpt");
+    assert(streq(pt_type_to_str(PT_NONE), "none"), "pt none");
+    return 0;
+}
+
+fn test_guid_helpers() {
+    # EFI System GUID: C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+    # Stored as mixed-endian: 28 73 2A C1 1F F8 D2 11 BA 4B 00 A0 C9 3E C9 3B
+    var efi_guid[16];
+    store8(&efi_guid, 0x28); store8(&efi_guid + 1, 0x73);
+    store8(&efi_guid + 2, 0x2A); store8(&efi_guid + 3, 0xC1);
+    store8(&efi_guid + 4, 0x1F); store8(&efi_guid + 5, 0xF8);
+    store8(&efi_guid + 6, 0xD2); store8(&efi_guid + 7, 0x11);
+    store8(&efi_guid + 8, 0xBA); store8(&efi_guid + 9, 0x4B);
+    store8(&efi_guid + 10, 0x00); store8(&efi_guid + 11, 0xA0);
+    store8(&efi_guid + 12, 0xC9); store8(&efi_guid + 13, 0x3E);
+    store8(&efi_guid + 14, 0xC9); store8(&efi_guid + 15, 0x3B);
+    assert(is_efi_type_guid(&efi_guid), "efi guid match");
+    assert(is_linux_type_guid(&efi_guid) == 0, "efi not linux");
+
+    # Linux filesystem GUID: 0FC63DAF -> AF 3D C6 0F ...
+    var linux_guid[16];
+    store8(&linux_guid, 0xAF); store8(&linux_guid + 1, 0x3D);
+    store8(&linux_guid + 2, 0xC6); store8(&linux_guid + 3, 0x0F);
+    assert(is_linux_type_guid(&linux_guid), "linux guid match");
+    assert(is_efi_type_guid(&linux_guid) == 0, "linux not efi");
+
+    # Zero GUID
+    var zero_guid[16];
+    for (var i = 0; i < 16; i = i + 1) { store8(&zero_guid + i, 0); }
+    assert(is_zero_guid(&zero_guid), "zero guid");
+    assert(is_zero_guid(&efi_guid) == 0, "efi not zero");
+
+    # Type string lookup
+    assert(streq(gpt_type_guid_to_str(&efi_guid), "EFI System"), "efi str");
+    assert(streq(gpt_type_guid_to_str(&linux_guid), "Linux filesystem"), "linux str");
+    return 0;
+}
+
+fn test_read_partition_table_real() {
+    # Read partition table from the first real disk
+    # This test is system-dependent but should not crash
+    var r = read_partition_table("/dev/sda");
+    if (is_ok(r)) {
+        var pt = payload(r);
+        var t = pt_type(pt);
+        assert(t == PT_MBR || t == PT_GPT || t == PT_NONE, "valid pt type");
+        var n = partition_count(pt);
+        assert(n >= 0, "part count non-negative");
+    }
+    # /dev/sda may not be readable without root — that's fine
+    return 0;
 }
 
 # ===================================================================

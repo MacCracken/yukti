@@ -1,5 +1,5 @@
 # yukti.cyr — device abstraction for AGNOS
-# Bundled distribution of yukti v1.0.0
+# Bundled distribution of yukti v1.1.0
 # Source: https://github.com/MacCracken/yukti
 # License: GPL-3.0-only
 #
@@ -3259,6 +3259,558 @@ pub fn list_devices(subsystem) {
     }
 
     return devices;
+}
+
+# --- partition.cyr ---
+# yukti/partition.cyr — Partition table reading (MBR and GPT)
+#
+# Reads partition tables directly from block device files.
+# Supports MBR (Master Boot Record) and GPT (GUID Partition Table).
+# EFI System Partition detection and boot flag queries.
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+enum PartConst {
+    SECTOR_SIZE = 512;
+    MBR_SIG_OFFSET = 510;
+    MBR_SIG_LO = 0x55;
+    MBR_SIG_HI = 0xAA;
+    MBR_PART_OFFSET = 446;
+    MBR_PART_ENTRY_SIZE = 16;
+    MBR_MAX_PARTS = 4;
+    GPT_HEADER_LBA = 1;
+    GPT_ENTRY_SIZE = 128;
+    GPT_MAX_ENTRIES = 128;
+}
+
+# MBR partition type IDs
+enum MbrType {
+    MBR_TYPE_EMPTY = 0x00;
+    MBR_TYPE_FAT12 = 0x01;
+    MBR_TYPE_FAT16_SMALL = 0x04;
+    MBR_TYPE_EXTENDED = 0x05;
+    MBR_TYPE_FAT16 = 0x06;
+    MBR_TYPE_NTFS = 0x07;
+    MBR_TYPE_FAT32 = 0x0B;
+    MBR_TYPE_FAT32_LBA = 0x0C;
+    MBR_TYPE_FAT16_LBA = 0x0E;
+    MBR_TYPE_EXTENDED_LBA = 0x0F;
+    MBR_TYPE_LINUX_SWAP = 0x82;
+    MBR_TYPE_LINUX = 0x83;
+    MBR_TYPE_LINUX_LVM = 0x8E;
+    MBR_TYPE_EFI = 0xEF;
+    MBR_TYPE_GPT_PROTECTIVE = 0xEE;
+}
+
+# Partition table type
+enum PartTableType {
+    PT_NONE = 0;
+    PT_MBR = 1;
+    PT_GPT = 2;
+}
+
+# ---------------------------------------------------------------------------
+# PartitionEntry struct — unified for MBR and GPT
+# Layout: 80 bytes
+#   0: index (partition number, 0-based)
+#   8: type_id (MBR type byte, or 0 for GPT)
+#  16: start_lba (u64)
+#  24: size_sectors (u64)
+#  32: size_bytes (u64)
+#  40: bootable (0/1 — MBR boot flag or GPT legacy BIOS attr)
+#  48: name (Str, from GPT name field, or type description for MBR)
+#  56: type_guid_hi (upper 8 bytes of GPT type GUID, 0 for MBR)
+#  64: type_guid_lo (lower 8 bytes of GPT type GUID, 0 for MBR)
+#  72: is_efi (0/1 — EFI System Partition)
+# ---------------------------------------------------------------------------
+
+enum PartEntryField {
+    PE_INDEX = 0;
+    PE_TYPE_ID = 8;
+    PE_START_LBA = 16;
+    PE_SIZE_SECTORS = 24;
+    PE_SIZE_BYTES = 32;
+    PE_BOOTABLE = 40;
+    PE_NAME = 48;
+    PE_TYPE_GUID_HI = 56;
+    PE_TYPE_GUID_LO = 64;
+    PE_IS_EFI = 72;
+    PE_SIZE = 80;
+}
+
+pub fn partition_entry_new() {
+    var pe = alloc(PE_SIZE);
+    store64(pe + PE_INDEX, 0);
+    store64(pe + PE_TYPE_ID, 0);
+    store64(pe + PE_START_LBA, 0);
+    store64(pe + PE_SIZE_SECTORS, 0);
+    store64(pe + PE_SIZE_BYTES, 0);
+    store64(pe + PE_BOOTABLE, 0);
+    store64(pe + PE_NAME, 0);
+    store64(pe + PE_TYPE_GUID_HI, 0);
+    store64(pe + PE_TYPE_GUID_LO, 0);
+    store64(pe + PE_IS_EFI, 0);
+    return pe;
+}
+
+pub fn pe_index(pe) { return load64(pe + PE_INDEX); }
+pub fn pe_type_id(pe) { return load64(pe + PE_TYPE_ID); }
+pub fn pe_start_lba(pe) { return load64(pe + PE_START_LBA); }
+pub fn pe_size_sectors(pe) { return load64(pe + PE_SIZE_SECTORS); }
+pub fn pe_size_bytes(pe) { return load64(pe + PE_SIZE_BYTES); }
+pub fn pe_bootable(pe) { return load64(pe + PE_BOOTABLE); }
+pub fn pe_name(pe) { return load64(pe + PE_NAME); }
+pub fn pe_is_efi(pe) { return load64(pe + PE_IS_EFI); }
+
+# ---------------------------------------------------------------------------
+# PartitionTable struct — result of reading a partition table
+# Layout: 24 bytes
+#   0: table_type (PT_MBR, PT_GPT, PT_NONE)
+#   8: entries (vec of PartitionEntry ptrs)
+#  16: disk_guid (Str, GPT only, 0 for MBR)
+# ---------------------------------------------------------------------------
+
+pub fn partition_table_new(table_type, entries, disk_guid) {
+    var pt = alloc(24);
+    store64(pt, table_type);
+    store64(pt + 8, entries);
+    store64(pt + 16, disk_guid);
+    return pt;
+}
+
+pub fn pt_type(pt) { return load64(pt); }
+pub fn pt_entries(pt) { return load64(pt + 8); }
+pub fn pt_disk_guid(pt) { return load64(pt + 16); }
+
+pub fn pt_type_to_str(t) {
+    if (t == PT_MBR) { return "mbr"; }
+    if (t == PT_GPT) { return "gpt"; }
+    return "none";
+}
+
+# ---------------------------------------------------------------------------
+# MBR type ID to human-readable string
+# ---------------------------------------------------------------------------
+
+pub fn mbr_type_to_str(type_id) {
+    if (type_id == MBR_TYPE_EMPTY) { return "Empty"; }
+    if (type_id == MBR_TYPE_FAT12) { return "FAT12"; }
+    if (type_id == MBR_TYPE_FAT16_SMALL) { return "FAT16 <32M"; }
+    if (type_id == MBR_TYPE_EXTENDED) { return "Extended"; }
+    if (type_id == MBR_TYPE_FAT16) { return "FAT16"; }
+    if (type_id == MBR_TYPE_NTFS) { return "NTFS/exFAT"; }
+    if (type_id == MBR_TYPE_FAT32) { return "FAT32"; }
+    if (type_id == MBR_TYPE_FAT32_LBA) { return "FAT32 LBA"; }
+    if (type_id == MBR_TYPE_FAT16_LBA) { return "FAT16 LBA"; }
+    if (type_id == MBR_TYPE_EXTENDED_LBA) { return "Extended LBA"; }
+    if (type_id == MBR_TYPE_LINUX_SWAP) { return "Linux swap"; }
+    if (type_id == MBR_TYPE_LINUX) { return "Linux"; }
+    if (type_id == MBR_TYPE_LINUX_LVM) { return "Linux LVM"; }
+    if (type_id == MBR_TYPE_EFI) { return "EFI System"; }
+    if (type_id == MBR_TYPE_GPT_PROTECTIVE) { return "GPT Protective"; }
+    return "Unknown";
+}
+
+# ---------------------------------------------------------------------------
+# Read 512 bytes from a block device at a given LBA
+# ---------------------------------------------------------------------------
+
+fn read_sector(fd, lba, buf) {
+    # lseek to lba * 512: SYS_LSEEK = 8, SEEK_SET = 0
+    var offset = lba * SECTOR_SIZE;
+    var r = syscall(8, fd, offset, 0);
+    if (r < 0) { return r; }
+    # read 512 bytes
+    return syscall(0, fd, buf, SECTOR_SIZE);
+}
+
+# Read N bytes at an exact byte offset
+fn read_at(fd, byte_offset, buf, count) {
+    var r = syscall(8, fd, byte_offset, 0);
+    if (r < 0) { return r; }
+    return syscall(0, fd, buf, count);
+}
+
+# ---------------------------------------------------------------------------
+# Parse MBR partition table from sector 0 buffer
+# ---------------------------------------------------------------------------
+
+fn parse_mbr_entries(buf) {
+    var entries = vec_new();
+
+    for (var i = 0; i < MBR_MAX_PARTS; i = i + 1) {
+        var offset = MBR_PART_OFFSET + i * MBR_PART_ENTRY_SIZE;
+
+        # MBR partition entry layout (16 bytes):
+        #  0: status (0x80=bootable, 0x00=inactive)
+        #  1-3: CHS first sector
+        #  4: type ID
+        #  5-7: CHS last sector
+        #  8-11: LBA start (little-endian u32)
+        # 12-15: sector count (little-endian u32)
+
+        var type_id = load8(buf + offset + 4);
+        if (type_id == MBR_TYPE_EMPTY) { continue; }
+
+        var status = load8(buf + offset);
+        var lba_start = load8(buf + offset + 8) |
+                        (load8(buf + offset + 9) << 8) |
+                        (load8(buf + offset + 10) << 16) |
+                        (load8(buf + offset + 11) << 24);
+        var sector_count = load8(buf + offset + 12) |
+                           (load8(buf + offset + 13) << 8) |
+                           (load8(buf + offset + 14) << 16) |
+                           (load8(buf + offset + 15) << 24);
+
+        var pe = partition_entry_new();
+        store64(pe + PE_INDEX, i);
+        store64(pe + PE_TYPE_ID, type_id);
+        store64(pe + PE_START_LBA, lba_start);
+        store64(pe + PE_SIZE_SECTORS, sector_count);
+        store64(pe + PE_SIZE_BYTES, sector_count * SECTOR_SIZE);
+        if (status == 0x80) { store64(pe + PE_BOOTABLE, 1); }
+        store64(pe + PE_NAME, str_from(mbr_type_to_str(type_id)));
+        if (type_id == MBR_TYPE_EFI) { store64(pe + PE_IS_EFI, 1); }
+
+        vec_push(entries, pe);
+    }
+
+    return entries;
+}
+
+# ---------------------------------------------------------------------------
+# GPT GUID helpers
+# ---------------------------------------------------------------------------
+
+# Format a 16-byte GUID buffer as string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+fn format_guid(buf) {
+    var sb = str_builder_new();
+    # GUID is stored in mixed-endian: first 3 fields are little-endian
+    # Bytes: 0-3 (LE u32), 4-5 (LE u16), 6-7 (LE u16), 8-9 (BE), 10-15 (BE)
+
+    # Field 1: bytes 3,2,1,0
+    _hex2(sb, load8(buf + 3)); _hex2(sb, load8(buf + 2));
+    _hex2(sb, load8(buf + 1)); _hex2(sb, load8(buf + 0));
+    str_builder_add_byte(sb, 45);
+    # Field 2: bytes 5,4
+    _hex2(sb, load8(buf + 5)); _hex2(sb, load8(buf + 4));
+    str_builder_add_byte(sb, 45);
+    # Field 3: bytes 7,6
+    _hex2(sb, load8(buf + 7)); _hex2(sb, load8(buf + 6));
+    str_builder_add_byte(sb, 45);
+    # Field 4: bytes 8,9
+    _hex2(sb, load8(buf + 8)); _hex2(sb, load8(buf + 9));
+    str_builder_add_byte(sb, 45);
+    # Field 5: bytes 10-15
+    _hex2(sb, load8(buf + 10)); _hex2(sb, load8(buf + 11));
+    _hex2(sb, load8(buf + 12)); _hex2(sb, load8(buf + 13));
+    _hex2(sb, load8(buf + 14)); _hex2(sb, load8(buf + 15));
+
+    return str_builder_build(sb);
+}
+
+fn _hex2(sb, byte) {
+    var hi = (byte >> 4) & 0x0F;
+    var lo = byte & 0x0F;
+    if (hi < 10) { str_builder_add_byte(sb, 48 + hi); }
+    else { str_builder_add_byte(sb, 97 + hi - 10); }
+    if (lo < 10) { str_builder_add_byte(sb, 48 + lo); }
+    else { str_builder_add_byte(sb, 97 + lo - 10); }
+    return 0;
+}
+
+# Known GPT type GUIDs (stored as the first 4 bytes LE for quick comparison)
+# EFI System: C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+# Linux filesystem: 0FC63DAF-8483-4772-8E79-3D69D8477DE4
+# Linux swap: 0657FD6D-A4AB-43C4-84E5-0933C84B4F4F
+# Microsoft Basic Data: EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
+
+fn is_efi_type_guid(guid_buf) {
+    # Check first 4 bytes (LE): C12A7328 -> bytes: 28 73 2A C1
+    if (load8(guid_buf) == 0x28) {
+        if (load8(guid_buf + 1) == 0x73) {
+            if (load8(guid_buf + 2) == 0x2A) {
+                if (load8(guid_buf + 3) == 0xC1) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+fn is_linux_type_guid(guid_buf) {
+    # 0FC63DAF -> bytes: AF 3D C6 0F
+    if (load8(guid_buf) == 0xAF) {
+        if (load8(guid_buf + 1) == 0x3D) {
+            if (load8(guid_buf + 2) == 0xC6) {
+                if (load8(guid_buf + 3) == 0x0F) { return 1; }
+            }
+        }
+    }
+    return 0;
+}
+
+fn is_linux_swap_guid(guid_buf) {
+    # 0657FD6D -> bytes: 6D FD 57 06
+    if (load8(guid_buf) == 0x6D) {
+        if (load8(guid_buf + 1) == 0xFD) {
+            if (load8(guid_buf + 2) == 0x57) {
+                if (load8(guid_buf + 3) == 0x06) { return 1; }
+            }
+        }
+    }
+    return 0;
+}
+
+fn is_msdata_type_guid(guid_buf) {
+    # EBD0A0A2 -> bytes: A2 A0 D0 EB
+    if (load8(guid_buf) == 0xA2) {
+        if (load8(guid_buf + 1) == 0xA0) {
+            if (load8(guid_buf + 2) == 0xD0) {
+                if (load8(guid_buf + 3) == 0xEB) { return 1; }
+            }
+        }
+    }
+    return 0;
+}
+
+fn gpt_type_guid_to_str(guid_buf) {
+    if (is_efi_type_guid(guid_buf)) { return "EFI System"; }
+    if (is_linux_type_guid(guid_buf)) { return "Linux filesystem"; }
+    if (is_linux_swap_guid(guid_buf)) { return "Linux swap"; }
+    if (is_msdata_type_guid(guid_buf)) { return "Microsoft Basic Data"; }
+    return format_guid(guid_buf);
+}
+
+# Check if GUID is all zeros (unused entry)
+fn is_zero_guid(buf) {
+    for (var i = 0; i < 16; i = i + 1) {
+        if (load8(buf + i) != 0) { return 0; }
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# Parse GPT name field — 72 bytes of UTF-16LE, extract ASCII
+# ---------------------------------------------------------------------------
+
+fn parse_gpt_name(buf) {
+    var sb = str_builder_new();
+    for (var i = 0; i < 36; i = i + 1) {
+        var lo = load8(buf + i * 2);
+        var hi = load8(buf + i * 2 + 1);
+        if (lo == 0) { if (hi == 0) { break; } }
+        # ASCII range only
+        if (hi == 0) {
+            if (lo >= 32) { if (lo < 127) { str_builder_add_byte(sb, lo); } }
+        }
+    }
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# Parse GPT partition entries
+# ---------------------------------------------------------------------------
+
+fn parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
+    var entries = vec_new();
+    var buf[128];
+    var byte_offset = entry_start_lba * SECTOR_SIZE;
+
+    for (var i = 0; i < num_entries; i = i + 1) {
+        var n = read_at(fd, byte_offset + i * entry_size, &buf, entry_size);
+        if (n < entry_size) { break; }
+
+        # GPT partition entry layout (128 bytes):
+        #  0-15: Partition type GUID (16 bytes)
+        # 16-31: Unique partition GUID (16 bytes)
+        # 32-39: Starting LBA (u64 LE)
+        # 40-47: Ending LBA (u64 LE)
+        # 48-55: Attributes (u64)
+        # 56-127: Name (72 bytes, UTF-16LE)
+
+        # Skip empty entries (zero type GUID)
+        if (is_zero_guid(&buf)) { continue; }
+
+        var start_lba = load64(&buf + 32);
+        var end_lba = load64(&buf + 40);
+        var attrs = load64(&buf + 48);
+        var sector_count = end_lba - start_lba + 1;
+
+        var pe = partition_entry_new();
+        store64(pe + PE_INDEX, i);
+        store64(pe + PE_TYPE_ID, 0);
+        store64(pe + PE_START_LBA, start_lba);
+        store64(pe + PE_SIZE_SECTORS, sector_count);
+        store64(pe + PE_SIZE_BYTES, sector_count * SECTOR_SIZE);
+
+        # GPT legacy BIOS bootable: attribute bit 2
+        store64(pe + PE_BOOTABLE, (attrs >> 2) & 1);
+
+        # Name
+        var name = parse_gpt_name(&buf + 56);
+        if (str_len(name) == 0) {
+            name = str_from(gpt_type_guid_to_str(&buf));
+        }
+        store64(pe + PE_NAME, name);
+
+        # Type GUID
+        store64(pe + PE_TYPE_GUID_HI, load64(&buf));
+        store64(pe + PE_TYPE_GUID_LO, load64(&buf + 8));
+
+        # EFI detection
+        store64(pe + PE_IS_EFI, is_efi_type_guid(&buf));
+
+        vec_push(entries, pe);
+    }
+
+    return entries;
+}
+
+# ---------------------------------------------------------------------------
+# read_partition_table — main entry point
+# Opens a block device and reads its partition table (MBR or GPT)
+# ---------------------------------------------------------------------------
+
+pub fn read_partition_table(dev_path_cstr) {
+    sakshi_span_enter("read_pt", 7);
+
+    var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY, 0);
+    if (fd < 0) {
+        sakshi_span_exit();
+        return err_io(str_from(dev_path_cstr));
+    }
+
+    # Read sector 0 (MBR / protective MBR)
+    var sector0[512];
+    var n = read_sector(fd, 0, &sector0);
+    if (n < SECTOR_SIZE) {
+        syscall(SYS_CLOSE, fd);
+        sakshi_span_exit();
+        return err_io(str_from("failed to read sector 0"));
+    }
+
+    # Validate MBR signature
+    if (load8(&sector0 + MBR_SIG_OFFSET) != MBR_SIG_LO) {
+        syscall(SYS_CLOSE, fd);
+        sakshi_span_exit();
+        return Ok(partition_table_new(PT_NONE, vec_new(), 0));
+    }
+    if (load8(&sector0 + MBR_SIG_OFFSET + 1) != MBR_SIG_HI) {
+        syscall(SYS_CLOSE, fd);
+        sakshi_span_exit();
+        return Ok(partition_table_new(PT_NONE, vec_new(), 0));
+    }
+
+    # Check if this is a GPT protective MBR
+    var mbr_type0 = load8(&sector0 + MBR_PART_OFFSET + 4);
+    if (mbr_type0 == MBR_TYPE_GPT_PROTECTIVE) {
+        # Read GPT header at LBA 1
+        var gpt_hdr[512];
+        n = read_sector(fd, GPT_HEADER_LBA, &gpt_hdr);
+        if (n < SECTOR_SIZE) {
+            syscall(SYS_CLOSE, fd);
+            sakshi_span_exit();
+            return err_io(str_from("failed to read GPT header"));
+        }
+
+        # GPT header layout:
+        #  0-7: Signature "EFI PART" (45 46 49 20 50 41 52 54)
+        #  8-11: Revision (usually 00 00 01 00)
+        # 12-15: Header size (usually 92)
+        # 16-19: CRC32 of header
+        # 20-23: Reserved
+        # 24-31: My LBA
+        # 32-39: Alternate LBA
+        # 40-47: First usable LBA
+        # 48-55: Last usable LBA
+        # 56-71: Disk GUID (16 bytes)
+        # 72-79: Partition entry start LBA
+        # 80-83: Number of partition entries
+        # 84-87: Size of partition entry
+        # 88-91: CRC32 of partition entries
+
+        # Validate signature: "EFI PART"
+        if (load8(&gpt_hdr) != 0x45) {
+            syscall(SYS_CLOSE, fd);
+            sakshi_span_exit();
+            return err_parse(str_from("invalid GPT signature"));
+        }
+        if (load8(&gpt_hdr + 1) != 0x46) {
+            syscall(SYS_CLOSE, fd);
+            sakshi_span_exit();
+            return err_parse(str_from("invalid GPT signature"));
+        }
+
+        var entry_start_lba = load64(&gpt_hdr + 72);
+        var num_entries = load32(&gpt_hdr + 80);
+        var entry_size = load32(&gpt_hdr + 84);
+        if (entry_size == 0) { entry_size = GPT_ENTRY_SIZE; }
+        if (num_entries > GPT_MAX_ENTRIES) { num_entries = GPT_MAX_ENTRIES; }
+
+        # Disk GUID
+        var disk_guid = format_guid(&gpt_hdr + 56);
+
+        var entries = parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size);
+
+        syscall(SYS_CLOSE, fd);
+        sakshi_span_exit();
+        return Ok(partition_table_new(PT_GPT, entries, disk_guid));
+    }
+
+    # Plain MBR
+    var entries = parse_mbr_entries(&sector0);
+    syscall(SYS_CLOSE, fd);
+    sakshi_span_exit();
+    return Ok(partition_table_new(PT_MBR, entries, 0));
+}
+
+# ---------------------------------------------------------------------------
+# Convenience queries
+# ---------------------------------------------------------------------------
+
+# Find the EFI System Partition in a partition table
+pub fn find_efi_partition(pt) {
+    var entries = pt_entries(pt);
+    var n = vec_len(entries);
+    for (var i = 0; i < n; i = i + 1) {
+        var pe = vec_get(entries, i);
+        if (pe_is_efi(pe)) { return pe; }
+    }
+    return 0;
+}
+
+# Find all bootable partitions
+pub fn find_bootable_partitions(pt) {
+    var result = vec_new();
+    var entries = pt_entries(pt);
+    var n = vec_len(entries);
+    for (var i = 0; i < n; i = i + 1) {
+        var pe = vec_get(entries, i);
+        if (pe_bootable(pe)) { vec_push(result, pe); }
+    }
+    return result;
+}
+
+# Get partition count (non-empty entries)
+pub fn partition_count(pt) {
+    return vec_len(pt_entries(pt));
+}
+
+# Check if a disk has an EFI System Partition
+pub fn has_efi_partition(pt) {
+    return find_efi_partition(pt) != 0;
+}
+
+# Read partition table from sysfs device name (e.g. "sda", "nvme0n1")
+pub fn read_partition_table_by_name(dev_name) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/dev/");
+    str_builder_add_str(sb, dev_name);
+    return read_partition_table(str_cstr(str_builder_build(sb)));
 }
 
 # --- device_db.cyr ---

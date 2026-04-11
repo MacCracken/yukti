@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-04-11
+
+### Added
+- **`partition.cyr`** — MBR and GPT partition table reading
+  - MBR: 4 primary entries, 15 known type IDs, boot flag (0x80)
+  - GPT: header validation ("EFI PART"), 128-byte entries, mixed-endian GUID formatting
+  - 4 known GPT type GUIDs: EFI System, Linux filesystem, Linux swap, Microsoft Basic Data
+  - `read_partition_table(dev)`, `find_efi_partition()`, `find_bootable_partitions()`
+  - `partition_count()`, `has_efi_partition()`, `read_partition_table_by_name()`
+- **`device_db.cyr`** — device database persistence via patra
+  - 3 tables: `devices` (known devices), `mount_history` (event log), `preferences` (per-device config)
+  - `device_db_record_seen()`, `device_db_record_mount()`, `device_db_is_known()`
+  - `device_db_set_preference()` / `device_db_get_preference()` — per-device mount config
+  - `device_db_mount_count()`, `device_db_device_count()`
+- **`network.cyr`** — network filesystem mount helpers
+  - SMB/CIFS and NFS/NFS4 mount via direct syscall with credential and port support
+  - `NetworkShare` struct — host, path, fs_type, port, username, password
+  - `network_mount()`, `network_unmount()`, `network_list_mounted()`
+  - `network_probe_smb()` / `network_probe_nfs()` — TCP connect probe on ports 445/2049
+  - `network_mount_source()` — builds `//host/path` (SMB) or `host:/path` (NFS)
+- **sakshi_full structured logging** — upgraded from minimal sakshi
+  - Span-based instrumentation on mount/unmount/eject, tray control, TOC reading, enumeration, udev monitor
+  - `sakshi_span_enter()` / `sakshi_span_exit()` with automatic duration tracking
+
+### Changed
+- Include chain (`lib.cyr`) now uses `sakshi_full.cyr` instead of `sakshi.cyr`
+- Added `lib/patra.cyr` and `lib/freelist.cyr` as stdlib dependencies
+- Bundle script updated to include partition, device_db, network modules
+- CI/release workflows updated for Cyrius toolchain (matching patra/sakshi pattern)
+- Makefile rewritten for Cyrius build/test/bench/fuzz targets
+
+### Metrics
+- **Modules**: 13 (was 10)
+- **Source lines**: 4,573 (was 3,359)
+- **Tests**: 470 assertions (was 407)
+- **Binary size**: 307 KB (was 152 KB — includes patra SQL engine)
+- **dist bundle**: 4,477 lines
+
 ## [1.0.0] — 2026-04-11
 
 ### Changed — **Cyrius Port**

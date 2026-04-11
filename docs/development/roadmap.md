@@ -8,24 +8,24 @@
 - [x] All 8 modules: error, device, event, storage, optical, udev, linux, udev_rules
 - [x] Stdlib inclusion preparation (reviewed patra, sakshi)
 
+## Completed (v1.1.0)
+
+- [x] sakshi_full structured logging with spans (mount, eject, tray, TOC, enumerate, monitor)
+- [x] patra device database — persist device history, mount counts, per-device preferences
+- [x] Network filesystem mount helpers — SMB/CIFS and NFS/NFS4 with credentials, probing
+- [x] Partition management — MBR and GPT table reading, EFI detection, boot flags
+- [x] CI/release workflows ported to Cyrius (matching patra/sakshi pattern)
+- [x] dist/yukti.cyr bundle for stdlib inclusion
+
+## Completed (v1.1.0 → Cyrius 3.4.12)
+
+- [x] Published yukti as Cyrius stdlib module (`lib/yukti.cyr`)
+- [x] Extended `lib/str.cyr` with 12 new functions upstreamed to Cyrius stdlib
+- [x] Added `[deps.yukti]` to cyrius.toml
+
 ## Next Release
 
-### Cyrius Stdlib Integration
-- [ ] Publish yukti as a Cyrius stdlib module (lib/yukti.cyr)
-- [ ] Integration with sakshi_full structured logging
-- [ ] Integration with patra for device database persistence
-
-### Network Filesystem Mount Helpers
-- [ ] SMB/NFS mount with credential support via `MountOptions`
-- [ ] NAS autodiscovery (mDNS/SSDP)
-- [ ] `DC_NETWORK` with actual SMB/NFS share detection
-
 ## Medium Term
-
-### Partition Management
-- [ ] Partition table reading module (MBR/GPT)
-- [ ] EFI System Partition detection
-- [ ] Boot flag and partition type queries
 
 ### Optical Enhancements
 - [ ] Dual-layer/dual-sided disc type variants

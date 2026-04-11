@@ -17,6 +17,7 @@ modules = [
     "src/udev.cyr",
     "src/linux.cyr",
     "src/udev_rules.cyr",
+    "src/partition.cyr",
     "src/device_db.cyr",
     "src/network.cyr",
 ]

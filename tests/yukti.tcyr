@@ -2,6 +2,7 @@
 # Tests all modules: error, device, event, storage, optical, udev, udev_rules
 
 include "src/lib.cyr"
+include "lib/assert.cyr"
 
 # ===================================================================
 # Error tests

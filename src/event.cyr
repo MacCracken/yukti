@@ -3,7 +3,6 @@
 # DeviceEvent, DeviceEventKind, EventCollector (for testing),
 # and listener callback pattern.
 
-mod yukti;
 
 # ---------------------------------------------------------------------------
 # DeviceEventKind enum — 6 variants

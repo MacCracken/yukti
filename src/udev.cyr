@@ -3,7 +3,6 @@
 # Reads from /sys/, monitors udev events via netlink socket.
 # UdevEvent, device classification, sysfs enumeration, uevent parsing.
 
-mod yukti;
 
 # ---------------------------------------------------------------------------
 # UdevEvent struct
@@ -457,7 +456,7 @@ pub fn enumerate_devices(sysfs_root) {
         }
     }
 
-    sakshi_info("yukti", "enumeration complete", "");
+    sakshi_info("enumeration complete", strlen("enumeration complete"));
     return Ok(devices);
 }
 
@@ -653,7 +652,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
     store64(mon + 8, 1);
     store64(mon + 16, filter_vec);
 
-    sakshi_info("yukti", "udev monitor created", "");
+    sakshi_info("udev monitor created", strlen("udev monitor created"));
     return Ok(mon);
 }
 
@@ -683,7 +682,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
 
 pub fn udev_monitor_stop(mon) {
     store64(mon + 8, 0);
-    sakshi_info("yukti", "udev monitor stopping", "");
+    sakshi_info("udev monitor stopping", strlen("udev monitor stopping"));
     return 0;
 }
 
@@ -700,7 +699,7 @@ pub fn udev_monitor_is_running(mon) {
 
 # Run event loop dispatching to a listener function pointer
 pub fn udev_monitor_run(mon, listener_fn) {
-    sakshi_info("yukti", "udev monitor event loop started", "");
+    sakshi_info("udev monitor event loop started", strlen("udev monitor event loop started"));
     while (udev_monitor_is_running(mon)) {
         var r = udev_monitor_poll(mon, 500);
         if (is_ok(r) == 0) { continue; }

@@ -3,7 +3,6 @@
 # Disc type detection, tray control, TOC reading.
 # All hardware ops via direct syscalls/ioctls.
 
-mod yukti;
 
 # ---------------------------------------------------------------------------
 # DiscType enum — 10 variants
@@ -212,7 +211,7 @@ fn map_ioctl_error(dev_path_cstr, op) {
 # ---------------------------------------------------------------------------
 
 pub fn open_tray(dev_path_cstr) {
-    sakshi_info("yukti", "opening tray", dev_path_cstr);
+    sakshi_info("opening tray", strlen("opening tray"));
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -221,11 +220,11 @@ pub fn open_tray(dev_path_cstr) {
     syscall(SYS_CLOSE, fd);
 
     if (ret < 0) {
-        sakshi_error("yukti", "open tray failed", dev_path_cstr);
+        sakshi_error("open tray failed", strlen("open tray failed"));
         return err_tray_failed(str_from("eject ioctl failed"));
     }
 
-    sakshi_info("yukti", "tray opened", dev_path_cstr);
+    sakshi_info("tray opened", strlen("tray opened"));
     return Ok(0);
 }
 
@@ -234,7 +233,7 @@ pub fn open_tray(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn close_tray(dev_path_cstr) {
-    sakshi_info("yukti", "closing tray", dev_path_cstr);
+    sakshi_info("closing tray", strlen("closing tray"));
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -243,11 +242,11 @@ pub fn close_tray(dev_path_cstr) {
     syscall(SYS_CLOSE, fd);
 
     if (ret < 0) {
-        sakshi_error("yukti", "close tray failed", dev_path_cstr);
+        sakshi_error("close tray failed", strlen("close tray failed"));
         return err_tray_failed(str_from("close tray ioctl failed"));
     }
 
-    sakshi_info("yukti", "tray closed", dev_path_cstr);
+    sakshi_info("tray closed", strlen("tray closed"));
     return Ok(0);
 }
 
@@ -279,7 +278,7 @@ pub fn drive_status(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn read_toc(dev_path_cstr) {
-    sakshi_info("yukti", "reading disc TOC", dev_path_cstr);
+    sakshi_info("reading disc TOC", strlen("reading disc TOC"));
     var fd_r = open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
@@ -389,7 +388,7 @@ pub fn read_toc(dev_path_cstr) {
     # Classify disc type
     var dt = classify_toc_tracks(has_audio, has_data);
 
-    sakshi_info("yukti", "TOC read complete", dev_path_cstr);
+    sakshi_info("TOC read complete", strlen("TOC read complete"));
 
     return Ok(disc_toc_new(dt, tracks, total_size));
 }

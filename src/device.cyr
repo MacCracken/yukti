@@ -3,7 +3,6 @@
 # DeviceId, DeviceClass, DeviceState, DeviceCapabilities (bitflags),
 # DeviceInfo (primary device data structure), DeviceHealth, permissions.
 
-mod yukti;
 
 # ---------------------------------------------------------------------------
 # DeviceClass enum — 8 variants

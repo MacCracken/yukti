@@ -1,0 +1,33 @@
+# yukti/lib.cyr — Library entry point (include chain)
+#
+# Yukti — Device abstraction layer for AGNOS
+# Provides a unified API for detecting, monitoring, and managing hardware
+# devices: USB storage, optical drives, block devices, and udev hotplug events.
+
+# --- Standard library dependencies (order matters) ---
+include "lib/syscalls.cyr"
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/vec.cyr"
+include "lib/hashmap.cyr"
+include "lib/io.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/json.cyr"
+include "lib/process.cyr"
+include "lib/fnptr.cyr"
+include "lib/sakshi.cyr"
+include "lib/chrono.cyr"
+include "lib/args.cyr"
+
+# --- Yukti domain modules (dependency order) ---
+include "src/error.cyr"
+include "src/device.cyr"
+include "src/event.cyr"
+include "src/storage.cyr"
+include "src/optical.cyr"
+include "src/udev.cyr"
+include "src/linux.cyr"
+include "src/udev_rules.cyr"

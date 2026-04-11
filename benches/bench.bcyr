@@ -1,0 +1,132 @@
+# yukti benchmarks
+# Performance measurement for hot-path operations
+
+include "src/lib.cyr"
+
+fn bench_classify_device() {
+    var b = bench_new("classify_device (USB)");
+    var usb_props = map_new();
+    map_set(usb_props, "ID_BUS", str_from("usb"));
+    map_set(usb_props, "ID_USB_DRIVER", str_from("usb-storage"));
+    var usb = udev_event_new(str_from("add"), str_from("/sys/block/sdb/sdb1"),
+                              str_from("/dev/sdb1"), str_from("block"),
+                              str_from("partition"), usb_props);
+    bench_run(b, 100000, |_| {
+        classify_device(usb);
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_classify_and_extract() {
+    var b = bench_new("classify_and_extract (optical)");
+    var props = map_new();
+    map_set(props, "ID_CDROM", str_from("1"));
+    map_set(props, "ID_CDROM_DVD_RW", str_from("1"));
+    var opt = udev_event_new(str_from("add"), str_from("/sys/block/sr0"),
+                              str_from("/dev/sr0"), str_from("block"),
+                              str_from("disk"), props);
+    bench_run(b, 100000, |_| {
+        classify_and_extract(opt);
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_filesystem_from_str() {
+    var b = bench_new("filesystem_from_str");
+    bench_run(b, 100000, |_| {
+        filesystem_from_str("ext4");
+        filesystem_from_str("VFAT");
+        filesystem_from_str("iso9660");
+        filesystem_from_str("crypto_luks");
+        filesystem_from_str("unknown_fs");
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_detect_disc_type() {
+    var b = bench_new("detect_disc_type");
+    bench_run(b, 100000, |_| {
+        detect_disc_type("cd", 1, 0);
+        detect_disc_type("dvd-rom", 0, 1);
+        detect_disc_type("bd", 0, 1);
+        detect_disc_type("blank", 0, 0);
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_device_info_new() {
+    var b = bench_new("device_info_new");
+    bench_run(b, 100000, |_| {
+        var id = device_id_new_cstr("block:sdb1");
+        var info = device_info_new(id, str_from("/dev/sdb1"), DC_USB_STORAGE);
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_capabilities() {
+    var b = bench_new("has_cap (bitflag check)");
+    var caps = CAP_READ | CAP_WRITE | CAP_EJECT | CAP_REMOVABLE | CAP_HOTPLUG;
+    bench_run(b, 1000000, |_| {
+        has_cap(caps, CAP_READ);
+        has_cap(caps, CAP_WRITE);
+        has_cap(caps, CAP_EJECT);
+        has_cap(caps, CAP_TRIM);
+        has_cap(caps, CAP_BURN);
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_validate_mount_point() {
+    var b = bench_new("validate_mount_point");
+    bench_run(b, 100000, |_| {
+        validate_mount_point("/mnt/usb");
+        validate_mount_point("/run/media/test");
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn bench_find_mount_in() {
+    var b = bench_new("find_mount_in");
+    var table = str_from("/dev/sda1 / ext4 rw 0 0\n/dev/sda2 /home ext4 rw 0 0\n/dev/sdb1 /mnt/usb vfat rw 0 0\ntmpfs /tmp tmpfs rw 0 0\n");
+    bench_run(b, 100000, |_| {
+        find_mount_in("/dev/sdb1", table);
+        return 0;
+    });
+    bench_report(b);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+
+    syscall(1, 1, "yukti benchmarks\n", 17);
+    syscall(1, 1, "================\n\n", 19);
+
+    bench_classify_device();
+    bench_classify_and_extract();
+    bench_filesystem_from_str();
+    bench_detect_disc_type();
+    bench_device_info_new();
+    bench_capabilities();
+    bench_validate_mount_point();
+    bench_find_mount_in();
+
+    syscall(1, 1, "\ndone\n", 6);
+    syscall(60, 0);
+}
+
+main();

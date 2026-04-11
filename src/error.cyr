@@ -1,0 +1,195 @@
+# yukti/error.cyr — Error types for yukti
+#
+# All errors that yukti can produce. Each error is a heap-allocated struct
+# with kind, detail string, and optional context string.
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# Error kind enum — 15 variants matching Rust YuktiError
+# ---------------------------------------------------------------------------
+
+enum YuktiErrorKind {
+    ERR_DEVICE_NOT_FOUND = 0;
+    ERR_DEVICE_BUSY = 1;
+    ERR_MOUNT_FAILED = 2;
+    ERR_UNMOUNT_FAILED = 3;
+    ERR_EJECT_FAILED = 4;
+    ERR_TRAY_FAILED = 5;
+    ERR_PERMISSION_DENIED = 6;
+    ERR_UDEV = 7;
+    ERR_ALREADY_MOUNTED = 8;
+    ERR_TIMEOUT = 9;
+    ERR_UDEV_SOCKET = 10;
+    ERR_UDEV_PARSE = 11;
+    ERR_NO_MEDIA = 12;
+    ERR_UNSUPPORTED_FS = 13;
+    ERR_IO = 14;
+    ERR_PARSE = 15;
+}
+
+# ---------------------------------------------------------------------------
+# Error struct layout: 24 bytes
+#   0: kind (i64)
+#   8: detail (Str pointer — primary message)
+#  16: context (Str pointer — secondary context, e.g. path, device)
+# ---------------------------------------------------------------------------
+
+# Create a new error with kind and detail string.
+pub fn yukti_err_new(kind, detail) {
+    var e = alloc(24);
+    store64(e, kind);
+    store64(e + 8, detail);
+    store64(e + 16, 0);
+    return e;
+}
+
+# Create a new error with kind, detail, and context.
+pub fn yukti_err_new_ctx(kind, detail, context) {
+    var e = alloc(24);
+    store64(e, kind);
+    store64(e + 8, detail);
+    store64(e + 16, context);
+    return e;
+}
+
+# Accessors
+pub fn yukti_err_kind(e) { return load64(e); }
+pub fn yukti_err_detail(e) { return load64(e + 8); }
+pub fn yukti_err_context(e) { return load64(e + 16); }
+
+# ---------------------------------------------------------------------------
+# Error kind to string name
+# ---------------------------------------------------------------------------
+
+pub fn yukti_err_kind_str(kind) {
+    if (kind == ERR_DEVICE_NOT_FOUND) { return "device not found"; }
+    if (kind == ERR_DEVICE_BUSY) { return "device busy"; }
+    if (kind == ERR_MOUNT_FAILED) { return "mount failed"; }
+    if (kind == ERR_UNMOUNT_FAILED) { return "unmount failed"; }
+    if (kind == ERR_EJECT_FAILED) { return "eject failed"; }
+    if (kind == ERR_TRAY_FAILED) { return "tray operation failed"; }
+    if (kind == ERR_PERMISSION_DENIED) { return "permission denied"; }
+    if (kind == ERR_UDEV) { return "udev error"; }
+    if (kind == ERR_ALREADY_MOUNTED) { return "device already mounted"; }
+    if (kind == ERR_TIMEOUT) { return "operation timed out"; }
+    if (kind == ERR_UDEV_SOCKET) { return "udev socket error"; }
+    if (kind == ERR_UDEV_PARSE) { return "udev parse error"; }
+    if (kind == ERR_NO_MEDIA) { return "no media in device"; }
+    if (kind == ERR_UNSUPPORTED_FS) { return "unsupported filesystem"; }
+    if (kind == ERR_IO) { return "io error"; }
+    if (kind == ERR_PARSE) { return "parse error"; }
+    return "unknown error";
+}
+
+# ---------------------------------------------------------------------------
+# Format error to string builder
+# ---------------------------------------------------------------------------
+
+pub fn yukti_err_to_str(e, sb) {
+    var kind = yukti_err_kind(e);
+    str_builder_add_cstr(sb, yukti_err_kind_str(kind));
+
+    var detail = yukti_err_detail(e);
+    if (detail != 0) {
+        str_builder_add_cstr(sb, ": ");
+        str_builder_add_str(sb, detail);
+    }
+
+    var ctx = yukti_err_context(e);
+    if (ctx != 0) {
+        str_builder_add_cstr(sb, " (");
+        str_builder_add_str(sb, ctx);
+        str_builder_add_cstr(sb, ")");
+    }
+
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Convenience constructors for common errors
+# ---------------------------------------------------------------------------
+
+pub fn err_device_not_found(id) {
+    return Err(yukti_err_new(ERR_DEVICE_NOT_FOUND, id));
+}
+
+pub fn err_device_busy(path) {
+    return Err(yukti_err_new(ERR_DEVICE_BUSY, path));
+}
+
+pub fn err_mount_failed(device, reason) {
+    return Err(yukti_err_new_ctx(ERR_MOUNT_FAILED, reason, device));
+}
+
+pub fn err_unmount_failed(mount_point, reason) {
+    return Err(yukti_err_new_ctx(ERR_UNMOUNT_FAILED, reason, mount_point));
+}
+
+pub fn err_eject_failed(device, reason) {
+    return Err(yukti_err_new_ctx(ERR_EJECT_FAILED, reason, device));
+}
+
+pub fn err_tray_failed(reason) {
+    return Err(yukti_err_new(ERR_TRAY_FAILED, reason));
+}
+
+pub fn err_permission_denied(operation, path) {
+    return Err(yukti_err_new_ctx(ERR_PERMISSION_DENIED, operation, path));
+}
+
+pub fn err_udev(msg) {
+    return Err(yukti_err_new(ERR_UDEV, msg));
+}
+
+pub fn err_already_mounted(device, mount_point) {
+    return Err(yukti_err_new_ctx(ERR_ALREADY_MOUNTED, device, mount_point));
+}
+
+pub fn err_timeout(operation) {
+    return Err(yukti_err_new(ERR_TIMEOUT, operation));
+}
+
+pub fn err_udev_socket(msg) {
+    return Err(yukti_err_new(ERR_UDEV_SOCKET, msg));
+}
+
+pub fn err_udev_parse(msg) {
+    return Err(yukti_err_new(ERR_UDEV_PARSE, msg));
+}
+
+pub fn err_no_media(device) {
+    return Err(yukti_err_new(ERR_NO_MEDIA, device));
+}
+
+pub fn err_unsupported_fs(fs_type) {
+    return Err(yukti_err_new(ERR_UNSUPPORTED_FS, fs_type));
+}
+
+pub fn err_io(msg) {
+    return Err(yukti_err_new(ERR_IO, msg));
+}
+
+pub fn err_parse(msg) {
+    return Err(yukti_err_new(ERR_PARSE, msg));
+}
+
+# ---------------------------------------------------------------------------
+# Map errno to appropriate error result
+# ---------------------------------------------------------------------------
+
+pub fn map_errno_to_err(errno, operation, path) {
+    # EPERM=1, EACCES=13
+    if (errno == 1) { return err_permission_denied(operation, path); }
+    if (errno == 13) { return err_permission_denied(operation, path); }
+    # EBUSY=16
+    if (errno == 16) { return err_device_busy(path); }
+    # ENOMEDIUM=123
+    if (errno == 123) { return err_no_media(path); }
+    # Default: IO error
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, operation);
+    str_builder_add_cstr(sb, ": errno ");
+    str_builder_add_int(sb, errno);
+    return err_io(str_builder_build(sb));
+}

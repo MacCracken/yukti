@@ -1,0 +1,91 @@
+# yukti/main.cyr — CLI entry point
+#
+# Device detection demo: enumerates all block devices and prints
+# a summary table.
+
+include "src/lib.cyr"
+
+fn print_device_table(devices) {
+    var n = vec_len(devices);
+
+    # Header
+    syscall(1, 1, "yukti device enumeration\n", 25);
+    syscall(1, 1, "========================\n\n", 27);
+
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Found ");
+    str_builder_add_int(sb, n);
+    str_builder_add_cstr(sb, " device(s)\n\n");
+    var header = str_builder_build(sb);
+    syscall(1, 1, str_cstr(header), str_len(header));
+
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devices, i);
+
+        var line = str_builder_new();
+
+        # Device number
+        str_builder_add_cstr(line, "  [");
+        str_builder_add_int(line, i + 1);
+        str_builder_add_cstr(line, "] ");
+
+        # Dev path
+        str_builder_add_str(line, di_dev_path(info));
+        str_builder_add_cstr(line, "  ");
+
+        # Class
+        str_builder_add_cstr(line, device_class_to_str(di_class(info)));
+        str_builder_add_cstr(line, "  ");
+
+        # State
+        str_builder_add_cstr(line, device_state_to_str(di_state(info)));
+        str_builder_add_cstr(line, "  ");
+
+        # Size
+        device_info_size_display(info, line);
+        str_builder_add_cstr(line, "  ");
+
+        # Display name
+        var name = device_info_display_name(info);
+        str_builder_add_str(line, name);
+
+        # Mount point
+        var mp = di_mount_point(info);
+        if (mp != 0) {
+            str_builder_add_cstr(line, "  -> ");
+            str_builder_add_str(line, mp);
+        }
+
+        str_builder_add_cstr(line, "\n");
+        var out = str_builder_build(line);
+        syscall(1, 1, str_cstr(out), str_len(out));
+    }
+
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+
+    var mgr = linux_dm_new();
+    var r = linux_dm_enumerate(mgr);
+
+    if (is_ok(r) == 0) {
+        var err = payload(r);
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "error: ");
+        yukti_err_to_str(err, sb);
+        str_builder_add_cstr(sb, "\n");
+        var msg = str_builder_build(sb);
+        syscall(1, 2, str_cstr(msg), str_len(msg));
+        syscall(60, 1);
+    }
+
+    var devices = payload(r);
+    print_device_table(devices);
+
+    syscall(60, 0);
+}
+
+main();

@@ -1,0 +1,228 @@
+# yukti/linux.cyr — Linux device manager
+#
+# Ties together udev, storage, and optical modules.
+# Concrete implementation providing device enumeration, lookup,
+# mount/eject operations, and hotplug monitoring.
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# LinuxDeviceManager struct
+# Layout: 40 bytes
+#   0: sysfs_root (Str)
+#   8: devices (hashmap — DeviceId string → DeviceInfo ptr)
+#  16: listeners (vec of listener entries)
+#  24: monitor (UdevMonitor ptr, 0 if not running)
+#  32: monitor_thread (thread id, 0 if not running)
+# ---------------------------------------------------------------------------
+
+enum LinuxDMField {
+    LDM_SYSFS_ROOT = 0;
+    LDM_DEVICES = 8;
+    LDM_LISTENERS = 16;
+    LDM_MONITOR = 24;
+    LDM_MONITOR_THREAD = 32;
+    LDM_SIZE = 40;
+}
+
+pub fn linux_dm_new() {
+    return linux_dm_with_root(str_from("/sys"));
+}
+
+pub fn linux_dm_with_root(root) {
+    var mgr = alloc(LDM_SIZE);
+    store64(mgr + LDM_SYSFS_ROOT, root);
+    store64(mgr + LDM_DEVICES, map_new());
+    store64(mgr + LDM_LISTENERS, vec_new());
+    store64(mgr + LDM_MONITOR, 0);
+    store64(mgr + LDM_MONITOR_THREAD, 0);
+    return mgr;
+}
+
+pub fn ldm_sysfs_root(mgr) { return load64(mgr + LDM_SYSFS_ROOT); }
+
+# ---------------------------------------------------------------------------
+# Listener management
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_add_listener(mgr, handler_fn, filter_fn) {
+    var entry = listener_entry_new(handler_fn, filter_fn);
+    var listeners = load64(mgr + LDM_LISTENERS);
+    vec_push(listeners, entry);
+    return 0;
+}
+
+pub fn linux_dm_dispatch_event(mgr, event) {
+    var listeners = load64(mgr + LDM_LISTENERS);
+    dispatch_event_to_listeners(listeners, event);
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Device enumeration (Device trait: enumerate)
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_enumerate(mgr) {
+    var root = ldm_sysfs_root(mgr);
+    sakshi_info("yukti", "enumerating devices", str_cstr(root));
+
+    var r = enumerate_devices(root);
+    if (is_ok(r) == 0) { return r; }
+
+    var devices = payload(r);
+    var cache = load64(mgr + LDM_DEVICES);
+
+    # Clear and repopulate cache
+    # (hashmap doesn't have a clear, so we create a new one)
+    var new_cache = map_new();
+    var n = vec_len(devices);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devices, i);
+        var id_str = device_id_str(di_id(info));
+        map_set(new_cache, str_cstr(id_str), info);
+    }
+    store64(mgr + LDM_DEVICES, new_cache);
+
+    sakshi_info("yukti", "device cache updated", "");
+    return Ok(devices);
+}
+
+# ---------------------------------------------------------------------------
+# Device lookup (Device trait: get)
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_get(mgr, device_id) {
+    var cache = load64(mgr + LDM_DEVICES);
+    var id_str = device_id_str(device_id);
+    var info = map_get(cache, str_cstr(id_str));
+    return Ok(info);
+}
+
+# ---------------------------------------------------------------------------
+# Device refresh (Device trait: refresh)
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_refresh(mgr, device_id) {
+    var r = linux_dm_enumerate(mgr);
+    if (is_ok(r) == 0) { return r; }
+
+    var devices = payload(r);
+    var n = vec_len(devices);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devices, i);
+        if (device_id_eq(di_id(info), device_id)) {
+            return Ok(info);
+        }
+    }
+
+    return err_device_not_found(device_id_str(device_id));
+}
+
+# ---------------------------------------------------------------------------
+# Mount a device by ID
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_mount(mgr, device_id, options) {
+    # Look up device
+    var get_r = linux_dm_get(mgr, device_id);
+    if (is_ok(get_r) == 0) { return get_r; }
+    var info = payload(get_r);
+    if (info == 0) {
+        return err_device_not_found(device_id_str(device_id));
+    }
+
+    var dev_path = di_dev_path(info);
+    var result = storage_mount(str_cstr(dev_path), options);
+    if (is_ok(result) == 0) { return result; }
+
+    var mr = payload(result);
+
+    # Update cached state
+    di_set_state(info, DS_MOUNTED);
+    di_set_mount_point(info, mr_mount_point(mr));
+
+    return Ok(mr);
+}
+
+# ---------------------------------------------------------------------------
+# Unmount a device by ID
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_unmount(mgr, device_id) {
+    var get_r = linux_dm_get(mgr, device_id);
+    if (is_ok(get_r) == 0) { return get_r; }
+    var info = payload(get_r);
+    if (info == 0) {
+        return err_device_not_found(device_id_str(device_id));
+    }
+
+    var mp = di_mount_point(info);
+    if (mp == 0) {
+        return err_unmount_failed(di_dev_path(info), str_from("device is not mounted"));
+    }
+
+    var r = storage_unmount(str_cstr(mp));
+    if (is_ok(r) == 0) { return r; }
+
+    # Update cached state
+    di_set_state(info, DS_READY);
+    di_set_mount_point(info, 0);
+
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# Eject a device by ID
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_eject(mgr, device_id) {
+    var get_r = linux_dm_get(mgr, device_id);
+    if (is_ok(get_r) == 0) { return get_r; }
+    var info = payload(get_r);
+    if (info == 0) {
+        return err_device_not_found(device_id_str(device_id));
+    }
+
+    var dev_path = di_dev_path(info);
+    var r = storage_eject(str_cstr(dev_path));
+    if (is_ok(r) == 0) { return r; }
+
+    # Update cached state
+    di_set_state(info, DS_EJECTING);
+
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# Start udev hotplug monitor
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_start_monitor(mgr) {
+    var existing = load64(mgr + LDM_MONITOR);
+    if (existing != 0) {
+        return err_udev(str_from("monitor already running"));
+    }
+
+    sakshi_info("yukti", "starting udev hotplug monitor", "");
+    var r = udev_monitor_new();
+    if (is_ok(r) == 0) { return r; }
+
+    var mon = payload(r);
+    store64(mgr + LDM_MONITOR, mon);
+
+    return Ok(mon);
+}
+
+# ---------------------------------------------------------------------------
+# Stop udev monitor
+# ---------------------------------------------------------------------------
+
+pub fn linux_dm_stop_monitor(mgr) {
+    var mon = load64(mgr + LDM_MONITOR);
+    if (mon != 0) {
+        udev_monitor_close(mon);
+        store64(mgr + LDM_MONITOR, 0);
+    }
+    sakshi_info("yukti", "udev monitor stopped", "");
+    return 0;
+}

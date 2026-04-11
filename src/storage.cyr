@@ -1,0 +1,620 @@
+# yukti/storage.cyr — USB/block device storage operations
+#
+# Mount, unmount, eject, filesystem detection, /proc/mounts parsing.
+# All syscalls direct — no libc dependency.
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# Filesystem enum — 17 known types + unknown
+# ---------------------------------------------------------------------------
+
+enum Filesystem {
+    FS_EXT4 = 0;
+    FS_BTRFS = 1;
+    FS_XFS = 2;
+    FS_VFAT = 3;
+    FS_NTFS = 4;
+    FS_EXFAT = 5;
+    FS_ISO9660 = 6;
+    FS_UDF = 7;
+    FS_HFSPLUS = 8;
+    FS_SWAP = 9;
+    FS_LUKS = 10;
+    FS_F2FS = 11;
+    FS_EROFS = 12;
+    FS_TMPFS = 13;
+    FS_CIFS = 14;
+    FS_NFS = 15;
+    FS_UNKNOWN = 16;
+}
+
+pub fn filesystem_to_str(fs) {
+    if (fs == FS_EXT4) { return "ext4"; }
+    if (fs == FS_BTRFS) { return "btrfs"; }
+    if (fs == FS_XFS) { return "xfs"; }
+    if (fs == FS_VFAT) { return "vfat"; }
+    if (fs == FS_NTFS) { return "ntfs"; }
+    if (fs == FS_EXFAT) { return "exfat"; }
+    if (fs == FS_ISO9660) { return "iso9660"; }
+    if (fs == FS_UDF) { return "udf"; }
+    if (fs == FS_HFSPLUS) { return "hfs+"; }
+    if (fs == FS_SWAP) { return "swap"; }
+    if (fs == FS_LUKS) { return "luks"; }
+    if (fs == FS_F2FS) { return "f2fs"; }
+    if (fs == FS_EROFS) { return "erofs"; }
+    if (fs == FS_TMPFS) { return "tmpfs"; }
+    if (fs == FS_CIFS) { return "cifs"; }
+    if (fs == FS_NFS) { return "nfs"; }
+    return "unknown";
+}
+
+# Case-insensitive string comparison helper
+fn str_eq_ci(a, b) {
+    var a_len = strlen(a);
+    var b_len = strlen(b);
+    if (a_len != b_len) { return 0; }
+    for (var i = 0; i < a_len; i = i + 1) {
+        var ca = load8(a + i);
+        var cb = load8(b + i);
+        # Lowercase: if A-Z (65-90), add 32
+        if (ca >= 65) { if (ca <= 90) { ca = ca + 32; } }
+        if (cb >= 65) { if (cb <= 90) { cb = cb + 32; } }
+        if (ca != cb) { return 0; }
+    }
+    return 1;
+}
+
+# Parse filesystem type from string (case-insensitive, zero-alloc for known types)
+pub fn filesystem_from_str(s) {
+    if (str_eq_ci(s, "ext4")) { return FS_EXT4; }
+    if (str_eq_ci(s, "btrfs")) { return FS_BTRFS; }
+    if (str_eq_ci(s, "xfs")) { return FS_XFS; }
+    if (str_eq_ci(s, "vfat")) { return FS_VFAT; }
+    if (str_eq_ci(s, "fat32")) { return FS_VFAT; }
+    if (str_eq_ci(s, "fat16")) { return FS_VFAT; }
+    if (str_eq_ci(s, "ntfs")) { return FS_NTFS; }
+    if (str_eq_ci(s, "exfat")) { return FS_EXFAT; }
+    if (str_eq_ci(s, "iso9660")) { return FS_ISO9660; }
+    if (str_eq_ci(s, "udf")) { return FS_UDF; }
+    if (str_eq_ci(s, "hfsplus")) { return FS_HFSPLUS; }
+    if (str_eq_ci(s, "hfs+")) { return FS_HFSPLUS; }
+    if (str_eq_ci(s, "swap")) { return FS_SWAP; }
+    if (str_eq_ci(s, "crypto_luks")) { return FS_LUKS; }
+    if (str_eq_ci(s, "luks")) { return FS_LUKS; }
+    if (str_eq_ci(s, "f2fs")) { return FS_F2FS; }
+    if (str_eq_ci(s, "erofs")) { return FS_EROFS; }
+    if (str_eq_ci(s, "tmpfs")) { return FS_TMPFS; }
+    if (str_eq_ci(s, "cifs")) { return FS_CIFS; }
+    if (str_eq_ci(s, "nfs")) { return FS_NFS; }
+    if (str_eq_ci(s, "nfs4")) { return FS_NFS; }
+    return FS_UNKNOWN;
+}
+
+pub fn filesystem_is_writable(fs) {
+    if (fs == FS_EXT4) { return 1; }
+    if (fs == FS_BTRFS) { return 1; }
+    if (fs == FS_XFS) { return 1; }
+    if (fs == FS_VFAT) { return 1; }
+    if (fs == FS_NTFS) { return 1; }
+    if (fs == FS_EXFAT) { return 1; }
+    if (fs == FS_HFSPLUS) { return 1; }
+    if (fs == FS_F2FS) { return 1; }
+    if (fs == FS_TMPFS) { return 1; }
+    if (fs == FS_CIFS) { return 1; }
+    if (fs == FS_NFS) { return 1; }
+    return 0;
+}
+
+pub fn filesystem_is_optical(fs) {
+    if (fs == FS_ISO9660) { return 1; }
+    if (fs == FS_UDF) { return 1; }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# FilesystemUsage struct
+# Layout: 32 bytes
+#   0: total_bytes
+#   8: used_bytes
+#  16: available_bytes
+#  24: usage_percent_x100 (integer, e.g. 4523 = 45.23%)
+# ---------------------------------------------------------------------------
+
+pub fn filesystem_usage(mount_point_cstr) {
+    # SYS_STATFS = 137
+    # struct statfs is 120 bytes on x86_64
+    var buf[120];
+    var r = syscall(137, mount_point_cstr, &buf);
+    if (r < 0) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "statfs failed: errno ");
+        str_builder_add_int(sb, 0 - r);
+        return err_io(str_builder_build(sb));
+    }
+
+    # statfs layout (x86_64):
+    #  0: f_type (8)
+    #  8: f_bsize (8)
+    # 16: f_blocks (8)
+    # 24: f_bfree (8)
+    # 32: f_bavail (8)
+    # 40: f_files (8)  ... etc
+
+    var bsize = load64(&buf + 8);
+    var blocks = load64(&buf + 16);
+    var bfree = load64(&buf + 24);
+    var bavail = load64(&buf + 32);
+
+    var total_bytes = blocks * bsize;
+    var free_bytes = bfree * bsize;
+    var available_bytes = bavail * bsize;
+    var used_bytes = total_bytes - free_bytes;
+
+    var usage_pct_x100 = 0;
+    if (total_bytes > 0) {
+        usage_pct_x100 = (used_bytes * 10000) / total_bytes;
+    }
+
+    var usage = alloc(32);
+    store64(usage, total_bytes);
+    store64(usage + 8, used_bytes);
+    store64(usage + 16, available_bytes);
+    store64(usage + 24, usage_pct_x100);
+    return Ok(usage);
+}
+
+# ---------------------------------------------------------------------------
+# MountOptions struct
+# Layout: 32 bytes
+#   0: mount_point (Str, 0 = auto)
+#   8: read_only (0/1)
+#  16: options (Str — comma-separated, e.g. "nosuid,nodev")
+#  24: fs_type (Str, 0 = auto-detect)
+# ---------------------------------------------------------------------------
+
+pub fn mount_options_new() {
+    var opts = alloc(32);
+    store64(opts, 0);
+    store64(opts + 8, 0);
+    store64(opts + 16, str_from("nosuid,nodev"));
+    store64(opts + 24, 0);
+    return opts;
+}
+
+pub fn mount_options_set_point(opts, mp) { store64(opts, mp); return opts; }
+pub fn mount_options_set_ro(opts, ro) { store64(opts + 8, ro); return opts; }
+pub fn mount_options_set_fs(opts, fs) { store64(opts + 24, fs); return opts; }
+
+# ---------------------------------------------------------------------------
+# MountResult struct
+# Layout: 40 bytes
+#   0: device_id (DeviceId ptr)
+#   8: dev_path (Str)
+#  16: mount_point (Str)
+#  24: fs_type (Filesystem enum)
+#  32: read_only (0/1)
+# ---------------------------------------------------------------------------
+
+pub fn mount_result_new(device_id, dev_path, mount_point, fs_type, read_only) {
+    var r = alloc(40);
+    store64(r, device_id);
+    store64(r + 8, dev_path);
+    store64(r + 16, mount_point);
+    store64(r + 24, fs_type);
+    store64(r + 32, read_only);
+    return r;
+}
+
+pub fn mr_device_id(r) { return load64(r); }
+pub fn mr_dev_path(r) { return load64(r + 8); }
+pub fn mr_mount_point(r) { return load64(r + 16); }
+pub fn mr_fs_type(r) { return load64(r + 24); }
+pub fn mr_read_only(r) { return load64(r + 32); }
+
+# ---------------------------------------------------------------------------
+# Forbidden system mount points
+# ---------------------------------------------------------------------------
+
+fn is_forbidden_mount(path_cstr) {
+    if (streq(path_cstr, "/")) { return 1; }
+    if (streq(path_cstr, "/bin")) { return 1; }
+    if (streq(path_cstr, "/sbin")) { return 1; }
+    if (streq(path_cstr, "/usr")) { return 1; }
+    if (streq(path_cstr, "/etc")) { return 1; }
+    if (streq(path_cstr, "/boot")) { return 1; }
+    if (streq(path_cstr, "/sys")) { return 1; }
+    if (streq(path_cstr, "/proc")) { return 1; }
+    if (streq(path_cstr, "/dev")) { return 1; }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Octal unescape for /proc/mounts paths
+# The kernel encodes spaces as \040, tabs as \011, etc.
+# ---------------------------------------------------------------------------
+
+pub fn unescape_mount_path(s, s_len) {
+    var sb = str_builder_new();
+    var i = 0;
+    while (i < s_len) {
+        var c = load8(s + i);
+        if (c == 92) {
+            # backslash — check for octal escape
+            if (i + 3 < s_len) {
+                var d1 = load8(s + i + 1);
+                var d2 = load8(s + i + 2);
+                var d3 = load8(s + i + 3);
+                if (d1 >= 48) { if (d1 <= 55) {
+                if (d2 >= 48) { if (d2 <= 55) {
+                if (d3 >= 48) { if (d3 <= 55) {
+                    var val = (d1 - 48) * 64 + (d2 - 48) * 8 + (d3 - 48);
+                    str_builder_add_byte(sb, val);
+                    i = i + 4;
+                    continue;
+                } } } } } }
+            }
+        }
+        str_builder_add_byte(sb, c);
+        i = i + 1;
+    }
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# find_mount_in — parse mount table to find device mount point
+# ---------------------------------------------------------------------------
+
+pub fn find_mount_in(dev_path_cstr, mount_table) {
+    var lines = str_split(mount_table, "\n");
+    var nlines = vec_len(lines);
+
+    for (var i = 0; i < nlines; i = i + 1) {
+        var line = vec_get(lines, i);
+        var trimmed = str_trim(line);
+        if (str_len(trimmed) == 0) { continue; }
+        if (load8(str_data(trimmed)) == 35) { continue; }
+
+        # Split line by spaces: device mountpoint fstype options dump pass
+        var fields = str_split(trimmed, " ");
+        if (vec_len(fields) < 2) { continue; }
+
+        var device_field = vec_get(fields, 0);
+        var mount_field = vec_get(fields, 1);
+
+        var device_unesc = unescape_mount_path(str_data(device_field), str_len(device_field));
+        var mount_unesc = unescape_mount_path(str_data(mount_field), str_len(mount_field));
+
+        if (str_eq_cstr(device_unesc, dev_path_cstr)) {
+            return mount_unesc;
+        }
+    }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# find_mount_point — read /proc/mounts and find device
+# ---------------------------------------------------------------------------
+
+pub fn find_mount_point(dev_path_cstr) {
+    var data = file_read_all("/proc/mounts");
+    if (data == 0) { return 0; }
+    var table = str_from(data);
+    return find_mount_in(dev_path_cstr, table);
+}
+
+# ---------------------------------------------------------------------------
+# default_mount_point — generate safe mount path
+# ---------------------------------------------------------------------------
+
+pub fn default_mount_point(info) {
+    var label = di_label(info);
+    var name = label;
+    if (name == 0) {
+        name = device_id_str(di_id(info));
+    }
+
+    # Sanitize: replace non-alphanumeric with underscore
+    var src = str_data(name);
+    var slen = str_len(name);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/run/media/");
+    for (var i = 0; i < slen; i = i + 1) {
+        var c = load8(src + i);
+        if (c >= 48) { if (c <= 57) { str_builder_add_byte(sb, c); continue; } }
+        if (c >= 65) { if (c <= 90) { str_builder_add_byte(sb, c); continue; } }
+        if (c >= 97) { if (c <= 122) { str_builder_add_byte(sb, c); continue; } }
+        if (c == 45) { str_builder_add_byte(sb, c); continue; }
+        if (c == 95) { str_builder_add_byte(sb, c); continue; }
+        str_builder_add_byte(sb, 95);
+    }
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# is_mounted — check if device is mounted via /proc/mounts
+# ---------------------------------------------------------------------------
+
+pub fn is_mounted(dev_path_cstr) {
+    var mp = find_mount_point(dev_path_cstr);
+    return mp != 0;
+}
+
+# ---------------------------------------------------------------------------
+# validate_mount_point — check safety
+# ---------------------------------------------------------------------------
+
+pub fn validate_mount_point(path_cstr) {
+    # Must be absolute
+    if (load8(path_cstr) != 47) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "mount point must be absolute: ");
+        str_builder_add_cstr(sb, path_cstr);
+        return err_mount_failed(str_from(""), str_builder_build(sb));
+    }
+
+    # Must not be forbidden
+    if (is_forbidden_mount(path_cstr)) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "cannot mount on system directory: ");
+        str_builder_add_cstr(sb, path_cstr);
+        return err_mount_failed(str_from(""), str_builder_build(sb));
+    }
+
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# parse_mount_flags — convert option strings to mount syscall flags
+# ---------------------------------------------------------------------------
+
+enum MountFlag {
+    MS_RDONLY = 1;
+    MS_NOSUID = 2;
+    MS_NODEV = 4;
+    MS_NOEXEC = 8;
+}
+
+fn parse_mount_flags(options_str, read_only) {
+    var flags = 0;
+    if (read_only) { flags = flags | MS_RDONLY; }
+
+    if (options_str == 0) { return flags; }
+
+    var parts = str_split(options_str, ",");
+    var n = vec_len(parts);
+    for (var i = 0; i < n; i = i + 1) {
+        var opt = vec_get(parts, i);
+        var opt_trimmed = str_trim(opt);
+        if (str_eq_cstr(opt_trimmed, "nosuid")) { flags = flags | MS_NOSUID; }
+        if (str_eq_cstr(opt_trimmed, "nodev")) { flags = flags | MS_NODEV; }
+        if (str_eq_cstr(opt_trimmed, "noexec")) { flags = flags | MS_NOEXEC; }
+    }
+    return flags;
+}
+
+# ---------------------------------------------------------------------------
+# Filesystem types to try when auto-detecting
+# ---------------------------------------------------------------------------
+
+fn get_auto_fs_type(idx) {
+    if (idx == 0) { return "ext4"; }
+    if (idx == 1) { return "vfat"; }
+    if (idx == 2) { return "ntfs"; }
+    if (idx == 3) { return "iso9660"; }
+    if (idx == 4) { return "udf"; }
+    if (idx == 5) { return "exfat"; }
+    if (idx == 6) { return "btrfs"; }
+    if (idx == 7) { return "xfs"; }
+    if (idx == 8) { return "f2fs"; }
+    if (idx == 9) { return "erofs"; }
+    return 0;
+}
+
+enum AutoFs {
+    AUTO_FS_COUNT = 10;
+}
+
+# ---------------------------------------------------------------------------
+# mount — mount a device via SYS_MOUNT (165)
+# ---------------------------------------------------------------------------
+
+pub fn storage_mount(dev_path_cstr, options) {
+    # Check if already mounted
+    var existing = find_mount_point(dev_path_cstr);
+    if (existing != 0) {
+        return err_already_mounted(str_from(dev_path_cstr), existing);
+    }
+
+    # Determine mount point
+    var mp_str = load64(options);
+    var mount_cstr = 0;
+    if (mp_str != 0) {
+        mount_cstr = str_cstr(mp_str);
+    } else {
+        # Auto-generate: /run/media/<dev_name>
+        var dev_s = str_from(dev_path_cstr);
+        # Find last / to get device name
+        var idx = str_last_index_of(dev_s, "/");
+        var dev_name = dev_s;
+        if (idx >= 0) {
+            dev_name = str_substr(dev_s, idx + 1, str_len(dev_s));
+        }
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "/run/media/");
+        str_builder_add_str(sb, dev_name);
+        var mp = str_builder_build(sb);
+        mount_cstr = str_cstr(mp);
+    }
+
+    # Validate mount point
+    var val_r = validate_mount_point(mount_cstr);
+    if (is_ok(val_r) == 0) { return val_r; }
+
+    sakshi_info("yukti", "mounting device", dev_path_cstr);
+
+    # Create mount point directory: SYS_MKDIR = 83
+    syscall(83, mount_cstr, 493);
+
+    var read_only = load64(options + 8);
+    var opts_str = load64(options + 16);
+    var flags = parse_mount_flags(opts_str, read_only);
+
+    var fs_type_str = load64(options + 24);
+
+    if (fs_type_str != 0) {
+        # Explicit filesystem type
+        var fs_cstr = str_cstr(fs_type_str);
+        var r = syscall(165, dev_path_cstr, mount_cstr, fs_cstr, flags, 0);
+        if (r < 0) {
+            var errno = 0 - r;
+            return map_errno_to_err(errno, "mount", str_from(dev_path_cstr));
+        }
+        sakshi_info("yukti", "mount succeeded", dev_path_cstr);
+        var dev_id = device_id_new_cstr(dev_path_cstr);
+        return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
+                                   filesystem_from_str(fs_cstr), read_only));
+    }
+
+    # Auto-detect filesystem type
+    var last_errno = 0;
+    for (var i = 0; i < AUTO_FS_COUNT; i = i + 1) {
+        var fs_try = get_auto_fs_type(i);
+        if (fs_try == 0) { break; }
+        var r = syscall(165, dev_path_cstr, mount_cstr, fs_try, flags, 0);
+        if (r == 0) {
+            sakshi_info("yukti", "mount succeeded (auto)", fs_try);
+            var dev_id = device_id_new_cstr(dev_path_cstr);
+            return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
+                                       filesystem_from_str(fs_try), read_only));
+        }
+        last_errno = 0 - r;
+    }
+
+    return map_errno_to_err(last_errno, "mount", str_from(dev_path_cstr));
+}
+
+# ---------------------------------------------------------------------------
+# unmount — unmount via SYS_UMOUNT2 (166)
+# ---------------------------------------------------------------------------
+
+pub fn storage_unmount(mount_point_cstr) {
+    sakshi_info("yukti", "unmounting", mount_point_cstr);
+
+    # SYS_UMOUNT2 = 166, flags = 0
+    var r = syscall(166, mount_point_cstr, 0);
+    if (r < 0) {
+        var errno = 0 - r;
+        sakshi_error("yukti", "unmount failed", mount_point_cstr);
+        if (errno == 1) { return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr)); }
+        if (errno == 13) { return err_permission_denied(str_from("unmount"), str_from(mount_point_cstr)); }
+        if (errno == 16) { return err_device_busy(str_from(mount_point_cstr)); }
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "umount failed: errno ");
+        str_builder_add_int(sb, errno);
+        return err_unmount_failed(str_from(mount_point_cstr), str_builder_build(sb));
+    }
+
+    sakshi_info("yukti", "unmount succeeded", mount_point_cstr);
+
+    # Clean up mount directory if under /run/media/
+    # SYS_RMDIR = 84
+    var mp_s = str_from(mount_point_cstr);
+    if (str_starts_with(mp_s, "/run/media/")) {
+        syscall(84, mount_point_cstr);
+    }
+
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# eject — eject device (CDROMEJECT ioctl or sysfs delete)
+# ---------------------------------------------------------------------------
+
+enum EjectConst {
+    CDROMEJECT_IOCTL = 0x5309;
+    O_RDONLY = 0;
+    O_NONBLOCK = 2048;
+    SYS_IOCTL = 16;
+    SYS_OPEN = 2;
+    SYS_CLOSE = 3;
+}
+
+pub fn storage_eject(dev_path_cstr) {
+    sakshi_info("yukti", "ejecting device", dev_path_cstr);
+
+    # Unmount first if mounted
+    var mp = find_mount_point(dev_path_cstr);
+    if (mp != 0) {
+        var um_r = storage_unmount(str_cstr(mp));
+        if (is_ok(um_r) == 0) { return um_r; }
+    }
+
+    # Get device name from path
+    var dev_s = str_from(dev_path_cstr);
+    var idx = str_last_index_of(dev_s, "/");
+    var dev_name = dev_s;
+    if (idx >= 0) {
+        dev_name = str_substr(dev_s, idx + 1, str_len(dev_s));
+    }
+
+    # Check if optical drive (starts with "sr")
+    if (str_starts_with(dev_name, "sr")) {
+        # Optical: open device and CDROMEJECT ioctl
+        var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
+        if (fd < 0) {
+            return err_eject_failed(dev_s, str_from("failed to open device"));
+        }
+        var r = syscall(SYS_IOCTL, fd, CDROMEJECT_IOCTL, 0);
+        syscall(SYS_CLOSE, fd);
+        if (r < 0) {
+            return err_eject_failed(dev_s, str_from("CDROMEJECT ioctl failed"));
+        }
+    } else {
+        # USB/block: strip partition suffix to get base device name
+        var base_name = dev_name;
+        # For nvme/mmcblk: strip p<digits> suffix
+        if (str_contains(dev_name, "nvme")) {
+            var p_idx = str_last_index_of(dev_name, "p");
+            if (p_idx > 0) {
+                base_name = str_substr(dev_name, 0, p_idx);
+            }
+        } elif (str_contains(dev_name, "mmcblk")) {
+            var p_idx = str_last_index_of(dev_name, "p");
+            if (p_idx > 0) {
+                base_name = str_substr(dev_name, 0, p_idx);
+            }
+        } else {
+            # sdb1 -> sdb: strip trailing digits
+            var name_data = str_data(dev_name);
+            var name_len = str_len(dev_name);
+            var end = name_len;
+            while (end > 0) {
+                var c = load8(name_data + end - 1);
+                if (c < 48) { break; }
+                if (c > 57) { break; }
+                end = end - 1;
+            }
+            if (end > 0) {
+                base_name = str_substr(dev_name, 0, end);
+            }
+        }
+
+        # Write "1" to /sys/block/<base>/device/delete
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "/sys/block/");
+        str_builder_add_str(sb, base_name);
+        str_builder_add_cstr(sb, "/device/delete");
+        var delete_path = str_builder_build(sb);
+
+        var fd = syscall(SYS_OPEN, str_cstr(delete_path), 1, 0);
+        if (fd < 0) {
+            return err_eject_failed(dev_s, str_from("failed to open sysfs delete"));
+        }
+        syscall(1, fd, "1", 1);
+        syscall(SYS_CLOSE, fd);
+    }
+
+    sakshi_info("yukti", "eject succeeded", dev_path_cstr);
+    return Ok(0);
+}

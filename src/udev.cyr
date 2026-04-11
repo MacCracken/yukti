@@ -1,0 +1,727 @@
+# yukti/udev.cyr — udev integration: device enumeration and hotplug monitoring
+#
+# Reads from /sys/, monitors udev events via netlink socket.
+# UdevEvent, device classification, sysfs enumeration, uevent parsing.
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# UdevEvent struct
+# Layout: 48 bytes
+#   0: action (Str — "add", "remove", "change")
+#   8: sys_path (Str)
+#  16: dev_path (Str, 0 if none)
+#  24: subsystem (Str)
+#  32: dev_type (Str, 0 if none)
+#  40: properties (hashmap ptr)
+# ---------------------------------------------------------------------------
+
+enum UdevEventField {
+    UE_ACTION = 0;
+    UE_SYS_PATH = 8;
+    UE_DEV_PATH = 16;
+    UE_SUBSYSTEM = 24;
+    UE_DEV_TYPE = 32;
+    UE_PROPERTIES = 40;
+    UE_SIZE = 48;
+}
+
+pub fn udev_event_new(action, sys_path, dev_path, subsystem, dev_type, props) {
+    var e = alloc(UE_SIZE);
+    store64(e + UE_ACTION, action);
+    store64(e + UE_SYS_PATH, sys_path);
+    store64(e + UE_DEV_PATH, dev_path);
+    store64(e + UE_SUBSYSTEM, subsystem);
+    store64(e + UE_DEV_TYPE, dev_type);
+    store64(e + UE_PROPERTIES, props);
+    return e;
+}
+
+pub fn ue_action(e) { return load64(e + UE_ACTION); }
+pub fn ue_sys_path(e) { return load64(e + UE_SYS_PATH); }
+pub fn ue_dev_path(e) { return load64(e + UE_DEV_PATH); }
+pub fn ue_subsystem(e) { return load64(e + UE_SUBSYSTEM); }
+pub fn ue_dev_type(e) { return load64(e + UE_DEV_TYPE); }
+pub fn ue_properties(e) { return load64(e + UE_PROPERTIES); }
+
+pub fn udev_event_is_add(e) {
+    return str_eq_cstr(ue_action(e), "add");
+}
+
+pub fn udev_event_is_remove(e) {
+    return str_eq_cstr(ue_action(e), "remove");
+}
+
+pub fn udev_event_is_change(e) {
+    return str_eq_cstr(ue_action(e), "change");
+}
+
+pub fn udev_event_property(e, key_cstr) {
+    var props = ue_properties(e);
+    if (props == 0) { return 0; }
+    return map_get(props, key_cstr);
+}
+
+# ---------------------------------------------------------------------------
+# classify_device — determine DeviceClass from udev properties
+# ---------------------------------------------------------------------------
+
+pub fn classify_device(event) {
+    var bus = udev_event_property(event, "ID_BUS");
+    if (bus == 0) { bus = str_from(""); }
+
+    var dev_type = ue_dev_type(event);
+    if (dev_type == 0) { dev_type = str_from(""); }
+
+    var subsystem = ue_subsystem(event);
+
+    # USB storage
+    if (str_eq_cstr(bus, "usb")) {
+        if (str_eq_cstr(dev_type, "disk")) { return DC_USB_STORAGE; }
+        if (str_eq_cstr(dev_type, "partition")) { return DC_USB_STORAGE; }
+    }
+
+    # Optical drive
+    if (str_eq_cstr(subsystem, "block")) {
+        var cdrom = udev_event_property(event, "ID_CDROM");
+        if (cdrom != 0) { return DC_OPTICAL; }
+    }
+
+    # SD card
+    if (str_eq_cstr(bus, "mmc")) { return DC_SD_CARD; }
+    var flash_sd = udev_event_property(event, "ID_DRIVE_FLASH_SD");
+    if (flash_sd != 0) { return DC_SD_CARD; }
+
+    # Block device subtypes
+    if (str_eq_cstr(subsystem, "block")) {
+        var sys_path = ue_sys_path(event);
+        if (str_contains(sys_path, "/dm-")) { return DC_DEVICE_MAPPER; }
+        if (str_contains(sys_path, "/loop")) { return DC_LOOP; }
+        if (str_eq_cstr(dev_type, "disk")) { return DC_BLOCK_INTERNAL; }
+        if (str_eq_cstr(dev_type, "partition")) { return DC_BLOCK_INTERNAL; }
+    }
+
+    return DC_UNKNOWN;
+}
+
+# ---------------------------------------------------------------------------
+# extract_capabilities — build capability bitflags from udev properties
+# ---------------------------------------------------------------------------
+
+pub fn extract_capabilities(event, class) {
+    var caps = CAP_READ;
+
+    # Writable unless read-only
+    var ro = udev_event_property(event, "ID_FS_READONLY");
+    if (ro != 0) {
+        if (str_eq_cstr(ro, "1") == 0) {
+            caps = caps | CAP_WRITE;
+        }
+    } else {
+        caps = caps | CAP_WRITE;
+    }
+
+    # Removable
+    var usb_drv = udev_event_property(event, "ID_USB_DRIVER");
+    var udisks_rem = udev_event_property(event, "UDISKS_REMOVABLE");
+    var removable = 0;
+    if (usb_drv != 0) { removable = 1; }
+    if (udisks_rem != 0) {
+        if (str_eq_cstr(udisks_rem, "1")) { removable = 1; }
+    }
+    if (class == DC_USB_STORAGE) { removable = 1; }
+    if (class == DC_OPTICAL) { removable = 1; }
+    if (class == DC_SD_CARD) { removable = 1; }
+
+    if (removable) {
+        caps = caps | CAP_REMOVABLE | CAP_HOTPLUG | CAP_EJECT;
+    }
+
+    # Optical-specific
+    if (class == DC_OPTICAL) {
+        caps = caps | CAP_MEDIA_CHANGE | CAP_TRAY_CONTROL;
+        var cd_rw = udev_event_property(event, "ID_CDROM_CD_RW");
+        var dvd_rw = udev_event_property(event, "ID_CDROM_DVD_RW");
+        if (cd_rw != 0) { caps = caps | CAP_BURN; }
+        if (dvd_rw != 0) { caps = caps | CAP_BURN; }
+    }
+
+    # SSD TRIM
+    var trim = udev_event_property(event, "ID_ATA_FEATURE_SET_TRIM");
+    if (trim != 0) { caps = caps | CAP_TRIM; }
+
+    return caps;
+}
+
+# Classify and extract capabilities in one call
+pub fn classify_and_extract(event) {
+    var class = classify_device(event);
+    var caps = extract_capabilities(event, class);
+    # Return packed: class in low bits, caps shifted
+    # Actually, we return two values via a small struct
+    var result = alloc(16);
+    store64(result, class);
+    store64(result + 8, caps);
+    return result;
+}
+
+# ---------------------------------------------------------------------------
+# device_info_from_udev — build DeviceInfo from a UdevEvent
+# ---------------------------------------------------------------------------
+
+pub fn device_info_from_udev(event) {
+    var dev_path = ue_dev_path(event);
+    if (dev_path == 0) {
+        return err_udev(str_from("no dev_path in event"));
+    }
+
+    var ce = classify_and_extract(event);
+    var class = load64(ce);
+    var caps = load64(ce + 8);
+
+    # Build device ID: "subsystem:devname"
+    var subsys = ue_subsystem(event);
+    # Get filename from dev_path
+    var dev_name = dev_path;
+    var slash_idx = str_last_index_of(dev_path, "/");
+    if (slash_idx >= 0) {
+        dev_name = str_substr(dev_path, slash_idx + 1, str_len(dev_path));
+    }
+
+    var sb = str_builder_new();
+    str_builder_add_str(sb, subsys);
+    str_builder_add_cstr(sb, ":");
+    str_builder_add_str(sb, dev_name);
+    var id_str = str_builder_build(sb);
+    var id = device_id_new(id_str);
+
+    var info = device_info_new(id, dev_path, class);
+    di_set_sys_path(info, ue_sys_path(event));
+    di_set_caps(info, caps);
+
+    # Extract known properties
+    var vendor = udev_event_property(event, "ID_VENDOR");
+    if (vendor != 0) { di_set_vendor(info, vendor); }
+
+    var model = udev_event_property(event, "ID_MODEL");
+    if (model != 0) { di_set_model(info, model); }
+
+    var serial = udev_event_property(event, "ID_SERIAL_SHORT");
+    if (serial != 0) { di_set_serial(info, serial); }
+
+    var label = udev_event_property(event, "ID_FS_LABEL");
+    if (label == 0) { label = udev_event_property(event, "ID_FS_LABEL_ENC"); }
+    if (label != 0) { di_set_label(info, label); }
+
+    var fs_type = udev_event_property(event, "ID_FS_TYPE");
+    if (fs_type != 0) { di_set_fs_type(info, fs_type); }
+
+    # Size from partition entry size (sectors * 512)
+    var size_str = udev_event_property(event, "ID_PART_ENTRY_SIZE");
+    if (size_str != 0) {
+        var sectors = str_to_int(size_str);
+        if (sectors > 0) {
+            di_set_size_bytes(info, sectors * 512);
+        }
+    }
+
+    # USB vendor/product IDs (hex)
+    var vid_str = udev_event_property(event, "ID_VENDOR_ID");
+    if (vid_str != 0) {
+        var vid = str_to_hex(vid_str);
+        di_set_usb_vid(info, vid);
+    }
+
+    var pid_str = udev_event_property(event, "ID_MODEL_ID");
+    if (pid_str != 0) {
+        var pid = str_to_hex(pid_str);
+        di_set_usb_pid(info, pid);
+    }
+
+    # Partition table type
+    var pt = udev_event_property(event, "ID_PART_TABLE_TYPE");
+    if (pt != 0) { di_set_part_table(info, pt); }
+
+    di_set_properties(info, ue_properties(event));
+
+    return Ok(info);
+}
+
+# ---------------------------------------------------------------------------
+# Hex string to integer (for USB IDs)
+# ---------------------------------------------------------------------------
+
+fn str_to_hex(s) {
+    var data = str_data(s);
+    var len = str_len(s);
+    var val = 0;
+    for (var i = 0; i < len; i = i + 1) {
+        var c = load8(data + i);
+        val = val * 16;
+        if (c >= 48) { if (c <= 57) { val = val + (c - 48); continue; } }
+        if (c >= 97) { if (c <= 102) { val = val + (c - 87); continue; } }
+        if (c >= 65) { if (c <= 70) { val = val + (c - 55); continue; } }
+    }
+    return val;
+}
+
+# String to integer
+fn str_to_int(s) {
+    var data = str_data(s);
+    var len = str_len(s);
+    var val = 0;
+    for (var i = 0; i < len; i = i + 1) {
+        var c = load8(data + i);
+        if (c >= 48) { if (c <= 57) { val = val * 10 + (c - 48); continue; } }
+        break;
+    }
+    return val;
+}
+
+# ---------------------------------------------------------------------------
+# read_sysfs_attr — read a single sysfs attribute file, trimmed
+# ---------------------------------------------------------------------------
+
+fn read_sysfs_attr(base_path, attr_cstr) {
+    var sb = str_builder_new();
+    str_builder_add_str(sb, base_path);
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_cstr(sb, attr_cstr);
+    var path = str_builder_build(sb);
+
+    var data = file_read_all(str_cstr(path));
+    if (data == 0) { return 0; }
+    return str_trim(str_from(data));
+}
+
+# ---------------------------------------------------------------------------
+# enumerate_block_devices — list /sys/block/ entries
+# ---------------------------------------------------------------------------
+
+pub fn enumerate_block_devices(sysfs_root) {
+    var sb = str_builder_new();
+    str_builder_add_str(sb, sysfs_root);
+    str_builder_add_cstr(sb, "/block");
+    var block_dir = str_builder_build(sb);
+
+    var entries = dir_list(str_cstr(block_dir));
+    if (entries == 0) { return vec_new(); }
+    return entries;
+}
+
+# ---------------------------------------------------------------------------
+# build_device_info_from_sysfs — construct DeviceInfo from sysfs attributes
+# ---------------------------------------------------------------------------
+
+fn build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
+    var props = map_new();
+
+    # Read standard sysfs attributes
+    var vendor = read_sysfs_attr(sys_path, "device/vendor");
+    if (vendor != 0) { map_set(props, "ID_VENDOR", vendor); }
+
+    var model = read_sysfs_attr(sys_path, "device/model");
+    if (model != 0) { map_set(props, "ID_MODEL", model); }
+
+    var serial = read_sysfs_attr(sys_path, "device/serial");
+    if (serial != 0) { map_set(props, "ID_SERIAL_SHORT", serial); }
+
+    var removable = read_sysfs_attr(sys_path, "removable");
+    if (removable != 0) {
+        if (str_eq_cstr(removable, "1")) {
+            map_set(props, "UDISKS_REMOVABLE", str_from("1"));
+        }
+    }
+
+    var ro = read_sysfs_attr(sys_path, "ro");
+    if (ro != 0) {
+        if (str_eq_cstr(ro, "1")) {
+            map_set(props, "ID_FS_READONLY", str_from("1"));
+        }
+    }
+
+    var size_str = read_sysfs_attr(sys_path, "size");
+    if (size_str != 0) {
+        map_set(props, "ID_PART_ENTRY_SIZE", size_str);
+    }
+
+    # USB IDs
+    var vid = read_sysfs_attr(sys_path, "device/idVendor");
+    if (vid != 0) { map_set(props, "ID_VENDOR_ID", vid); }
+
+    var pid = read_sysfs_attr(sys_path, "device/idProduct");
+    if (pid != 0) { map_set(props, "ID_MODEL_ID", pid); }
+
+    # Build dev_path: /dev/<dev_name>
+    var dp_sb = str_builder_new();
+    str_builder_add_cstr(dp_sb, "/dev/");
+    str_builder_add_str(dp_sb, dev_name);
+    var dev_path = str_builder_build(dp_sb);
+
+    # Create synthetic UdevEvent
+    var event = udev_event_new(
+        str_from("add"),
+        sys_path,
+        dev_path,
+        str_from("block"),
+        str_from(dev_type_cstr),
+        props
+    );
+
+    var info_r = device_info_from_udev(event);
+    if (is_ok(info_r) == 0) { return 0; }
+    var info = payload(info_r);
+
+    # Query device node permissions
+    var perms = query_permissions(str_cstr(dev_path));
+    if (perms != 0) {
+        di_set_uid(info, perms_uid(perms));
+        di_set_gid(info, perms_gid(perms));
+        di_set_mode(info, perms_mode(perms));
+    }
+
+    # Check mount status
+    var mp = find_mount_point(str_cstr(dev_path));
+    if (mp != 0) {
+        di_set_mount_point(info, mp);
+        di_set_state(info, DS_MOUNTED);
+    }
+
+    return info;
+}
+
+# ---------------------------------------------------------------------------
+# enumerate_devices — enumerate all block devices under sysfs_root
+# ---------------------------------------------------------------------------
+
+pub fn enumerate_devices(sysfs_root) {
+    var sb = str_builder_new();
+    str_builder_add_str(sb, sysfs_root);
+    str_builder_add_cstr(sb, "/block");
+    var block_dir = str_builder_build(sb);
+
+    var entries = dir_list(str_cstr(block_dir));
+    if (entries == 0) {
+        return err_udev(str_from("failed to read /sys/block"));
+    }
+
+    var devices = vec_new();
+    var n = vec_len(entries);
+
+    for (var i = 0; i < n; i = i + 1) {
+        var dev_name = vec_get(entries, i);
+        # Skip . and ..
+        if (str_eq_cstr(dev_name, ".")) { continue; }
+        if (str_eq_cstr(dev_name, "..")) { continue; }
+
+        var path_sb = str_builder_new();
+        str_builder_add_str(path_sb, block_dir);
+        str_builder_add_cstr(path_sb, "/");
+        str_builder_add_str(path_sb, dev_name);
+        var sys_path = str_builder_build(path_sb);
+
+        var info = build_device_info_from_sysfs(sys_path, dev_name, "disk");
+        if (info != 0) {
+            vec_push(devices, info);
+        }
+
+        # Enumerate partitions: subdirectories starting with dev_name
+        var sub_entries = dir_list(str_cstr(sys_path));
+        if (sub_entries != 0) {
+            var nsub = vec_len(sub_entries);
+            for (var j = 0; j < nsub; j = j + 1) {
+                var part_name = vec_get(sub_entries, j);
+                if (str_starts_with(part_name, str_cstr(dev_name)) == 0) { continue; }
+                if (str_len(part_name) <= str_len(dev_name)) { continue; }
+
+                # Check if partition file exists
+                var pp_sb = str_builder_new();
+                str_builder_add_str(pp_sb, sys_path);
+                str_builder_add_cstr(pp_sb, "/");
+                str_builder_add_str(pp_sb, part_name);
+                var part_path = str_builder_build(pp_sb);
+
+                var chk_sb = str_builder_new();
+                str_builder_add_str(chk_sb, part_path);
+                str_builder_add_cstr(chk_sb, "/partition");
+                var part_file = str_builder_build(chk_sb);
+
+                if (file_exists(str_cstr(part_file))) {
+                    var part_info = build_device_info_from_sysfs(part_path, part_name, "partition");
+                    if (part_info != 0) {
+                        vec_push(devices, part_info);
+                    }
+                }
+            }
+        }
+    }
+
+    sakshi_info("yukti", "enumeration complete", "");
+    return Ok(devices);
+}
+
+# ---------------------------------------------------------------------------
+# parse_uevent — parse raw kernel uevent message (null-separated key=value)
+# ---------------------------------------------------------------------------
+
+pub fn parse_uevent(buf, len) {
+    if (len == 0) { return 0; }
+
+    var action = str_from("");
+    var devpath = str_from("");
+    var subsystem = str_from("");
+    var devtype = 0;
+    var props = map_new();
+
+    # Split on null bytes
+    var start = 0;
+    var first_part = 1;
+
+    for (var i = 0; i <= len; i = i + 1) {
+        var is_end = 0;
+        if (i == len) { is_end = 1; }
+        if (is_end == 0) {
+            if (load8(buf + i) == 0) { is_end = 1; }
+        }
+
+        if (is_end) {
+            var part_len = i - start;
+            if (part_len > 0) {
+                var part = str_from_buf(buf + start, part_len);
+
+                if (first_part) {
+                    # Check for action@devpath header
+                    var at_idx = str_index_of(part, "@");
+                    if (at_idx >= 0) {
+                        action = str_substr(part, 0, at_idx);
+                        devpath = str_substr(part, at_idx + 1, str_len(part));
+                        first_part = 0;
+                        start = i + 1;
+                        continue;
+                    }
+                    first_part = 0;
+                }
+
+                # Parse KEY=VALUE
+                var eq_idx = str_index_of(part, "=");
+                if (eq_idx >= 0) {
+                    var key = str_substr(part, 0, eq_idx);
+                    var val = str_substr(part, eq_idx + 1, str_len(part));
+
+                    if (str_eq_cstr(key, "ACTION")) { action = val; }
+                    elif (str_eq_cstr(key, "DEVPATH")) { devpath = val; }
+                    elif (str_eq_cstr(key, "SUBSYSTEM")) { subsystem = val; }
+                    elif (str_eq_cstr(key, "DEVTYPE")) { devtype = val; }
+                    else { map_set(props, str_cstr(key), val); }
+                }
+            }
+            start = i + 1;
+        }
+    }
+
+    if (str_len(action) == 0) { return 0; }
+    if (str_len(devpath) == 0) { return 0; }
+
+    # Derive dev_path from DEVNAME property
+    var dev_path = 0;
+    var devname = map_get(props, "DEVNAME");
+    if (devname != 0) {
+        if (load8(str_data(devname)) == 47) {
+            dev_path = devname;
+        } else {
+            var sb = str_builder_new();
+            str_builder_add_cstr(sb, "/dev/");
+            str_builder_add_str(sb, devname);
+            dev_path = str_builder_build(sb);
+        }
+    }
+
+    # Build sys_path: /sys<devpath>
+    var sp_sb = str_builder_new();
+    str_builder_add_cstr(sp_sb, "/sys");
+    str_builder_add_str(sp_sb, devpath);
+    var sys_path = str_builder_build(sp_sb);
+
+    return udev_event_new(action, sys_path, dev_path, subsystem, devtype, props);
+}
+
+# ---------------------------------------------------------------------------
+# udev_event_to_device_event — convert UdevEvent to DeviceEvent
+# ---------------------------------------------------------------------------
+
+pub fn udev_event_to_device_event(uevent) {
+    var action = ue_action(uevent);
+    var kind = 0 - 1;
+
+    if (str_eq_cstr(action, "add")) { kind = EK_ATTACHED; }
+    elif (str_eq_cstr(action, "remove")) { kind = EK_DETACHED; }
+    elif (str_eq_cstr(action, "change")) { kind = EK_MEDIA_CHANGED; }
+    else { return 0; }
+
+    var dev_path = ue_dev_path(uevent);
+    if (dev_path == 0) { return 0; }
+
+    var ce = classify_and_extract(uevent);
+    var class = load64(ce);
+
+    # Build device ID
+    var subsys = ue_subsystem(uevent);
+    var dev_name = dev_path;
+    var slash_idx = str_last_index_of(dev_path, "/");
+    if (slash_idx >= 0) {
+        dev_name = str_substr(dev_path, slash_idx + 1, str_len(dev_path));
+    }
+
+    var sb = str_builder_new();
+    str_builder_add_str(sb, subsys);
+    str_builder_add_cstr(sb, ":");
+    str_builder_add_str(sb, dev_name);
+    var id = device_id_new(str_builder_build(sb));
+
+    var event = device_event_new(id, class, kind, dev_path);
+
+    # Attach info for non-remove events
+    if (udev_event_is_remove(uevent) == 0) {
+        var info_r = device_info_from_udev(uevent);
+        if (is_ok(info_r)) {
+            de_set_device_info(event, payload(info_r));
+        }
+    }
+
+    return event;
+}
+
+# ---------------------------------------------------------------------------
+# UdevMonitor — netlink-based udev monitor
+# Layout: 24 bytes
+#   0: socket_fd
+#   8: running (0/1)
+#  16: filter (vec of DeviceClass values, 0 = no filter)
+# ---------------------------------------------------------------------------
+
+enum NetlinkConst {
+    AF_NETLINK = 16;
+    SOCK_DGRAM = 2;
+    SOCK_CLOEXEC = 524288;
+    NETLINK_KOBJECT_UEVENT = 15;
+    SOL_SOCKET = 1;
+    SO_RCVBUF = 8;
+    RECV_BUF_SIZE = 262144;
+    SYS_SOCKET = 41;
+    SYS_BIND = 49;
+    SYS_SETSOCKOPT = 54;
+    SYS_POLL = 7;
+    SYS_RECVFROM = 45;
+}
+
+pub fn udev_monitor_new() {
+    return udev_monitor_with_filter(0);
+}
+
+pub fn udev_monitor_with_filter(filter_vec) {
+    # Create netlink socket
+    var fd = syscall(SYS_SOCKET, AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    if (fd < 0) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "socket() failed: errno ");
+        str_builder_add_int(sb, 0 - fd);
+        return err_udev_socket(str_builder_build(sb));
+    }
+
+    # Bind to multicast group 1
+    # struct sockaddr_nl: { u16 family, u16 pad, u32 pid, u32 groups }
+    var addr[12];
+    store16(&addr, AF_NETLINK);
+    store16(&addr + 2, 0);
+    store32(&addr + 4, 0);
+    store32(&addr + 8, 1);
+
+    var rc = syscall(SYS_BIND, fd, &addr, 12);
+    if (rc < 0) {
+        syscall(SYS_CLOSE, fd);
+        return err_udev_socket(str_from("bind() failed"));
+    }
+
+    # Set receive buffer size
+    var bufsize[4];
+    store32(&bufsize, RECV_BUF_SIZE);
+    syscall(SYS_SETSOCKOPT, fd, SOL_SOCKET, SO_RCVBUF, &bufsize, 4);
+
+    var mon = alloc(24);
+    store64(mon, fd);
+    store64(mon + 8, 1);
+    store64(mon + 16, filter_vec);
+
+    sakshi_info("yukti", "udev monitor created", "");
+    return Ok(mon);
+}
+
+pub fn udev_monitor_poll(mon, timeout_ms) {
+    var fd = load64(mon);
+
+    # struct pollfd: { int fd, short events, short revents }
+    var pfd[8];
+    store32(&pfd, fd);
+    store16(&pfd + 4, 1);
+    store16(&pfd + 6, 0);
+
+    var ret = syscall(SYS_POLL, &pfd, 1, timeout_ms);
+    if (ret < 0) {
+        return err_udev_socket(str_from("poll() failed"));
+    }
+    if (ret == 0) { return Ok(0); }
+
+    # Receive data
+    var buf[8192];
+    var n = syscall(SYS_RECVFROM, fd, &buf, 8192, 0, 0, 0);
+    if (n <= 0) { return Ok(0); }
+
+    var uevent = parse_uevent(&buf, n);
+    return Ok(uevent);
+}
+
+pub fn udev_monitor_stop(mon) {
+    store64(mon + 8, 0);
+    sakshi_info("yukti", "udev monitor stopping", "");
+    return 0;
+}
+
+pub fn udev_monitor_close(mon) {
+    udev_monitor_stop(mon);
+    var fd = load64(mon);
+    syscall(SYS_CLOSE, fd);
+    return 0;
+}
+
+pub fn udev_monitor_is_running(mon) {
+    return load64(mon + 8);
+}
+
+# Run event loop dispatching to a listener function pointer
+pub fn udev_monitor_run(mon, listener_fn) {
+    sakshi_info("yukti", "udev monitor event loop started", "");
+    while (udev_monitor_is_running(mon)) {
+        var r = udev_monitor_poll(mon, 500);
+        if (is_ok(r) == 0) { continue; }
+        var uevent = payload(r);
+        if (uevent == 0) { continue; }
+
+        var dev_event = udev_event_to_device_event(uevent);
+        if (dev_event == 0) { continue; }
+
+        # Check monitor-level filter
+        var filter = load64(mon + 16);
+        if (filter != 0) {
+            var class = de_device_class(dev_event);
+            var found = 0;
+            var flen = vec_len(filter);
+            for (var i = 0; i < flen; i = i + 1) {
+                if (vec_get(filter, i) == class) { found = 1; break; }
+            }
+            if (found == 0) { continue; }
+        }
+
+        fncall1(listener_fn, dev_event);
+    }
+    return Ok(0);
+}

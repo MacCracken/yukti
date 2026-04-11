@@ -1,0 +1,454 @@
+# yukti/optical.cyr — Optical drive operations
+#
+# Disc type detection, tray control, TOC reading.
+# All hardware ops via direct syscalls/ioctls.
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# DiscType enum — 10 variants
+# ---------------------------------------------------------------------------
+
+enum DiscType {
+    DT_CD_AUDIO = 0;
+    DT_CD_DATA = 1;
+    DT_CD_MIXED = 2;
+    DT_DVD_ROM = 3;
+    DT_DVD_WRITABLE = 4;
+    DT_DVD_VIDEO = 5;
+    DT_BLURAY = 6;
+    DT_BLURAY_VIDEO = 7;
+    DT_BLANK = 8;
+    DT_UNKNOWN = 9;
+}
+
+pub fn disc_type_to_str(dt) {
+    if (dt == DT_CD_AUDIO) { return "CD-DA (Audio)"; }
+    if (dt == DT_CD_DATA) { return "CD-ROM (Data)"; }
+    if (dt == DT_CD_MIXED) { return "CD (Mixed Mode)"; }
+    if (dt == DT_DVD_ROM) { return "DVD-ROM"; }
+    if (dt == DT_DVD_WRITABLE) { return "DVD-R/RW"; }
+    if (dt == DT_DVD_VIDEO) { return "DVD Video"; }
+    if (dt == DT_BLURAY) { return "Blu-ray"; }
+    if (dt == DT_BLURAY_VIDEO) { return "Blu-ray Video"; }
+    if (dt == DT_BLANK) { return "Blank"; }
+    return "Unknown";
+}
+
+pub fn disc_type_has_audio(dt) {
+    if (dt == DT_CD_AUDIO) { return 1; }
+    if (dt == DT_CD_MIXED) { return 1; }
+    return 0;
+}
+
+pub fn disc_type_has_data(dt) {
+    if (dt == DT_CD_DATA) { return 1; }
+    if (dt == DT_CD_MIXED) { return 1; }
+    if (dt == DT_DVD_ROM) { return 1; }
+    if (dt == DT_DVD_WRITABLE) { return 1; }
+    if (dt == DT_DVD_VIDEO) { return 1; }
+    if (dt == DT_BLURAY) { return 1; }
+    if (dt == DT_BLURAY_VIDEO) { return 1; }
+    return 0;
+}
+
+pub fn disc_type_is_writable(dt) {
+    if (dt == DT_DVD_WRITABLE) { return 1; }
+    if (dt == DT_BLANK) { return 1; }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# TrayState enum
+# ---------------------------------------------------------------------------
+
+enum TrayState {
+    TS_OPEN = 0;
+    TS_CLOSED = 1;
+    TS_UNKNOWN = 2;
+}
+
+pub fn tray_state_to_str(ts) {
+    if (ts == TS_OPEN) { return "open"; }
+    if (ts == TS_CLOSED) { return "closed"; }
+    return "unknown";
+}
+
+# ---------------------------------------------------------------------------
+# TrackType enum
+# ---------------------------------------------------------------------------
+
+enum TrackType {
+    TT_AUDIO = 0;
+    TT_DATA = 1;
+    TT_UNKNOWN = 2;
+}
+
+# ---------------------------------------------------------------------------
+# ioctl constants
+# ---------------------------------------------------------------------------
+
+enum OpticalIoctl {
+    IOCTL_CDROMEJECT = 0x5309;
+    IOCTL_CDROMCLOSETRAY = 0x5319;
+    IOCTL_CDROM_DRIVE_STATUS = 0x5326;
+    IOCTL_CDROMREADTOCHDR = 0x5305;
+    IOCTL_CDROMREADTOCENTRY = 0x5306;
+    CDROM_LBA = 0x01;
+    CDROM_LEADOUT = 0xAA;
+    CDS_NO_DISC = 1;
+    CDS_TRAY_OPEN = 2;
+    CDS_DRIVE_NOT_READY = 3;
+    CDS_DISC_OK = 4;
+    ENOMEDIUM = 123;
+}
+
+# ---------------------------------------------------------------------------
+# TocEntry struct
+# Layout: 40 bytes
+#   0: number (track number, 1-based)
+#   8: track_type (TrackType)
+#  16: start_lba
+#  24: length_sectors
+#  32: duration_secs_x100 (integer, e.g. 18050 = 180.50s)
+# ---------------------------------------------------------------------------
+
+pub fn toc_entry_new(number, track_type, start_lba, length_sectors, duration_x100) {
+    var e = alloc(40);
+    store64(e, number);
+    store64(e + 8, track_type);
+    store64(e + 16, start_lba);
+    store64(e + 24, length_sectors);
+    store64(e + 32, duration_x100);
+    return e;
+}
+
+pub fn te_number(e) { return load64(e); }
+pub fn te_track_type(e) { return load64(e + 8); }
+pub fn te_start_lba(e) { return load64(e + 16); }
+pub fn te_length_sectors(e) { return load64(e + 24); }
+pub fn te_duration_x100(e) { return load64(e + 32); }
+
+# ---------------------------------------------------------------------------
+# DiscToc struct
+# Layout: 24 bytes
+#   0: disc_type (DiscType)
+#   8: tracks (vec of TocEntry ptrs)
+#  16: total_size_bytes
+# ---------------------------------------------------------------------------
+
+pub fn disc_toc_new(disc_type, tracks_vec, total_size) {
+    var t = alloc(24);
+    store64(t, disc_type);
+    store64(t + 8, tracks_vec);
+    store64(t + 16, total_size);
+    return t;
+}
+
+pub fn toc_disc_type(t) { return load64(t); }
+pub fn toc_tracks(t) { return load64(t + 8); }
+pub fn toc_total_size(t) { return load64(t + 16); }
+
+pub fn toc_audio_track_count(toc) {
+    var tracks = toc_tracks(toc);
+    var count = 0;
+    var n = vec_len(tracks);
+    for (var i = 0; i < n; i = i + 1) {
+        var entry = vec_get(tracks, i);
+        if (te_track_type(entry) == TT_AUDIO) { count = count + 1; }
+    }
+    return count;
+}
+
+pub fn toc_data_track_count(toc) {
+    var tracks = toc_tracks(toc);
+    var count = 0;
+    var n = vec_len(tracks);
+    for (var i = 0; i < n; i = i + 1) {
+        var entry = vec_get(tracks, i);
+        if (te_track_type(entry) == TT_DATA) { count = count + 1; }
+    }
+    return count;
+}
+
+# Total audio duration in centiseconds (x100)
+pub fn toc_total_audio_duration_x100(toc) {
+    var tracks = toc_tracks(toc);
+    var total = 0;
+    var n = vec_len(tracks);
+    for (var i = 0; i < n; i = i + 1) {
+        var entry = vec_get(tracks, i);
+        if (te_track_type(entry) == TT_AUDIO) {
+            total = total + te_duration_x100(entry);
+        }
+    }
+    return total;
+}
+
+# ---------------------------------------------------------------------------
+# Helper: open optical device with O_RDONLY | O_NONBLOCK
+# ---------------------------------------------------------------------------
+
+fn open_optical_device(dev_path_cstr) {
+    var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
+    if (fd < 0) {
+        var errno = 0 - fd;
+        if (errno == 13) { return err_permission_denied(str_from("open"), str_from(dev_path_cstr)); }
+        if (errno == 1) { return err_permission_denied(str_from("open"), str_from(dev_path_cstr)); }
+        if (errno == ENOMEDIUM) { return err_no_media(str_from(dev_path_cstr)); }
+        return err_io(str_from(dev_path_cstr));
+    }
+    return Ok(fd);
+}
+
+# Map ioctl errno to error
+fn map_ioctl_error(dev_path_cstr, op) {
+    # Read errno from last syscall failure - we pass it from caller
+    return err_tray_failed(str_from(op));
+}
+
+# ---------------------------------------------------------------------------
+# open_tray — eject/open optical drive tray
+# ---------------------------------------------------------------------------
+
+pub fn open_tray(dev_path_cstr) {
+    sakshi_info("yukti", "opening tray", dev_path_cstr);
+    var fd_r = open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r) == 0) { return fd_r; }
+    var fd = payload(fd_r);
+
+    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMEJECT, 0);
+    syscall(SYS_CLOSE, fd);
+
+    if (ret < 0) {
+        sakshi_error("yukti", "open tray failed", dev_path_cstr);
+        return err_tray_failed(str_from("eject ioctl failed"));
+    }
+
+    sakshi_info("yukti", "tray opened", dev_path_cstr);
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# close_tray — close optical drive tray
+# ---------------------------------------------------------------------------
+
+pub fn close_tray(dev_path_cstr) {
+    sakshi_info("yukti", "closing tray", dev_path_cstr);
+    var fd_r = open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r) == 0) { return fd_r; }
+    var fd = payload(fd_r);
+
+    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMCLOSETRAY, 0);
+    syscall(SYS_CLOSE, fd);
+
+    if (ret < 0) {
+        sakshi_error("yukti", "close tray failed", dev_path_cstr);
+        return err_tray_failed(str_from("close tray ioctl failed"));
+    }
+
+    sakshi_info("yukti", "tray closed", dev_path_cstr);
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# drive_status — query tray state
+# ---------------------------------------------------------------------------
+
+pub fn drive_status(dev_path_cstr) {
+    var fd_r = open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r) == 0) { return fd_r; }
+    var fd = payload(fd_r);
+
+    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROM_DRIVE_STATUS, 0);
+    syscall(SYS_CLOSE, fd);
+
+    if (ret < 0) {
+        return err_tray_failed(str_from("drive status ioctl failed"));
+    }
+
+    if (ret == CDS_TRAY_OPEN) { return Ok(TS_OPEN); }
+    if (ret == CDS_DISC_OK) { return Ok(TS_CLOSED); }
+    if (ret == CDS_NO_DISC) { return Ok(TS_CLOSED); }
+    if (ret == CDS_DRIVE_NOT_READY) { return Ok(TS_CLOSED); }
+    return Ok(TS_UNKNOWN);
+}
+
+# ---------------------------------------------------------------------------
+# read_toc — read CD table of contents via ioctls
+# ---------------------------------------------------------------------------
+
+pub fn read_toc(dev_path_cstr) {
+    sakshi_info("yukti", "reading disc TOC", dev_path_cstr);
+    var fd_r = open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r) == 0) { return fd_r; }
+    var fd = payload(fd_r);
+
+    # Read TOC header: struct cdrom_tochdr { u8 first, u8 last }
+    var hdr[2];
+    store8(&hdr, 0);
+    store8(&hdr + 1, 0);
+    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCHDR, &hdr);
+    if (ret < 0) {
+        syscall(SYS_CLOSE, fd);
+        return err_tray_failed(str_from("read TOC header failed"));
+    }
+
+    var first = load8(&hdr);
+    var last = load8(&hdr + 1);
+
+    # Read LBA for each track plus lead-out (0xAA)
+    # struct cdrom_tocentry: { u8 track, u8 adr_ctrl, u8 format, union addr(4+pad), u8 datamode }
+    # For LBA format: addr is i32 at offset 4 (after 3 bytes of track/adr_ctrl/format, padded)
+    # Actual struct layout on x86_64:
+    #   0: track (u8)
+    #   1: adr_ctrl (u8)
+    #   2: format (u8)
+    #   3: padding (1 byte)
+    #   4: addr union (4 bytes for LBA i32)
+    #   8: datamode (u8)
+    #   total: ~12 bytes, padded to alignment
+
+    var lba_vec = vec_new();
+    var ctrl_vec = vec_new();
+
+    var track_num = first;
+    while (track_num <= last) {
+        var entry[16];
+        store8(&entry, track_num);
+        store8(&entry + 1, 0);
+        store8(&entry + 2, CDROM_LBA);
+        store32(&entry + 4, 0);
+        store8(&entry + 8, 0);
+
+        ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &entry);
+        if (ret < 0) {
+            syscall(SYS_CLOSE, fd);
+            return err_tray_failed(str_from("read TOC entry failed"));
+        }
+
+        var lba = load32(&entry + 4);
+        var adr_ctrl = load8(&entry + 1);
+        vec_push(lba_vec, lba);
+        vec_push(ctrl_vec, adr_ctrl);
+
+        track_num = track_num + 1;
+    }
+
+    # Read lead-out entry
+    var leadout[16];
+    store8(&leadout, CDROM_LEADOUT);
+    store8(&leadout + 1, 0);
+    store8(&leadout + 2, CDROM_LBA);
+    store32(&leadout + 4, 0);
+    store8(&leadout + 8, 0);
+    ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &leadout);
+    if (ret < 0) {
+        syscall(SYS_CLOSE, fd);
+        return err_tray_failed(str_from("read lead-out failed"));
+    }
+    var leadout_lba = load32(&leadout + 4);
+    vec_push(lba_vec, leadout_lba);
+
+    syscall(SYS_CLOSE, fd);
+
+    # Build track entries
+    var tracks = vec_new();
+    var has_audio = 0;
+    var has_data = 0;
+    var num_tracks = vec_len(lba_vec) - 1;
+
+    for (var i = 0; i < num_tracks; i = i + 1) {
+        var start_lba = vec_get(lba_vec, i);
+        var next_lba = vec_get(lba_vec, i + 1);
+        var length = next_lba - start_lba;
+        if (length < 0) { length = 0; }
+
+        var adr_ctrl = vec_get(ctrl_vec, i);
+        var is_data_track = (adr_ctrl & 4) != 0;
+
+        var tt = TT_AUDIO;
+        var duration_x100 = 0;
+        if (is_data_track) {
+            tt = TT_DATA;
+            has_data = 1;
+        } else {
+            has_audio = 1;
+            # Audio: 75 frames/sec -> duration = length / 75
+            # x100 for centiseconds: length * 100 / 75 = length * 4 / 3
+            duration_x100 = (length * 100) / 75;
+        }
+
+        var entry = toc_entry_new(first + i, tt, start_lba, length, duration_x100);
+        vec_push(tracks, entry);
+    }
+
+    # Total size: lead-out LBA * 2048
+    var total_size = leadout_lba * 2048;
+
+    # Classify disc type
+    var dt = classify_toc_tracks(has_audio, has_data);
+
+    sakshi_info("yukti", "TOC read complete", dev_path_cstr);
+
+    return Ok(disc_toc_new(dt, tracks, total_size));
+}
+
+# ---------------------------------------------------------------------------
+# classify_toc_tracks — determine disc type from track content
+# ---------------------------------------------------------------------------
+
+pub fn classify_toc_tracks(has_audio, has_data) {
+    if (has_audio != 0) {
+        if (has_data != 0) { return DT_CD_MIXED; }
+        return DT_CD_AUDIO;
+    }
+    if (has_data != 0) { return DT_CD_DATA; }
+    return DT_UNKNOWN;
+}
+
+# ---------------------------------------------------------------------------
+# detect_disc_type — from media type string + track info
+# Zero-alloc case-insensitive matching
+# ---------------------------------------------------------------------------
+
+pub fn detect_disc_type(media_type_cstr, has_audio, has_data) {
+    if (str_eq_ci(media_type_cstr, "cd")) {
+        return classify_toc_tracks(has_audio, has_data);
+    }
+    if (str_eq_ci(media_type_cstr, "cd-rom")) {
+        return classify_toc_tracks(has_audio, has_data);
+    }
+    if (str_eq_ci(media_type_cstr, "dvd")) { return DT_DVD_ROM; }
+    if (str_eq_ci(media_type_cstr, "dvd-rom")) { return DT_DVD_ROM; }
+    if (str_eq_ci(media_type_cstr, "dvd-r")) { return DT_DVD_WRITABLE; }
+    if (str_eq_ci(media_type_cstr, "dvd-rw")) { return DT_DVD_WRITABLE; }
+    if (str_eq_ci(media_type_cstr, "dvd+r")) { return DT_DVD_WRITABLE; }
+    if (str_eq_ci(media_type_cstr, "dvd+rw")) { return DT_DVD_WRITABLE; }
+    if (str_eq_ci(media_type_cstr, "dvd-video")) { return DT_DVD_VIDEO; }
+    if (str_eq_ci(media_type_cstr, "bd")) { return DT_BLURAY; }
+    if (str_eq_ci(media_type_cstr, "blu-ray")) { return DT_BLURAY; }
+    if (str_eq_ci(media_type_cstr, "bd-rom")) { return DT_BLURAY; }
+    if (str_eq_ci(media_type_cstr, "bd-video")) { return DT_BLURAY_VIDEO; }
+    if (str_eq_ci(media_type_cstr, "blank")) { return DT_BLANK; }
+    if (str_eq_ci(media_type_cstr, "no_disc")) { return DT_BLANK; }
+    return DT_UNKNOWN;
+}
+
+# ---------------------------------------------------------------------------
+# is_dvd_video — check if mount point contains VIDEO_TS directory
+# ---------------------------------------------------------------------------
+
+pub fn is_dvd_video(mount_point_cstr) {
+    var sb1 = str_builder_new();
+    str_builder_add_cstr(sb1, mount_point_cstr);
+    str_builder_add_cstr(sb1, "/VIDEO_TS");
+    if (is_dir(str_cstr(str_builder_build(sb1)))) { return 1; }
+
+    var sb2 = str_builder_new();
+    str_builder_add_cstr(sb2, mount_point_cstr);
+    str_builder_add_cstr(sb2, "/video_ts");
+    if (is_dir(str_cstr(str_builder_build(sb2)))) { return 1; }
+
+    return 0;
+}

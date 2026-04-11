@@ -1,0 +1,24 @@
+name = "yukti"
+version = "0.25.3"
+license = "GPL-3.0-only"
+entry = "src/main.cyr"
+output = "yukti"
+description = "Device abstraction — USB, optical, block devices, udev hotplug, mount/eject"
+repository = "https://github.com/MacCracken/yukti"
+
+[lib]
+entry = "src/lib.cyr"
+modules = [
+    "src/error.cyr",
+    "src/device.cyr",
+    "src/event.cyr",
+    "src/storage.cyr",
+    "src/optical.cyr",
+    "src/udev.cyr",
+    "src/linux.cyr",
+    "src/udev_rules.cyr",
+]
+
+[[bench]]
+name = "benchmarks"
+entry = "benches/bench.bcyr"

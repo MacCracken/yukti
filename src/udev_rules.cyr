@@ -1,0 +1,333 @@
+# yukti/udev_rules.cyr — Udev rule management
+#
+# Create, validate, render, and install udev rules.
+# Standalone implementation (no agnosys dependency).
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# UdevRule struct
+# Layout: 24 bytes
+#   0: name (Str — rule file name without .rules extension)
+#   8: match_attrs (vec of pairs — each pair is [key Str, value Str])
+#  16: actions (vec of pairs — each pair is [key Str, value Str])
+# ---------------------------------------------------------------------------
+
+pub fn udev_rule_new(name, match_attrs, actions) {
+    var r = alloc(24);
+    store64(r, name);
+    store64(r + 8, match_attrs);
+    store64(r + 16, actions);
+    return r;
+}
+
+pub fn ur_name(r) { return load64(r); }
+pub fn ur_match_attrs(r) { return load64(r + 8); }
+pub fn ur_actions(r) { return load64(r + 16); }
+
+# A pair is 16 bytes: [key Str, value Str]
+pub fn pair_new(key, value) {
+    var p = alloc(16);
+    store64(p, key);
+    store64(p + 8, value);
+    return p;
+}
+
+pub fn pair_key(p) { return load64(p); }
+pub fn pair_value(p) { return load64(p + 8); }
+
+# ---------------------------------------------------------------------------
+# UdevDeviceInfo struct (from udevadm query)
+# Layout: 48 bytes
+# ---------------------------------------------------------------------------
+
+pub fn udev_device_info_new(syspath, devpath, subsystem, devtype, driver, devnode) {
+    var info = alloc(48);
+    store64(info, syspath);
+    store64(info + 8, devpath);
+    store64(info + 16, subsystem);
+    store64(info + 24, devtype);
+    store64(info + 32, driver);
+    store64(info + 40, devnode);
+    return info;
+}
+
+pub fn udi_syspath(i) { return load64(i); }
+pub fn udi_devpath(i) { return load64(i + 8); }
+pub fn udi_subsystem(i) { return load64(i + 16); }
+pub fn udi_devtype(i) { return load64(i + 24); }
+pub fn udi_driver(i) { return load64(i + 32); }
+pub fn udi_devnode(i) { return load64(i + 40); }
+
+# ---------------------------------------------------------------------------
+# render_rule — render udev rule to .rules file format
+# ---------------------------------------------------------------------------
+
+pub fn render_rule(rule) {
+    var sb = str_builder_new();
+
+    # Match conditions: KEY=="VALUE"
+    var matches = ur_match_attrs(rule);
+    var nm = vec_len(matches);
+    for (var i = 0; i < nm; i = i + 1) {
+        if (i > 0) { str_builder_add_cstr(sb, ", "); }
+        var p = vec_get(matches, i);
+        str_builder_add_str(sb, pair_key(p));
+        str_builder_add_cstr(sb, "==\"");
+        str_builder_add_str(sb, pair_value(p));
+        str_builder_add_cstr(sb, "\"");
+    }
+
+    # Actions: KEY="VALUE"
+    var actions = ur_actions(rule);
+    var na = vec_len(actions);
+    for (var i = 0; i < na; i = i + 1) {
+        if (nm > 0) { str_builder_add_cstr(sb, ", "); }
+        elif (i > 0) { str_builder_add_cstr(sb, ", "); }
+        var p = vec_get(actions, i);
+        str_builder_add_str(sb, pair_key(p));
+        str_builder_add_cstr(sb, "=\"");
+        str_builder_add_str(sb, pair_value(p));
+        str_builder_add_cstr(sb, "\"");
+    }
+
+    return str_builder_build(sb);
+}
+
+# ---------------------------------------------------------------------------
+# validate_rule — check rule for correctness
+# ---------------------------------------------------------------------------
+
+# Dangerous action keys that should be flagged
+fn is_dangerous_action(key_cstr) {
+    if (streq(key_cstr, "RUN")) { return 1; }
+    if (streq(key_cstr, "PROGRAM")) { return 1; }
+    if (streq(key_cstr, "IMPORT")) { return 1; }
+    return 0;
+}
+
+pub fn validate_rule(rule) {
+    var name = ur_name(rule);
+    if (str_len(name) == 0) {
+        return err_udev(str_from("rule name cannot be empty"));
+    }
+
+    var matches = ur_match_attrs(rule);
+    if (vec_len(matches) == 0) {
+        return err_udev(str_from("rule must have at least one match"));
+    }
+
+    var actions = ur_actions(rule);
+    if (vec_len(actions) == 0) {
+        return err_udev(str_from("rule must have at least one action"));
+    }
+
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# write_rule — write rule file to rules directory
+# ---------------------------------------------------------------------------
+
+pub fn write_rule(rule, rules_dir_cstr) {
+    var val_r = validate_rule(rule);
+    if (is_ok(val_r) == 0) { return val_r; }
+
+    var rendered = render_rule(rule);
+
+    # Build path: rules_dir/name.rules
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, rules_dir_cstr);
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_str(sb, ur_name(rule));
+    str_builder_add_cstr(sb, ".rules");
+    var path = str_builder_build(sb);
+    var path_cstr = str_cstr(path);
+
+    # Write file: open + write + close
+    var fd = syscall(SYS_OPEN, path_cstr, 577, 420);
+    if (fd < 0) {
+        var esb = str_builder_new();
+        str_builder_add_cstr(esb, "failed to write rule: ");
+        str_builder_add_str(esb, path);
+        return err_udev(str_builder_build(esb));
+    }
+
+    var data = str_cstr(rendered);
+    syscall(1, fd, data, strlen(data));
+    syscall(1, fd, "\n", 1);
+    syscall(SYS_CLOSE, fd);
+
+    return Ok(path);
+}
+
+# ---------------------------------------------------------------------------
+# remove_rule — delete rule file
+# ---------------------------------------------------------------------------
+
+pub fn remove_rule(name, rules_dir_cstr) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, rules_dir_cstr);
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_str(sb, name);
+    str_builder_add_cstr(sb, ".rules");
+    var path = str_builder_build(sb);
+
+    # SYS_UNLINK = 87
+    var r = syscall(87, str_cstr(path));
+    if (r < 0) {
+        var esb = str_builder_new();
+        str_builder_add_cstr(esb, "failed to remove rule: ");
+        str_builder_add_str(esb, path);
+        return err_udev(str_builder_build(esb));
+    }
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# reload_rules — udevadm control --reload-rules
+# ---------------------------------------------------------------------------
+
+pub fn reload_rules() {
+    var r = run("udevadm", "control --reload-rules");
+    if (r != 0) {
+        return err_udev(str_from("failed to reload rules"));
+    }
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# trigger_device — udevadm trigger --action=change <syspath>
+# ---------------------------------------------------------------------------
+
+pub fn trigger_device(syspath_cstr) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "trigger --action=change ");
+    str_builder_add_cstr(sb, syspath_cstr);
+    var args = str_builder_build(sb);
+
+    var r = run("udevadm", str_cstr(args));
+    if (r != 0) {
+        return err_udev(str_from("failed to trigger device"));
+    }
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
+# query_device — udevadm info <syspath>
+# ---------------------------------------------------------------------------
+
+pub fn query_device(syspath_cstr) {
+    var buf[4096];
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "info --query=property --path=");
+    str_builder_add_cstr(sb, syspath_cstr);
+    var args = str_builder_build(sb);
+
+    var n = run_capture("udevadm", str_cstr(args), &buf, 4096);
+    if (n <= 0) {
+        return err_udev(str_from("device query failed"));
+    }
+
+    # Parse output into UdevDeviceInfo
+    var output = str_from_buf(&buf, n);
+    var info = udev_device_info_new(
+        str_from(syspath_cstr),
+        str_from(""),
+        str_from(""),
+        0, 0, 0
+    );
+
+    # Parse KEY=VALUE lines
+    var lines = str_split(output, "\n");
+    var nlines = vec_len(lines);
+    for (var i = 0; i < nlines; i = i + 1) {
+        var line = str_trim(vec_get(lines, i));
+        var eq = str_index_of(line, "=");
+        if (eq < 0) { continue; }
+        var key = str_substr(line, 0, eq);
+        var val = str_substr(line, eq + 1, str_len(line));
+
+        if (str_eq_cstr(key, "DEVPATH")) { store64(info + 8, val); }
+        elif (str_eq_cstr(key, "SUBSYSTEM")) { store64(info + 16, val); }
+        elif (str_eq_cstr(key, "DEVTYPE")) { store64(info + 24, val); }
+        elif (str_eq_cstr(key, "DRIVER")) { store64(info + 32, val); }
+        elif (str_eq_cstr(key, "DEVNAME")) { store64(info + 40, val); }
+    }
+
+    return Ok(info);
+}
+
+# ---------------------------------------------------------------------------
+# list_devices — enumerate devices (optionally filtered by subsystem)
+# ---------------------------------------------------------------------------
+
+pub fn list_devices(subsystem) {
+    var buf[8192];
+    var args_sb = str_builder_new();
+    str_builder_add_cstr(args_sb, "info --export-db");
+    var args = str_builder_build(args_sb);
+
+    var n = run_capture("udevadm", str_cstr(args), &buf, 8192);
+    if (n <= 0) { return vec_new(); }
+
+    # Parse output: device blocks separated by blank lines
+    var output = str_from_buf(&buf, n);
+    var devices = vec_new();
+    var lines = str_split(output, "\n");
+    var nlines = vec_len(lines);
+
+    var cur_syspath = 0;
+    var cur_devpath = str_from("");
+    var cur_subsystem = str_from("");
+    var cur_devtype = 0;
+    var cur_driver = 0;
+    var cur_devnode = 0;
+
+    for (var i = 0; i < nlines; i = i + 1) {
+        var line = str_trim(vec_get(lines, i));
+        if (str_len(line) == 0) {
+            # End of block
+            if (cur_syspath != 0) {
+                # Filter by subsystem if provided
+                var include = 1;
+                if (subsystem != 0) {
+                    if (str_eq(cur_subsystem, subsystem) == 0) {
+                        include = 0;
+                    }
+                }
+                if (include) {
+                    var di = udev_device_info_new(cur_syspath, cur_devpath, cur_subsystem,
+                                                   cur_devtype, cur_driver, cur_devnode);
+                    vec_push(devices, di);
+                }
+            }
+            cur_syspath = 0;
+            cur_devpath = str_from("");
+            cur_subsystem = str_from("");
+            cur_devtype = 0;
+            cur_driver = 0;
+            cur_devnode = 0;
+            continue;
+        }
+
+        # Parse P: (syspath), E: (property)
+        if (str_starts_with(line, "P: ")) {
+            cur_syspath = str_substr(line, 3, str_len(line));
+        } elif (str_starts_with(line, "E: ")) {
+            var kv = str_substr(line, 3, str_len(line));
+            var eq = str_index_of(kv, "=");
+            if (eq >= 0) {
+                var key = str_substr(kv, 0, eq);
+                var val = str_substr(kv, eq + 1, str_len(kv));
+                if (str_eq_cstr(key, "DEVPATH")) { cur_devpath = val; }
+                elif (str_eq_cstr(key, "SUBSYSTEM")) { cur_subsystem = val; }
+                elif (str_eq_cstr(key, "DEVTYPE")) { cur_devtype = val; }
+                elif (str_eq_cstr(key, "DRIVER")) { cur_driver = val; }
+                elif (str_eq_cstr(key, "DEVNAME")) { cur_devnode = val; }
+            }
+        }
+    }
+
+    return devices;
+}

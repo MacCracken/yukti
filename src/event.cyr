@@ -1,0 +1,196 @@
+# yukti/event.cyr — Device events: attach, detach, media change, mount/unmount
+#
+# DeviceEvent, DeviceEventKind, EventCollector (for testing),
+# and listener callback pattern.
+
+mod yukti;
+
+# ---------------------------------------------------------------------------
+# DeviceEventKind enum — 6 variants
+# ---------------------------------------------------------------------------
+
+enum DeviceEventKind {
+    EK_ATTACHED = 0;
+    EK_DETACHED = 1;
+    EK_MEDIA_CHANGED = 2;
+    EK_MOUNTED = 3;
+    EK_UNMOUNTED = 4;
+    EK_ERROR = 5;
+}
+
+pub fn event_kind_to_str(kind) {
+    if (kind == EK_ATTACHED) { return "attached"; }
+    if (kind == EK_DETACHED) { return "detached"; }
+    if (kind == EK_MEDIA_CHANGED) { return "media-changed"; }
+    if (kind == EK_MOUNTED) { return "mounted"; }
+    if (kind == EK_UNMOUNTED) { return "unmounted"; }
+    if (kind == EK_ERROR) { return "error"; }
+    return "unknown";
+}
+
+# ---------------------------------------------------------------------------
+# DeviceEvent struct
+# Layout: 56 bytes
+#   0: device_id (DeviceId ptr)
+#   8: device_class (DeviceClass enum value)
+#  16: kind (DeviceEventKind enum value)
+#  24: dev_path (Str)
+#  32: timestamp (i64 — epoch seconds)
+#  40: extra (Str — mount_point for Mounted, message for Error, 0 otherwise)
+#  48: device_info (DeviceInfo ptr, 0 for detach)
+# ---------------------------------------------------------------------------
+
+enum DeviceEventField {
+    DE_DEVICE_ID = 0;
+    DE_DEVICE_CLASS = 8;
+    DE_KIND = 16;
+    DE_DEV_PATH = 24;
+    DE_TIMESTAMP = 32;
+    DE_EXTRA = 40;
+    DE_DEVICE_INFO = 48;
+    DE_SIZE = 56;
+}
+
+pub fn device_event_new(device_id, device_class, kind, dev_path) {
+    var e = alloc(DE_SIZE);
+    store64(e + DE_DEVICE_ID, device_id);
+    store64(e + DE_DEVICE_CLASS, device_class);
+    store64(e + DE_KIND, kind);
+    store64(e + DE_DEV_PATH, dev_path);
+    # Timestamp: clock_gettime(CLOCK_REALTIME=0)
+    var ts[16];
+    syscall(228, 0, &ts);
+    store64(e + DE_TIMESTAMP, load64(&ts));
+    store64(e + DE_EXTRA, 0);
+    store64(e + DE_DEVICE_INFO, 0);
+    return e;
+}
+
+# Accessors
+pub fn de_device_id(e) { return load64(e + DE_DEVICE_ID); }
+pub fn de_device_class(e) { return load64(e + DE_DEVICE_CLASS); }
+pub fn de_kind(e) { return load64(e + DE_KIND); }
+pub fn de_dev_path(e) { return load64(e + DE_DEV_PATH); }
+pub fn de_timestamp(e) { return load64(e + DE_TIMESTAMP); }
+pub fn de_extra(e) { return load64(e + DE_EXTRA); }
+pub fn de_device_info(e) { return load64(e + DE_DEVICE_INFO); }
+
+# Setters
+pub fn de_set_extra(e, v) { store64(e + DE_EXTRA, v); return 0; }
+pub fn de_set_device_info(e, v) { store64(e + DE_DEVICE_INFO, v); return 0; }
+
+# Attach device info snapshot to event
+pub fn device_event_with_info(e, info) {
+    de_set_device_info(e, info);
+    return e;
+}
+
+# Predicate methods
+pub fn device_event_is_attach(e) {
+    return de_kind(e) == EK_ATTACHED;
+}
+
+pub fn device_event_is_detach(e) {
+    return de_kind(e) == EK_DETACHED;
+}
+
+pub fn device_event_is_removable(e) {
+    var class = de_device_class(e);
+    if (class == DC_USB_STORAGE) { return 1; }
+    if (class == DC_OPTICAL) { return 1; }
+    if (class == DC_SD_CARD) { return 1; }
+    return 0;
+}
+
+# Format event kind with extra data for display
+pub fn device_event_kind_display(e, sb) {
+    var kind = de_kind(e);
+    if (kind == EK_MOUNTED) {
+        str_builder_add_cstr(sb, "mounted:");
+        var extra = de_extra(e);
+        if (extra != 0) {
+            str_builder_add_str(sb, extra);
+        }
+        return 0;
+    }
+    if (kind == EK_ERROR) {
+        str_builder_add_cstr(sb, "error:");
+        var extra = de_extra(e);
+        if (extra != 0) {
+            str_builder_add_str(sb, extra);
+        }
+        return 0;
+    }
+    str_builder_add_cstr(sb, event_kind_to_str(kind));
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# EventCollector — vec-backed event collector for testing
+# Layout: 8 bytes — pointer to vec
+# ---------------------------------------------------------------------------
+
+pub fn event_collector_new() {
+    var c = alloc(8);
+    store64(c, vec_new());
+    return c;
+}
+
+pub fn event_collector_push(c, event) {
+    vec_push(load64(c), event);
+    return 0;
+}
+
+pub fn event_collector_count(c) {
+    return vec_len(load64(c));
+}
+
+pub fn event_collector_get(c, i) {
+    return vec_get(load64(c), i);
+}
+
+pub fn event_collector_clear(c) {
+    var v = load64(c);
+    # Reset vec length to 0
+    store64(v + 8, 0);
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Listener dispatch — function pointer callbacks
+#
+# Listeners are stored as function pointers in a vec.
+# Each listener is called as fncall1(fn_ptr, event).
+# Filter support: a listener can be paired with a filter function
+# that returns 1 to accept, 0 to skip.
+#
+# Listener entry: 16 bytes [fn_ptr, filter_fn_ptr (0 = accept all)]
+# ---------------------------------------------------------------------------
+
+pub fn listener_entry_new(fn_ptr, filter_fn) {
+    var entry = alloc(16);
+    store64(entry, fn_ptr);
+    store64(entry + 8, filter_fn);
+    return entry;
+}
+
+pub fn dispatch_event_to_listeners(listeners_vec, event) {
+    var len = vec_len(listeners_vec);
+    for (var i = 0; i < len; i = i + 1) {
+        var entry = vec_get(listeners_vec, i);
+        var filter_fn = load64(entry + 8);
+
+        # Check filter if present
+        if (filter_fn != 0) {
+            var accepted = fncall1(filter_fn, event);
+            if (accepted == 0) {
+                continue;
+            }
+        }
+
+        # Dispatch event
+        var handler = load64(entry);
+        fncall1(handler, event);
+    }
+    return 0;
+}

@@ -1,26 +1,39 @@
-.PHONY: check fmt clippy test test-all bench audit deny coverage doc build clean
+.PHONY: build test bench fuzz bundle clean check
 
-check: fmt clippy test audit
-fmt:
-	cargo fmt --all -- --check
-clippy:
-	cargo clippy --all-targets --all-features -- -D warnings
-test:
-	cargo test
-test-all:
-	cargo test --all-features
-bench:
-	cargo bench --bench yantra_bench
-audit:
-	cargo audit
-deny:
-	cargo deny check
-coverage:
-	cargo tarpaulin --all-features --skip-clean
-doc:
-	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+CC := $(shell which cyrius 2>/dev/null || which cc3 2>/dev/null || echo $(HOME)/Repos/cyrius/build/cc3)
+
 build:
-	cargo build --release --all-features
+	@mkdir -p build
+	cat src/main.cyr | $(CC) > build/yukti 2>/dev/null
+	@chmod +x build/yukti
+	@echo "build/yukti: $$(wc -c < build/yukti) bytes"
+
+test:
+	@mkdir -p build
+	cat tests/yukti.tcyr | $(CC) > build/yukti_test 2>/dev/null
+	@chmod +x build/yukti_test
+	@./build/yukti_test 2>/dev/null
+
+bench:
+	@mkdir -p build
+	cat benches/bench.bcyr | $(CC) > build/yukti_bench 2>/dev/null
+	@chmod +x build/yukti_bench
+	@./build/yukti_bench 2>/dev/null
+
+fuzz:
+	@mkdir -p build
+	@for f in fuzz/*.fcyr; do \
+		name=$$(basename "$$f" .fcyr); \
+		cat "$$f" | $(CC) > "build/$$name" 2>/dev/null; \
+		chmod +x "build/$$name"; \
+		./build/$$name 2>/dev/null; \
+	done
+
+bundle:
+	@./scripts/bundle.sh
+
+check: build test fuzz
+	@echo "all checks passed"
+
 clean:
-	cargo clean
-	rm -rf coverage/
+	rm -rf build/

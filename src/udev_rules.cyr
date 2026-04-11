@@ -98,7 +98,7 @@ pub fn render_rule(rule) {
 # ---------------------------------------------------------------------------
 
 # Dangerous action keys that should be flagged
-fn is_dangerous_action(key_cstr) {
+fn _is_dangerous_action(key_cstr) {
     if (streq(key_cstr, "RUN")) { return 1; }
     if (streq(key_cstr, "PROGRAM")) { return 1; }
     if (streq(key_cstr, "IMPORT")) { return 1; }

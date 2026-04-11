@@ -246,42 +246,13 @@ pub fn device_info_from_udev(event) {
     return Ok(info);
 }
 
-# ---------------------------------------------------------------------------
-# Hex string to integer (for USB IDs)
-# ---------------------------------------------------------------------------
-
-fn str_to_hex(s) {
-    var data = str_data(s);
-    var len = str_len(s);
-    var val = 0;
-    for (var i = 0; i < len; i = i + 1) {
-        var c = load8(data + i);
-        val = val * 16;
-        if (c >= 48) { if (c <= 57) { val = val + (c - 48); continue; } }
-        if (c >= 97) { if (c <= 102) { val = val + (c - 87); continue; } }
-        if (c >= 65) { if (c <= 70) { val = val + (c - 55); continue; } }
-    }
-    return val;
-}
-
-# String to integer
-fn str_to_int(s) {
-    var data = str_data(s);
-    var len = str_len(s);
-    var val = 0;
-    for (var i = 0; i < len; i = i + 1) {
-        var c = load8(data + i);
-        if (c >= 48) { if (c <= 57) { val = val * 10 + (c - 48); continue; } }
-        break;
-    }
-    return val;
-}
+# Note: str_to_hex() and str_to_int() are provided by lib/str.cyr
 
 # ---------------------------------------------------------------------------
 # read_sysfs_attr — read a single sysfs attribute file, trimmed
 # ---------------------------------------------------------------------------
 
-fn read_sysfs_attr(base_path, attr_cstr) {
+fn _read_sysfs_attr(base_path, attr_cstr) {
     var sb = str_builder_new();
     str_builder_add_str(sb, base_path);
     str_builder_add_cstr(sb, "/");
@@ -313,43 +284,43 @@ pub fn enumerate_block_devices(sysfs_root) {
 # build_device_info_from_sysfs — construct DeviceInfo from sysfs attributes
 # ---------------------------------------------------------------------------
 
-fn build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
+fn _build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
     var props = map_new();
 
     # Read standard sysfs attributes
-    var vendor = read_sysfs_attr(sys_path, "device/vendor");
+    var vendor = _read_sysfs_attr(sys_path, "device/vendor");
     if (vendor != 0) { map_set(props, "ID_VENDOR", vendor); }
 
-    var model = read_sysfs_attr(sys_path, "device/model");
+    var model = _read_sysfs_attr(sys_path, "device/model");
     if (model != 0) { map_set(props, "ID_MODEL", model); }
 
-    var serial = read_sysfs_attr(sys_path, "device/serial");
+    var serial = _read_sysfs_attr(sys_path, "device/serial");
     if (serial != 0) { map_set(props, "ID_SERIAL_SHORT", serial); }
 
-    var removable = read_sysfs_attr(sys_path, "removable");
+    var removable = _read_sysfs_attr(sys_path, "removable");
     if (removable != 0) {
         if (str_eq_cstr(removable, "1")) {
             map_set(props, "UDISKS_REMOVABLE", str_from("1"));
         }
     }
 
-    var ro = read_sysfs_attr(sys_path, "ro");
+    var ro = _read_sysfs_attr(sys_path, "ro");
     if (ro != 0) {
         if (str_eq_cstr(ro, "1")) {
             map_set(props, "ID_FS_READONLY", str_from("1"));
         }
     }
 
-    var size_str = read_sysfs_attr(sys_path, "size");
+    var size_str = _read_sysfs_attr(sys_path, "size");
     if (size_str != 0) {
         map_set(props, "ID_PART_ENTRY_SIZE", size_str);
     }
 
     # USB IDs
-    var vid = read_sysfs_attr(sys_path, "device/idVendor");
+    var vid = _read_sysfs_attr(sys_path, "device/idVendor");
     if (vid != 0) { map_set(props, "ID_VENDOR_ID", vid); }
 
-    var pid = read_sysfs_attr(sys_path, "device/idProduct");
+    var pid = _read_sysfs_attr(sys_path, "device/idProduct");
     if (pid != 0) { map_set(props, "ID_MODEL_ID", pid); }
 
     # Build dev_path: /dev/<dev_name>
@@ -420,7 +391,7 @@ pub fn enumerate_devices(sysfs_root) {
         str_builder_add_str(path_sb, dev_name);
         var sys_path = str_builder_build(path_sb);
 
-        var info = build_device_info_from_sysfs(sys_path, dev_name, "disk");
+        var info = _build_device_info_from_sysfs(sys_path, dev_name, "disk");
         if (info != 0) {
             vec_push(devices, info);
         }
@@ -447,7 +418,7 @@ pub fn enumerate_devices(sysfs_root) {
                 var part_file = str_builder_build(chk_sb);
 
                 if (file_exists(str_cstr(part_file))) {
-                    var part_info = build_device_info_from_sysfs(part_path, part_name, "partition");
+                    var part_info = _build_device_info_from_sysfs(part_path, part_name, "partition");
                     if (part_info != 0) {
                         vec_push(devices, part_info);
                     }

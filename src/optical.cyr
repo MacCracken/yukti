@@ -188,7 +188,7 @@ pub fn toc_total_audio_duration_x100(toc) {
 # Helper: open optical device with O_RDONLY | O_NONBLOCK
 # ---------------------------------------------------------------------------
 
-fn open_optical_device(dev_path_cstr) {
+fn _open_optical_device(dev_path_cstr) {
     var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
     if (fd < 0) {
         var errno = 0 - fd;
@@ -201,7 +201,7 @@ fn open_optical_device(dev_path_cstr) {
 }
 
 # Map ioctl errno to error
-fn map_ioctl_error(dev_path_cstr, op) {
+fn _map_ioctl_error(dev_path_cstr, op) {
     # Read errno from last syscall failure - we pass it from caller
     return err_tray_failed(str_from(op));
 }
@@ -212,7 +212,7 @@ fn map_ioctl_error(dev_path_cstr, op) {
 
 pub fn open_tray(dev_path_cstr) {
     sakshi_span_enter("open_tray", 9);
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -234,7 +234,7 @@ pub fn open_tray(dev_path_cstr) {
 
 pub fn close_tray(dev_path_cstr) {
     sakshi_span_enter("close_tray", 10);
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -255,7 +255,7 @@ pub fn close_tray(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn drive_status(dev_path_cstr) {
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -279,7 +279,7 @@ pub fn drive_status(dev_path_cstr) {
 
 pub fn read_toc(dev_path_cstr) {
     sakshi_span_enter("read_toc", 8);
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -412,25 +412,25 @@ pub fn classify_toc_tracks(has_audio, has_data) {
 # ---------------------------------------------------------------------------
 
 pub fn detect_disc_type(media_type_cstr, has_audio, has_data) {
-    if (str_eq_ci(media_type_cstr, "cd")) {
+    if (_str_eq_ci(media_type_cstr, "cd")) {
         return classify_toc_tracks(has_audio, has_data);
     }
-    if (str_eq_ci(media_type_cstr, "cd-rom")) {
+    if (_str_eq_ci(media_type_cstr, "cd-rom")) {
         return classify_toc_tracks(has_audio, has_data);
     }
-    if (str_eq_ci(media_type_cstr, "dvd")) { return DT_DVD_ROM; }
-    if (str_eq_ci(media_type_cstr, "dvd-rom")) { return DT_DVD_ROM; }
-    if (str_eq_ci(media_type_cstr, "dvd-r")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd-rw")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd+r")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd+rw")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd-video")) { return DT_DVD_VIDEO; }
-    if (str_eq_ci(media_type_cstr, "bd")) { return DT_BLURAY; }
-    if (str_eq_ci(media_type_cstr, "blu-ray")) { return DT_BLURAY; }
-    if (str_eq_ci(media_type_cstr, "bd-rom")) { return DT_BLURAY; }
-    if (str_eq_ci(media_type_cstr, "bd-video")) { return DT_BLURAY_VIDEO; }
-    if (str_eq_ci(media_type_cstr, "blank")) { return DT_BLANK; }
-    if (str_eq_ci(media_type_cstr, "no_disc")) { return DT_BLANK; }
+    if (_str_eq_ci(media_type_cstr, "dvd")) { return DT_DVD_ROM; }
+    if (_str_eq_ci(media_type_cstr, "dvd-rom")) { return DT_DVD_ROM; }
+    if (_str_eq_ci(media_type_cstr, "dvd-r")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd-rw")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd+r")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd+rw")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd-video")) { return DT_DVD_VIDEO; }
+    if (_str_eq_ci(media_type_cstr, "bd")) { return DT_BLURAY; }
+    if (_str_eq_ci(media_type_cstr, "blu-ray")) { return DT_BLURAY; }
+    if (_str_eq_ci(media_type_cstr, "bd-rom")) { return DT_BLURAY; }
+    if (_str_eq_ci(media_type_cstr, "bd-video")) { return DT_BLURAY_VIDEO; }
+    if (_str_eq_ci(media_type_cstr, "blank")) { return DT_BLANK; }
+    if (_str_eq_ci(media_type_cstr, "no_disc")) { return DT_BLANK; }
     return DT_UNKNOWN;
 }
 

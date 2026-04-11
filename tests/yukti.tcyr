@@ -1433,25 +1433,25 @@ fn test_guid_helpers() {
     store8(&efi_guid + 10, 0x00); store8(&efi_guid + 11, 0xA0);
     store8(&efi_guid + 12, 0xC9); store8(&efi_guid + 13, 0x3E);
     store8(&efi_guid + 14, 0xC9); store8(&efi_guid + 15, 0x3B);
-    assert(is_efi_type_guid(&efi_guid), "efi guid match");
-    assert(is_linux_type_guid(&efi_guid) == 0, "efi not linux");
+    assert(_is_efi_type_guid(&efi_guid), "efi guid match");
+    assert(_is_linux_type_guid(&efi_guid) == 0, "efi not linux");
 
     # Linux filesystem GUID: 0FC63DAF -> AF 3D C6 0F ...
     var linux_guid[16];
     store8(&linux_guid, 0xAF); store8(&linux_guid + 1, 0x3D);
     store8(&linux_guid + 2, 0xC6); store8(&linux_guid + 3, 0x0F);
-    assert(is_linux_type_guid(&linux_guid), "linux guid match");
-    assert(is_efi_type_guid(&linux_guid) == 0, "linux not efi");
+    assert(_is_linux_type_guid(&linux_guid), "linux guid match");
+    assert(_is_efi_type_guid(&linux_guid) == 0, "linux not efi");
 
     # Zero GUID
     var zero_guid[16];
     for (var i = 0; i < 16; i = i + 1) { store8(&zero_guid + i, 0); }
-    assert(is_zero_guid(&zero_guid), "zero guid");
-    assert(is_zero_guid(&efi_guid) == 0, "efi not zero");
+    assert(_is_zero_guid(&zero_guid), "zero guid");
+    assert(_is_zero_guid(&efi_guid) == 0, "efi not zero");
 
     # Type string lookup
-    assert(streq(gpt_type_guid_to_str(&efi_guid), "EFI System"), "efi str");
-    assert(streq(gpt_type_guid_to_str(&linux_guid), "Linux filesystem"), "linux str");
+    assert(streq(_gpt_type_guid_to_str(&efi_guid), "EFI System"), "efi str");
+    assert(streq(_gpt_type_guid_to_str(&linux_guid), "Linux filesystem"), "linux str");
     return 0;
 }
 

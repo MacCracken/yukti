@@ -59,13 +59,15 @@ pub fn network_share_new(host, path, fs_type) {
     return ns;
 }
 
-pub fn ns_host(ns) { return load64(ns + NS_HOST); }
-pub fn ns_path(ns) { return load64(ns + NS_PATH); }
-pub fn ns_fs_type(ns) { return load64(ns + NS_FS_TYPE); }
-pub fn ns_port(ns) { return load64(ns + NS_PORT); }
-pub fn ns_username(ns) { return load64(ns + NS_USERNAME); }
-pub fn ns_password(ns) { return load64(ns + NS_PASSWORD); }
+# NetworkShare accessors
+pub fn ns_host(ns) { return load64(ns + NS_HOST); }       # Str: IP or hostname
+pub fn ns_path(ns) { return load64(ns + NS_PATH); }       # Str: remote path
+pub fn ns_fs_type(ns) { return load64(ns + NS_FS_TYPE); } # NetFsType enum
+pub fn ns_port(ns) { return load64(ns + NS_PORT); }       # Port (0 = default)
+pub fn ns_username(ns) { return load64(ns + NS_USERNAME); } # Str or 0
+pub fn ns_password(ns) { return load64(ns + NS_PASSWORD); } # Str or 0
 
+# NetworkShare setters (builder pattern — returns ns)
 pub fn ns_set_port(ns, port) { store64(ns + NS_PORT, port); return ns; }
 pub fn ns_set_username(ns, user) { store64(ns + NS_USERNAME, user); return ns; }
 pub fn ns_set_password(ns, pass) { store64(ns + NS_PASSWORD, pass); return ns; }
@@ -110,7 +112,7 @@ pub fn network_mount_source(share) {
 # Build mount data options string for SMB/NFS
 # ---------------------------------------------------------------------------
 
-fn build_smb_options(share) {
+fn _build_smb_options(share) {
     var sb = str_builder_new();
 
     var user = ns_username(share);
@@ -137,7 +139,7 @@ fn build_smb_options(share) {
     return str_builder_build(sb);
 }
 
-fn build_nfs_options(share) {
+fn _build_nfs_options(share) {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "nolock");
 
@@ -177,9 +179,9 @@ pub fn network_mount(share, mount_point_cstr) {
     # Build options
     var options = 0;
     if (fs_type == NET_FS_SMB) {
-        options = build_smb_options(share);
+        options = _build_smb_options(share);
     } else {
-        options = build_nfs_options(share);
+        options = _build_nfs_options(share);
     }
     var options_cstr = str_cstr(options);
 

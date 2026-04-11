@@ -48,7 +48,7 @@ pub fn device_db_handle() {
 # Device key — serial if available, else vendor:model
 # ---------------------------------------------------------------------------
 
-fn device_key(info) {
+fn _device_key(info) {
     var serial = di_serial(info);
     if (serial != 0) {
         if (str_len(serial) > 0) {
@@ -74,7 +74,7 @@ fn device_key(info) {
 pub fn device_db_record_seen(info) {
     if (_yukti_db == 0) { return 0; }
 
-    var key = device_key(info);
+    var key = _device_key(info);
     var key_cstr = str_cstr(key);
     var vendor = di_vendor(info);
     var model = di_model(info);
@@ -144,7 +144,7 @@ enum MountAction {
 pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     if (_yukti_db == 0) { return 0; }
 
-    var key = device_key(info);
+    var key = _device_key(info);
     var dev_path = di_dev_path(info);
 
     var ts[16];
@@ -257,10 +257,11 @@ pub fn device_db_get_preference(serial) {
     return pref;
 }
 
-pub fn pref_mount_point(p) { return load64(p); }
-pub fn pref_read_only(p) { return load64(p + 8); }
-pub fn pref_fs_type(p) { return load64(p + 16); }
-pub fn pref_auto_mount(p) { return load64(p + 24); }
+# Preference accessors
+pub fn pref_mount_point(p) { return load64(p); }     # Str: preferred mount point (0 = auto)
+pub fn pref_read_only(p) { return load64(p + 8); }   # 0/1
+pub fn pref_fs_type(p) { return load64(p + 16); }    # Str: filesystem type (0 = auto)
+pub fn pref_auto_mount(p) { return load64(p + 24); } # 0/1: auto-mount on plug
 
 # ---------------------------------------------------------------------------
 # Queries — device history

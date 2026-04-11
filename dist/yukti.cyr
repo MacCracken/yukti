@@ -1,5 +1,5 @@
 # yukti.cyr — device abstraction for AGNOS
-# Bundled distribution of yukti v1.1.0
+# Bundled distribution of yukti v1.1.1
 # Source: https://github.com/MacCracken/yukti
 # License: GPL-3.0-only
 #
@@ -935,7 +935,7 @@ pub fn filesystem_to_str(fs) {
 }
 
 # Case-insensitive string comparison helper
-fn str_eq_ci(a, b) {
+fn _str_eq_ci(a, b) {
     var a_len = strlen(a);
     var b_len = strlen(b);
     if (a_len != b_len) { return 0; }
@@ -952,27 +952,27 @@ fn str_eq_ci(a, b) {
 
 # Parse filesystem type from string (case-insensitive, zero-alloc for known types)
 pub fn filesystem_from_str(s) {
-    if (str_eq_ci(s, "ext4")) { return FS_EXT4; }
-    if (str_eq_ci(s, "btrfs")) { return FS_BTRFS; }
-    if (str_eq_ci(s, "xfs")) { return FS_XFS; }
-    if (str_eq_ci(s, "vfat")) { return FS_VFAT; }
-    if (str_eq_ci(s, "fat32")) { return FS_VFAT; }
-    if (str_eq_ci(s, "fat16")) { return FS_VFAT; }
-    if (str_eq_ci(s, "ntfs")) { return FS_NTFS; }
-    if (str_eq_ci(s, "exfat")) { return FS_EXFAT; }
-    if (str_eq_ci(s, "iso9660")) { return FS_ISO9660; }
-    if (str_eq_ci(s, "udf")) { return FS_UDF; }
-    if (str_eq_ci(s, "hfsplus")) { return FS_HFSPLUS; }
-    if (str_eq_ci(s, "hfs+")) { return FS_HFSPLUS; }
-    if (str_eq_ci(s, "swap")) { return FS_SWAP; }
-    if (str_eq_ci(s, "crypto_luks")) { return FS_LUKS; }
-    if (str_eq_ci(s, "luks")) { return FS_LUKS; }
-    if (str_eq_ci(s, "f2fs")) { return FS_F2FS; }
-    if (str_eq_ci(s, "erofs")) { return FS_EROFS; }
-    if (str_eq_ci(s, "tmpfs")) { return FS_TMPFS; }
-    if (str_eq_ci(s, "cifs")) { return FS_CIFS; }
-    if (str_eq_ci(s, "nfs")) { return FS_NFS; }
-    if (str_eq_ci(s, "nfs4")) { return FS_NFS; }
+    if (_str_eq_ci(s, "ext4")) { return FS_EXT4; }
+    if (_str_eq_ci(s, "btrfs")) { return FS_BTRFS; }
+    if (_str_eq_ci(s, "xfs")) { return FS_XFS; }
+    if (_str_eq_ci(s, "vfat")) { return FS_VFAT; }
+    if (_str_eq_ci(s, "fat32")) { return FS_VFAT; }
+    if (_str_eq_ci(s, "fat16")) { return FS_VFAT; }
+    if (_str_eq_ci(s, "ntfs")) { return FS_NTFS; }
+    if (_str_eq_ci(s, "exfat")) { return FS_EXFAT; }
+    if (_str_eq_ci(s, "iso9660")) { return FS_ISO9660; }
+    if (_str_eq_ci(s, "udf")) { return FS_UDF; }
+    if (_str_eq_ci(s, "hfsplus")) { return FS_HFSPLUS; }
+    if (_str_eq_ci(s, "hfs+")) { return FS_HFSPLUS; }
+    if (_str_eq_ci(s, "swap")) { return FS_SWAP; }
+    if (_str_eq_ci(s, "crypto_luks")) { return FS_LUKS; }
+    if (_str_eq_ci(s, "luks")) { return FS_LUKS; }
+    if (_str_eq_ci(s, "f2fs")) { return FS_F2FS; }
+    if (_str_eq_ci(s, "erofs")) { return FS_EROFS; }
+    if (_str_eq_ci(s, "tmpfs")) { return FS_TMPFS; }
+    if (_str_eq_ci(s, "cifs")) { return FS_CIFS; }
+    if (_str_eq_ci(s, "nfs")) { return FS_NFS; }
+    if (_str_eq_ci(s, "nfs4")) { return FS_NFS; }
     return FS_UNKNOWN;
 }
 
@@ -1101,7 +1101,7 @@ pub fn mr_read_only(r) { return load64(r + 32); }
 # Forbidden system mount points
 # ---------------------------------------------------------------------------
 
-fn is_forbidden_mount(path_cstr) {
+fn _is_forbidden_mount(path_cstr) {
     if (streq(path_cstr, "/")) { return 1; }
     if (streq(path_cstr, "/bin")) { return 1; }
     if (streq(path_cstr, "/sbin")) { return 1; }
@@ -1240,7 +1240,7 @@ pub fn validate_mount_point(path_cstr) {
     }
 
     # Must not be forbidden
-    if (is_forbidden_mount(path_cstr)) {
+    if (_is_forbidden_mount(path_cstr)) {
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "cannot mount on system directory: ");
         str_builder_add_cstr(sb, path_cstr);
@@ -1261,7 +1261,7 @@ enum MountFlag {
     MS_NOEXEC = 8;
 }
 
-fn parse_mount_flags(options_str, read_only) {
+fn _parse_mount_flags(options_str, read_only) {
     var flags = 0;
     if (read_only) { flags = flags | MS_RDONLY; }
 
@@ -1283,7 +1283,7 @@ fn parse_mount_flags(options_str, read_only) {
 # Filesystem types to try when auto-detecting
 # ---------------------------------------------------------------------------
 
-fn get_auto_fs_type(idx) {
+fn _get_auto_fs_type(idx) {
     if (idx == 0) { return "ext4"; }
     if (idx == 1) { return "vfat"; }
     if (idx == 2) { return "ntfs"; }
@@ -1344,7 +1344,7 @@ pub fn storage_mount(dev_path_cstr, options) {
 
     var read_only = load64(options + 8);
     var opts_str = load64(options + 16);
-    var flags = parse_mount_flags(opts_str, read_only);
+    var flags = _parse_mount_flags(opts_str, read_only);
 
     var fs_type_str = load64(options + 24);
 
@@ -1365,7 +1365,7 @@ pub fn storage_mount(dev_path_cstr, options) {
     # Auto-detect filesystem type
     var last_errno = 0;
     for (var i = 0; i < AUTO_FS_COUNT; i = i + 1) {
-        var fs_try = get_auto_fs_type(i);
+        var fs_try = _get_auto_fs_type(i);
         if (fs_try == 0) { break; }
         var r = syscall(165, dev_path_cstr, mount_cstr, fs_try, flags, 0);
         if (r == 0) {
@@ -1696,7 +1696,7 @@ pub fn toc_total_audio_duration_x100(toc) {
 # Helper: open optical device with O_RDONLY | O_NONBLOCK
 # ---------------------------------------------------------------------------
 
-fn open_optical_device(dev_path_cstr) {
+fn _open_optical_device(dev_path_cstr) {
     var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
     if (fd < 0) {
         var errno = 0 - fd;
@@ -1709,7 +1709,7 @@ fn open_optical_device(dev_path_cstr) {
 }
 
 # Map ioctl errno to error
-fn map_ioctl_error(dev_path_cstr, op) {
+fn _map_ioctl_error(dev_path_cstr, op) {
     # Read errno from last syscall failure - we pass it from caller
     return err_tray_failed(str_from(op));
 }
@@ -1720,7 +1720,7 @@ fn map_ioctl_error(dev_path_cstr, op) {
 
 pub fn open_tray(dev_path_cstr) {
     sakshi_span_enter("open_tray", 9);
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -1742,7 +1742,7 @@ pub fn open_tray(dev_path_cstr) {
 
 pub fn close_tray(dev_path_cstr) {
     sakshi_span_enter("close_tray", 10);
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -1763,7 +1763,7 @@ pub fn close_tray(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn drive_status(dev_path_cstr) {
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -1787,7 +1787,7 @@ pub fn drive_status(dev_path_cstr) {
 
 pub fn read_toc(dev_path_cstr) {
     sakshi_span_enter("read_toc", 8);
-    var fd_r = open_optical_device(dev_path_cstr);
+    var fd_r = _open_optical_device(dev_path_cstr);
     if (is_ok(fd_r) == 0) { return fd_r; }
     var fd = payload(fd_r);
 
@@ -1920,25 +1920,25 @@ pub fn classify_toc_tracks(has_audio, has_data) {
 # ---------------------------------------------------------------------------
 
 pub fn detect_disc_type(media_type_cstr, has_audio, has_data) {
-    if (str_eq_ci(media_type_cstr, "cd")) {
+    if (_str_eq_ci(media_type_cstr, "cd")) {
         return classify_toc_tracks(has_audio, has_data);
     }
-    if (str_eq_ci(media_type_cstr, "cd-rom")) {
+    if (_str_eq_ci(media_type_cstr, "cd-rom")) {
         return classify_toc_tracks(has_audio, has_data);
     }
-    if (str_eq_ci(media_type_cstr, "dvd")) { return DT_DVD_ROM; }
-    if (str_eq_ci(media_type_cstr, "dvd-rom")) { return DT_DVD_ROM; }
-    if (str_eq_ci(media_type_cstr, "dvd-r")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd-rw")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd+r")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd+rw")) { return DT_DVD_WRITABLE; }
-    if (str_eq_ci(media_type_cstr, "dvd-video")) { return DT_DVD_VIDEO; }
-    if (str_eq_ci(media_type_cstr, "bd")) { return DT_BLURAY; }
-    if (str_eq_ci(media_type_cstr, "blu-ray")) { return DT_BLURAY; }
-    if (str_eq_ci(media_type_cstr, "bd-rom")) { return DT_BLURAY; }
-    if (str_eq_ci(media_type_cstr, "bd-video")) { return DT_BLURAY_VIDEO; }
-    if (str_eq_ci(media_type_cstr, "blank")) { return DT_BLANK; }
-    if (str_eq_ci(media_type_cstr, "no_disc")) { return DT_BLANK; }
+    if (_str_eq_ci(media_type_cstr, "dvd")) { return DT_DVD_ROM; }
+    if (_str_eq_ci(media_type_cstr, "dvd-rom")) { return DT_DVD_ROM; }
+    if (_str_eq_ci(media_type_cstr, "dvd-r")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd-rw")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd+r")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd+rw")) { return DT_DVD_WRITABLE; }
+    if (_str_eq_ci(media_type_cstr, "dvd-video")) { return DT_DVD_VIDEO; }
+    if (_str_eq_ci(media_type_cstr, "bd")) { return DT_BLURAY; }
+    if (_str_eq_ci(media_type_cstr, "blu-ray")) { return DT_BLURAY; }
+    if (_str_eq_ci(media_type_cstr, "bd-rom")) { return DT_BLURAY; }
+    if (_str_eq_ci(media_type_cstr, "bd-video")) { return DT_BLURAY_VIDEO; }
+    if (_str_eq_ci(media_type_cstr, "blank")) { return DT_BLANK; }
+    if (_str_eq_ci(media_type_cstr, "no_disc")) { return DT_BLANK; }
     return DT_UNKNOWN;
 }
 
@@ -2209,42 +2209,13 @@ pub fn device_info_from_udev(event) {
     return Ok(info);
 }
 
-# ---------------------------------------------------------------------------
-# Hex string to integer (for USB IDs)
-# ---------------------------------------------------------------------------
-
-fn str_to_hex(s) {
-    var data = str_data(s);
-    var len = str_len(s);
-    var val = 0;
-    for (var i = 0; i < len; i = i + 1) {
-        var c = load8(data + i);
-        val = val * 16;
-        if (c >= 48) { if (c <= 57) { val = val + (c - 48); continue; } }
-        if (c >= 97) { if (c <= 102) { val = val + (c - 87); continue; } }
-        if (c >= 65) { if (c <= 70) { val = val + (c - 55); continue; } }
-    }
-    return val;
-}
-
-# String to integer
-fn str_to_int(s) {
-    var data = str_data(s);
-    var len = str_len(s);
-    var val = 0;
-    for (var i = 0; i < len; i = i + 1) {
-        var c = load8(data + i);
-        if (c >= 48) { if (c <= 57) { val = val * 10 + (c - 48); continue; } }
-        break;
-    }
-    return val;
-}
+# Note: str_to_hex() and str_to_int() are provided by lib/str.cyr
 
 # ---------------------------------------------------------------------------
 # read_sysfs_attr — read a single sysfs attribute file, trimmed
 # ---------------------------------------------------------------------------
 
-fn read_sysfs_attr(base_path, attr_cstr) {
+fn _read_sysfs_attr(base_path, attr_cstr) {
     var sb = str_builder_new();
     str_builder_add_str(sb, base_path);
     str_builder_add_cstr(sb, "/");
@@ -2276,43 +2247,43 @@ pub fn enumerate_block_devices(sysfs_root) {
 # build_device_info_from_sysfs — construct DeviceInfo from sysfs attributes
 # ---------------------------------------------------------------------------
 
-fn build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
+fn _build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
     var props = map_new();
 
     # Read standard sysfs attributes
-    var vendor = read_sysfs_attr(sys_path, "device/vendor");
+    var vendor = _read_sysfs_attr(sys_path, "device/vendor");
     if (vendor != 0) { map_set(props, "ID_VENDOR", vendor); }
 
-    var model = read_sysfs_attr(sys_path, "device/model");
+    var model = _read_sysfs_attr(sys_path, "device/model");
     if (model != 0) { map_set(props, "ID_MODEL", model); }
 
-    var serial = read_sysfs_attr(sys_path, "device/serial");
+    var serial = _read_sysfs_attr(sys_path, "device/serial");
     if (serial != 0) { map_set(props, "ID_SERIAL_SHORT", serial); }
 
-    var removable = read_sysfs_attr(sys_path, "removable");
+    var removable = _read_sysfs_attr(sys_path, "removable");
     if (removable != 0) {
         if (str_eq_cstr(removable, "1")) {
             map_set(props, "UDISKS_REMOVABLE", str_from("1"));
         }
     }
 
-    var ro = read_sysfs_attr(sys_path, "ro");
+    var ro = _read_sysfs_attr(sys_path, "ro");
     if (ro != 0) {
         if (str_eq_cstr(ro, "1")) {
             map_set(props, "ID_FS_READONLY", str_from("1"));
         }
     }
 
-    var size_str = read_sysfs_attr(sys_path, "size");
+    var size_str = _read_sysfs_attr(sys_path, "size");
     if (size_str != 0) {
         map_set(props, "ID_PART_ENTRY_SIZE", size_str);
     }
 
     # USB IDs
-    var vid = read_sysfs_attr(sys_path, "device/idVendor");
+    var vid = _read_sysfs_attr(sys_path, "device/idVendor");
     if (vid != 0) { map_set(props, "ID_VENDOR_ID", vid); }
 
-    var pid = read_sysfs_attr(sys_path, "device/idProduct");
+    var pid = _read_sysfs_attr(sys_path, "device/idProduct");
     if (pid != 0) { map_set(props, "ID_MODEL_ID", pid); }
 
     # Build dev_path: /dev/<dev_name>
@@ -2383,7 +2354,7 @@ pub fn enumerate_devices(sysfs_root) {
         str_builder_add_str(path_sb, dev_name);
         var sys_path = str_builder_build(path_sb);
 
-        var info = build_device_info_from_sysfs(sys_path, dev_name, "disk");
+        var info = _build_device_info_from_sysfs(sys_path, dev_name, "disk");
         if (info != 0) {
             vec_push(devices, info);
         }
@@ -2410,7 +2381,7 @@ pub fn enumerate_devices(sysfs_root) {
                 var part_file = str_builder_build(chk_sb);
 
                 if (file_exists(str_cstr(part_file))) {
-                    var part_info = build_device_info_from_sysfs(part_path, part_name, "partition");
+                    var part_info = _build_device_info_from_sysfs(part_path, part_name, "partition");
                     if (part_info != 0) {
                         vec_push(devices, part_info);
                     }
@@ -3019,7 +2990,7 @@ pub fn render_rule(rule) {
 # ---------------------------------------------------------------------------
 
 # Dangerous action keys that should be flagged
-fn is_dangerous_action(key_cstr) {
+fn _is_dangerous_action(key_cstr) {
     if (streq(key_cstr, "RUN")) { return 1; }
     if (streq(key_cstr, "PROGRAM")) { return 1; }
     if (streq(key_cstr, "IMPORT")) { return 1; }
@@ -3355,14 +3326,15 @@ pub fn partition_entry_new() {
     return pe;
 }
 
-pub fn pe_index(pe) { return load64(pe + PE_INDEX); }
-pub fn pe_type_id(pe) { return load64(pe + PE_TYPE_ID); }
-pub fn pe_start_lba(pe) { return load64(pe + PE_START_LBA); }
-pub fn pe_size_sectors(pe) { return load64(pe + PE_SIZE_SECTORS); }
-pub fn pe_size_bytes(pe) { return load64(pe + PE_SIZE_BYTES); }
-pub fn pe_bootable(pe) { return load64(pe + PE_BOOTABLE); }
-pub fn pe_name(pe) { return load64(pe + PE_NAME); }
-pub fn pe_is_efi(pe) { return load64(pe + PE_IS_EFI); }
+# Partition entry accessors
+pub fn pe_index(pe) { return load64(pe + PE_INDEX); }         # Partition number (0-based)
+pub fn pe_type_id(pe) { return load64(pe + PE_TYPE_ID); }     # MBR type byte (0 for GPT)
+pub fn pe_start_lba(pe) { return load64(pe + PE_START_LBA); } # Starting LBA
+pub fn pe_size_sectors(pe) { return load64(pe + PE_SIZE_SECTORS); } # Size in 512-byte sectors
+pub fn pe_size_bytes(pe) { return load64(pe + PE_SIZE_BYTES); }    # Size in bytes
+pub fn pe_bootable(pe) { return load64(pe + PE_BOOTABLE); }   # 1 if bootable
+pub fn pe_name(pe) { return load64(pe + PE_NAME); }           # Str: GPT name or MBR type desc
+pub fn pe_is_efi(pe) { return load64(pe + PE_IS_EFI); }       # 1 if EFI System Partition
 
 # ---------------------------------------------------------------------------
 # PartitionTable struct — result of reading a partition table
@@ -3380,9 +3352,10 @@ pub fn partition_table_new(table_type, entries, disk_guid) {
     return pt;
 }
 
-pub fn pt_type(pt) { return load64(pt); }
-pub fn pt_entries(pt) { return load64(pt + 8); }
-pub fn pt_disk_guid(pt) { return load64(pt + 16); }
+# Partition table accessors
+pub fn pt_type(pt) { return load64(pt); }          # PT_MBR, PT_GPT, or PT_NONE
+pub fn pt_entries(pt) { return load64(pt + 8); }   # Vec of PartitionEntry ptrs
+pub fn pt_disk_guid(pt) { return load64(pt + 16); } # Str: GPT disk GUID (0 for MBR)
 
 pub fn pt_type_to_str(t) {
     if (t == PT_MBR) { return "mbr"; }
@@ -3417,7 +3390,7 @@ pub fn mbr_type_to_str(type_id) {
 # Read 512 bytes from a block device at a given LBA
 # ---------------------------------------------------------------------------
 
-fn read_sector(fd, lba, buf) {
+fn _read_sector(fd, lba, buf) {
     # lseek to lba * 512: SYS_LSEEK = 8, SEEK_SET = 0
     var offset = lba * SECTOR_SIZE;
     var r = syscall(8, fd, offset, 0);
@@ -3427,7 +3400,7 @@ fn read_sector(fd, lba, buf) {
 }
 
 # Read N bytes at an exact byte offset
-fn read_at(fd, byte_offset, buf, count) {
+fn _read_at(fd, byte_offset, buf, count) {
     var r = syscall(8, fd, byte_offset, 0);
     if (r < 0) { return r; }
     return syscall(0, fd, buf, count);
@@ -3437,7 +3410,7 @@ fn read_at(fd, byte_offset, buf, count) {
 # Parse MBR partition table from sector 0 buffer
 # ---------------------------------------------------------------------------
 
-fn parse_mbr_entries(buf) {
+fn _parse_mbr_entries(buf) {
     var entries = vec_new();
 
     for (var i = 0; i < MBR_MAX_PARTS; i = i + 1) {
@@ -3485,7 +3458,7 @@ fn parse_mbr_entries(buf) {
 # ---------------------------------------------------------------------------
 
 # Format a 16-byte GUID buffer as string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-fn format_guid(buf) {
+fn _format_guid(buf) {
     var sb = str_builder_new();
     # GUID is stored in mixed-endian: first 3 fields are little-endian
     # Bytes: 0-3 (LE u32), 4-5 (LE u16), 6-7 (LE u16), 8-9 (BE), 10-15 (BE)
@@ -3527,7 +3500,7 @@ fn _hex2(sb, byte) {
 # Linux swap: 0657FD6D-A4AB-43C4-84E5-0933C84B4F4F
 # Microsoft Basic Data: EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
 
-fn is_efi_type_guid(guid_buf) {
+fn _is_efi_type_guid(guid_buf) {
     # Check first 4 bytes (LE): C12A7328 -> bytes: 28 73 2A C1
     if (load8(guid_buf) == 0x28) {
         if (load8(guid_buf + 1) == 0x73) {
@@ -3541,7 +3514,7 @@ fn is_efi_type_guid(guid_buf) {
     return 0;
 }
 
-fn is_linux_type_guid(guid_buf) {
+fn _is_linux_type_guid(guid_buf) {
     # 0FC63DAF -> bytes: AF 3D C6 0F
     if (load8(guid_buf) == 0xAF) {
         if (load8(guid_buf + 1) == 0x3D) {
@@ -3553,7 +3526,7 @@ fn is_linux_type_guid(guid_buf) {
     return 0;
 }
 
-fn is_linux_swap_guid(guid_buf) {
+fn _is_linux_swap_guid(guid_buf) {
     # 0657FD6D -> bytes: 6D FD 57 06
     if (load8(guid_buf) == 0x6D) {
         if (load8(guid_buf + 1) == 0xFD) {
@@ -3565,7 +3538,7 @@ fn is_linux_swap_guid(guid_buf) {
     return 0;
 }
 
-fn is_msdata_type_guid(guid_buf) {
+fn _is_msdata_type_guid(guid_buf) {
     # EBD0A0A2 -> bytes: A2 A0 D0 EB
     if (load8(guid_buf) == 0xA2) {
         if (load8(guid_buf + 1) == 0xA0) {
@@ -3577,16 +3550,16 @@ fn is_msdata_type_guid(guid_buf) {
     return 0;
 }
 
-fn gpt_type_guid_to_str(guid_buf) {
-    if (is_efi_type_guid(guid_buf)) { return "EFI System"; }
-    if (is_linux_type_guid(guid_buf)) { return "Linux filesystem"; }
-    if (is_linux_swap_guid(guid_buf)) { return "Linux swap"; }
-    if (is_msdata_type_guid(guid_buf)) { return "Microsoft Basic Data"; }
-    return format_guid(guid_buf);
+fn _gpt_type_guid_to_str(guid_buf) {
+    if (_is_efi_type_guid(guid_buf)) { return "EFI System"; }
+    if (_is_linux_type_guid(guid_buf)) { return "Linux filesystem"; }
+    if (_is_linux_swap_guid(guid_buf)) { return "Linux swap"; }
+    if (_is_msdata_type_guid(guid_buf)) { return "Microsoft Basic Data"; }
+    return _format_guid(guid_buf);
 }
 
 # Check if GUID is all zeros (unused entry)
-fn is_zero_guid(buf) {
+fn _is_zero_guid(buf) {
     for (var i = 0; i < 16; i = i + 1) {
         if (load8(buf + i) != 0) { return 0; }
     }
@@ -3597,7 +3570,7 @@ fn is_zero_guid(buf) {
 # Parse GPT name field — 72 bytes of UTF-16LE, extract ASCII
 # ---------------------------------------------------------------------------
 
-fn parse_gpt_name(buf) {
+fn _parse_gpt_name(buf) {
     var sb = str_builder_new();
     for (var i = 0; i < 36; i = i + 1) {
         var lo = load8(buf + i * 2);
@@ -3615,13 +3588,13 @@ fn parse_gpt_name(buf) {
 # Parse GPT partition entries
 # ---------------------------------------------------------------------------
 
-fn parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
+fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
     var entries = vec_new();
     var buf[128];
     var byte_offset = entry_start_lba * SECTOR_SIZE;
 
     for (var i = 0; i < num_entries; i = i + 1) {
-        var n = read_at(fd, byte_offset + i * entry_size, &buf, entry_size);
+        var n = _read_at(fd, byte_offset + i * entry_size, &buf, entry_size);
         if (n < entry_size) { break; }
 
         # GPT partition entry layout (128 bytes):
@@ -3633,7 +3606,7 @@ fn parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
         # 56-127: Name (72 bytes, UTF-16LE)
 
         # Skip empty entries (zero type GUID)
-        if (is_zero_guid(&buf)) { continue; }
+        if (_is_zero_guid(&buf)) { continue; }
 
         var start_lba = load64(&buf + 32);
         var end_lba = load64(&buf + 40);
@@ -3651,9 +3624,9 @@ fn parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
         store64(pe + PE_BOOTABLE, (attrs >> 2) & 1);
 
         # Name
-        var name = parse_gpt_name(&buf + 56);
+        var name = _parse_gpt_name(&buf + 56);
         if (str_len(name) == 0) {
-            name = str_from(gpt_type_guid_to_str(&buf));
+            name = str_from(_gpt_type_guid_to_str(&buf));
         }
         store64(pe + PE_NAME, name);
 
@@ -3662,7 +3635,7 @@ fn parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
         store64(pe + PE_TYPE_GUID_LO, load64(&buf + 8));
 
         # EFI detection
-        store64(pe + PE_IS_EFI, is_efi_type_guid(&buf));
+        store64(pe + PE_IS_EFI, _is_efi_type_guid(&buf));
 
         vec_push(entries, pe);
     }
@@ -3686,7 +3659,7 @@ pub fn read_partition_table(dev_path_cstr) {
 
     # Read sector 0 (MBR / protective MBR)
     var sector0[512];
-    var n = read_sector(fd, 0, &sector0);
+    var n = _read_sector(fd, 0, &sector0);
     if (n < SECTOR_SIZE) {
         syscall(SYS_CLOSE, fd);
         sakshi_span_exit();
@@ -3710,7 +3683,7 @@ pub fn read_partition_table(dev_path_cstr) {
     if (mbr_type0 == MBR_TYPE_GPT_PROTECTIVE) {
         # Read GPT header at LBA 1
         var gpt_hdr[512];
-        n = read_sector(fd, GPT_HEADER_LBA, &gpt_hdr);
+        n = _read_sector(fd, GPT_HEADER_LBA, &gpt_hdr);
         if (n < SECTOR_SIZE) {
             syscall(SYS_CLOSE, fd);
             sakshi_span_exit();
@@ -3752,9 +3725,9 @@ pub fn read_partition_table(dev_path_cstr) {
         if (num_entries > GPT_MAX_ENTRIES) { num_entries = GPT_MAX_ENTRIES; }
 
         # Disk GUID
-        var disk_guid = format_guid(&gpt_hdr + 56);
+        var disk_guid = _format_guid(&gpt_hdr + 56);
 
-        var entries = parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size);
+        var entries = _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size);
 
         syscall(SYS_CLOSE, fd);
         sakshi_span_exit();
@@ -3762,7 +3735,7 @@ pub fn read_partition_table(dev_path_cstr) {
     }
 
     # Plain MBR
-    var entries = parse_mbr_entries(&sector0);
+    var entries = _parse_mbr_entries(&sector0);
     syscall(SYS_CLOSE, fd);
     sakshi_span_exit();
     return Ok(partition_table_new(PT_MBR, entries, 0));
@@ -3864,7 +3837,7 @@ pub fn device_db_handle() {
 # Device key — serial if available, else vendor:model
 # ---------------------------------------------------------------------------
 
-fn device_key(info) {
+fn _device_key(info) {
     var serial = di_serial(info);
     if (serial != 0) {
         if (str_len(serial) > 0) {
@@ -3890,7 +3863,7 @@ fn device_key(info) {
 pub fn device_db_record_seen(info) {
     if (_yukti_db == 0) { return 0; }
 
-    var key = device_key(info);
+    var key = _device_key(info);
     var key_cstr = str_cstr(key);
     var vendor = di_vendor(info);
     var model = di_model(info);
@@ -3960,7 +3933,7 @@ enum MountAction {
 pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     if (_yukti_db == 0) { return 0; }
 
-    var key = device_key(info);
+    var key = _device_key(info);
     var dev_path = di_dev_path(info);
 
     var ts[16];
@@ -4073,10 +4046,11 @@ pub fn device_db_get_preference(serial) {
     return pref;
 }
 
-pub fn pref_mount_point(p) { return load64(p); }
-pub fn pref_read_only(p) { return load64(p + 8); }
-pub fn pref_fs_type(p) { return load64(p + 16); }
-pub fn pref_auto_mount(p) { return load64(p + 24); }
+# Preference accessors
+pub fn pref_mount_point(p) { return load64(p); }     # Str: preferred mount point (0 = auto)
+pub fn pref_read_only(p) { return load64(p + 8); }   # 0/1
+pub fn pref_fs_type(p) { return load64(p + 16); }    # Str: filesystem type (0 = auto)
+pub fn pref_auto_mount(p) { return load64(p + 24); } # 0/1: auto-mount on plug
 
 # ---------------------------------------------------------------------------
 # Queries — device history
@@ -4190,13 +4164,15 @@ pub fn network_share_new(host, path, fs_type) {
     return ns;
 }
 
-pub fn ns_host(ns) { return load64(ns + NS_HOST); }
-pub fn ns_path(ns) { return load64(ns + NS_PATH); }
-pub fn ns_fs_type(ns) { return load64(ns + NS_FS_TYPE); }
-pub fn ns_port(ns) { return load64(ns + NS_PORT); }
-pub fn ns_username(ns) { return load64(ns + NS_USERNAME); }
-pub fn ns_password(ns) { return load64(ns + NS_PASSWORD); }
+# NetworkShare accessors
+pub fn ns_host(ns) { return load64(ns + NS_HOST); }       # Str: IP or hostname
+pub fn ns_path(ns) { return load64(ns + NS_PATH); }       # Str: remote path
+pub fn ns_fs_type(ns) { return load64(ns + NS_FS_TYPE); } # NetFsType enum
+pub fn ns_port(ns) { return load64(ns + NS_PORT); }       # Port (0 = default)
+pub fn ns_username(ns) { return load64(ns + NS_USERNAME); } # Str or 0
+pub fn ns_password(ns) { return load64(ns + NS_PASSWORD); } # Str or 0
 
+# NetworkShare setters (builder pattern — returns ns)
 pub fn ns_set_port(ns, port) { store64(ns + NS_PORT, port); return ns; }
 pub fn ns_set_username(ns, user) { store64(ns + NS_USERNAME, user); return ns; }
 pub fn ns_set_password(ns, pass) { store64(ns + NS_PASSWORD, pass); return ns; }
@@ -4241,7 +4217,7 @@ pub fn network_mount_source(share) {
 # Build mount data options string for SMB/NFS
 # ---------------------------------------------------------------------------
 
-fn build_smb_options(share) {
+fn _build_smb_options(share) {
     var sb = str_builder_new();
 
     var user = ns_username(share);
@@ -4268,7 +4244,7 @@ fn build_smb_options(share) {
     return str_builder_build(sb);
 }
 
-fn build_nfs_options(share) {
+fn _build_nfs_options(share) {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "nolock");
 
@@ -4308,9 +4284,9 @@ pub fn network_mount(share, mount_point_cstr) {
     # Build options
     var options = 0;
     if (fs_type == NET_FS_SMB) {
-        options = build_smb_options(share);
+        options = _build_smb_options(share);
     } else {
-        options = build_nfs_options(share);
+        options = _build_nfs_options(share);
     }
     var options_cstr = str_cstr(options);
 

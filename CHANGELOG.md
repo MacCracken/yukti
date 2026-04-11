@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-04-11
+
+### Fixed
+- All private helper functions consistently prefixed with `_` (storage, optical, udev, partition, device_db, network)
+- Removed duplicate `str_to_hex()` and `str_to_int()` from udev.cyr (now provided by lib/str.cyr)
+- Added inline doc comments to all accessor functions (partition, network, device_db)
+- Zero compiler warnings on clean build
+
 ## [1.1.0] — 2026-04-11
 
 ### Added

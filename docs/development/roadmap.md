@@ -25,6 +25,12 @@
 
 ## Next Release
 
+### Dual-mode architecture (kernel + userland)
+- [ ] Extract kernel-safe core module: device structs, PCI class/vendor enums, DeviceType constants — pure data, no syscalls
+- [ ] Keep Linux sysfs/udev layer as optional module on top
+- [ ] AGNOS kernel can consume the core module bare-metal for PCI device identification
+- [ ] Userland (kybernet, argonaut) consumes full yukti with sysfs enumeration
+
 ## Medium Term
 
 ### Optical Enhancements

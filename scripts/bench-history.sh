@@ -14,7 +14,6 @@ BENCHMARKS_MD="docs/benchmarks/results.md"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-CC="${CC:-$(command -v cc5 2>/dev/null || echo "$HOME/.cyrius/bin/cc5")}"
 
 # Create header if file doesn't exist
 if [ ! -f "$HISTORY_FILE" ]; then
@@ -33,8 +32,7 @@ echo ""
 # Build benchmarks
 echo "Building benchmarks..."
 mkdir -p build
-cat tests/bcyr/yukti.bcyr | "$CC" > build/yukti_bench 2>/dev/null
-chmod +x build/yukti_bench
+cyrius build tests/bcyr/yukti.bcyr build/yukti_bench >/dev/null
 
 # Run benchmarks and capture output
 echo "Running benchmarks..."

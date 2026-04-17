@@ -2,13 +2,10 @@ name: Release
 
 on:
   push:
-    tags: ['*']
+    tags: ['[0-9]*']
 
 permissions:
   contents: write
-
-env:
-  CYRIUS_VERSION: "5.2.1"
 
 jobs:
   ci:
@@ -27,11 +24,12 @@ jobs:
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
           TAG="${GITHUB_REF_NAME}"
           [ "$FILE_VERSION" = "$TAG" ] || { echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
-          # cyrius.cyml uses ${file:VERSION} — no separate version string to
-          # drift against the tag.
+          echo "Version verified: $TAG (cyrius.cyml pulls from VERSION via \${file:VERSION})"
 
       - name: Install Cyrius toolchain
         run: |
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
@@ -40,6 +38,7 @@ jobs:
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Resolve deps
         run: cyrius deps
@@ -47,26 +46,25 @@ jobs:
       - name: Verify dep hashes
         run: cyrius deps --verify
 
-      - name: Build
+      - name: Build (DCE)
         run: |
           mkdir -p build
-          cat programs/demo.cyr | cc5 > build/yukti
-          chmod +x build/yukti
+          CYRIUS_DCE=1 cyrius build src/main.cyr build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
       - name: Test
+        run: cyrius test tests/tcyr/yukti.tcyr
+
+      - name: Fuzz
         run: |
-          cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test
-          chmod +x build/yukti_test
-          ./build/yukti_test
           for f in fuzz/*.fcyr; do
             name=$(basename "$f" .fcyr)
-            cat "$f" | cc5 > "build/$name"
-            chmod +x "build/$name"
-            timeout 10 "build/$name"
+            CYRIUS_DCE=1 cyrius build "$f" "build/$name"
+            timeout 10 "build/$name" || { echo "FUZZ CRASH: $name"; exit 1; }
+            echo "  $name: ok"
           done
 
-      - name: Bundle dist
+      - name: Regenerate bundle
         run: cyrius distlib
 
       - name: Clean toolchain artifacts
@@ -76,14 +74,15 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           git archive --format=tar.gz --prefix="yukti-${TAG}/" -o "yukti-${TAG}-src.tar.gz" HEAD
-          sha256sum yukti-*.tar.gz > SHA256SUMS
+          cp dist/yukti.cyr "yukti-${TAG}.cyr"
+          sha256sum yukti-*.tar.gz yukti-*.cyr > SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-artifacts
           path: |
             yukti-*.tar.gz
-            dist/yukti.cyr
+            yukti-*.cyr
             cyrius.lock
             SHA256SUMS
 
@@ -105,6 +104,6 @@ jobs:
           prerelease: ${{ startsWith(github.ref_name, '0.') }}
           files: |
             yukti-*.tar.gz
-            dist/yukti.cyr
+            yukti-*.cyr
             cyrius.lock
             SHA256SUMS

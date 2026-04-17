@@ -8,11 +8,14 @@ language = "cyrius"
 cyrius = "5.2.1"
 
 [build]
-entry = "programs/demo.cyr"
+entry = "src/main.cyr"
 output = "build/yukti"
 
+# `[lib]` exists so `cyrius distlib` knows what to concatenate into
+# dist/yukti.cyr. Don't move `modules` into `[build]` — it makes
+# `cyrius build` prepend them before src/main.cyr, which then
+# re-includes them via src/lib.cyr and inflates the binary by ~38%.
 [lib]
-entry = "src/lib.cyr"
 modules = [
     "src/error.cyr",
     "src/device.cyr",
@@ -57,7 +60,3 @@ modules = ["dist/sakshi.cyr"]
 git = "https://github.com/MacCracken/patra.git"
 tag = "1.1.1"
 modules = ["dist/patra.cyr"]
-
-[[bench]]
-name = "benchmarks"
-entry = "tests/bcyr/yukti.bcyr"

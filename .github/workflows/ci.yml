@@ -11,11 +11,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CYRIUS_VERSION: "5.2.1"
-
 jobs:
-  build-and-test:
+  build:
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
@@ -23,6 +20,8 @@ jobs:
 
       - name: Install Cyrius toolchain
         run: |
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
           CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
@@ -31,50 +30,56 @@ jobs:
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
-          echo "Cyrius $CYRIUS_VERSION installed"
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
-      - name: Resolve deps
+      - name: Resolve dependencies
         run: cyrius deps
 
       - name: Verify dep hashes
         run: cyrius deps --verify
 
-      - name: Build
+      - name: Lint
+        run: |
+          for f in src/error.cyr src/device.cyr src/event.cyr src/storage.cyr \
+                   src/optical.cyr src/udev.cyr src/linux.cyr src/udev_rules.cyr \
+                   src/partition.cyr src/device_db.cyr src/network.cyr src/gpu.cyr \
+                   src/lib.cyr src/main.cyr; do
+            cyrius lint "$f" || true
+          done
+
+      - name: Verify dist/yukti.cyr is in sync with src/
+        run: |
+          cyrius distlib
+          if ! git diff --quiet dist/yukti.cyr; then
+            echo "ERROR: dist/yukti.cyr is stale. Run 'cyrius distlib' and commit the result."
+            git --no-pager diff dist/yukti.cyr | head -40
+            exit 1
+          fi
+          echo "dist/yukti.cyr matches src/"
+
+      - name: Build (DCE)
         run: |
           mkdir -p build
-          cat programs/demo.cyr | cc5 > build/yukti
-          chmod +x build/yukti
+          CYRIUS_DCE=1 cyrius build src/main.cyr build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
       - name: Verify ELF
         run: xxd -l 4 build/yukti | grep -q "7f45 4c46"
 
-      - name: Unit tests
-        run: |
-          cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test
-          chmod +x build/yukti_test
-          ./build/yukti_test
+      - name: Test
+        run: cyrius test tests/tcyr/yukti.tcyr
 
       - name: Fuzz
         run: |
           for f in fuzz/*.fcyr; do
             name=$(basename "$f" .fcyr)
-            cat "$f" | cc5 > "build/$name"
-            chmod +x "build/$name"
+            CYRIUS_DCE=1 cyrius build "$f" "build/$name"
             timeout 10 "build/$name" || { echo "FUZZ CRASH: $name"; exit 1; }
             echo "  $name: ok"
           done
 
-      - name: Benchmarks
-        run: |
-          cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench
-          chmod +x build/yukti_bench
-          ./build/yukti_bench
-
-      - name: Bundle dist
-        run: |
-          cyrius distlib
-          echo "dist/yukti.cyr: $(wc -l < dist/yukti.cyr) lines"
+      - name: Bench
+        run: cyrius bench tests/bcyr/yukti.bcyr
 
   security:
     name: Security Scan
@@ -97,15 +102,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check required docs
+      - name: Check required files
         run: |
           MISSING=0
-          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE cyrius.cyml; do
-            if [ -f "$doc" ]; then echo "  OK: $doc"; else echo "  MISSING: $doc"; MISSING=1; fi
+          for f in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE cyrius.cyml; do
+            if [ -f "$f" ]; then echo "  OK: $f"
+            else echo "  MISSING: $f"; MISSING=1; fi
           done
           exit $MISSING
+
       - name: Verify version consistency
         run: |
-          FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          grep -q "$FILE_VERSION" CHANGELOG.md || { echo "version not in changelog"; exit 1; }
-          echo "Version consistent: $FILE_VERSION (manifest uses \${file:VERSION})"
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "VERSION file: $VERSION"
+          grep -q "$VERSION" CHANGELOG.md || { echo "FAIL: version not in CHANGELOG.md"; exit 1; }
+          echo "Version consistent (manifest pulls VERSION via \${file:VERSION})"

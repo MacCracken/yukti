@@ -4,7 +4,7 @@ Thanks for taking the time to dig in.
 
 ## Prerequisites
 
-- Cyrius toolchain 5.2.x (`cc5` + `cyrius` on `$PATH`) —
+- Cyrius toolchain 5.2.x (`cyrius` on `$PATH`) —
   <https://github.com/MacCracken/cyrius>
 - A Linux host for udev/mount behaviour to actually do anything useful
 
@@ -20,17 +20,18 @@ Thanks for taking the time to dig in.
 ## Build / Test / Bench / Fuzz
 
 ```sh
-cat programs/demo.cyr      | cc5 > build/yukti        && chmod +x build/yukti
-cat tests/tcyr/yukti.tcyr  | cc5 > build/yukti_test   && chmod +x build/yukti_test  && ./build/yukti_test
-cat tests/bcyr/yukti.bcyr  | cc5 > build/yukti_bench  && chmod +x build/yukti_bench && ./build/yukti_bench
+cyrius build src/main.cyr build/yukti
+cyrius test  tests/tcyr/yukti.tcyr
+cyrius bench tests/bcyr/yukti.bcyr
 for f in fuzz/*.fcyr; do
-  n=$(basename "$f" .fcyr); cat "$f" | cc5 > "build/$n" && chmod +x "build/$n" && "./build/$n"
+  n=$(basename "$f" .fcyr); cyrius build "$f" "build/$n" && "./build/$n"
 done
 cyrius distlib             # rebuild dist/yukti.cyr
 cyrius deps --verify       # supply-chain gate
 ```
 
 There is no Makefile — the `cyrius` tool is the whole build system.
+Never shell out to `cc5` directly; always go through `cyrius <subcommand>`.
 
 ## Adding a Module
 

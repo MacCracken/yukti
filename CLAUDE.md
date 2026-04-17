@@ -18,28 +18,28 @@ jalwa (auto-import), file manager (device sidebar), aethersafha (mount notificat
 
 ## Build & Test
 
-Requires `cc5` + `cyrius` 5.2.x on PATH. Deps are resolved into `lib/` by
-`cyrius deps`; the stdlib modules (alloc, str, fmt, vec, hashmap, io, fs,
-tagged, json, process, fnptr, chrono, args, freelist) and external deps
-(sakshi 2.0.0, patra 1.1.1) come through that mechanism — do NOT
-re-vendor them by hand.
+Requires the `cyrius` toolchain 5.2.x on PATH (which provides `cc5`
+internally). Deps are resolved into `lib/` by `cyrius deps`; the stdlib
+modules (alloc, str, fmt, vec, hashmap, io, fs, tagged, json, process,
+fnptr, chrono, args, freelist) and external deps (sakshi 2.0.0, patra
+1.1.1) come through that mechanism — do NOT re-vendor them by hand.
 
 ```sh
 # Resolve deps into lib/ (once, and after any dep change)
 cyrius deps
 
-# Build the demo binary
-cat programs/demo.cyr | cc5 > build/yukti
+# Build the CLI
+cyrius build src/main.cyr build/yukti
 
 # Test (485 assertions)
-cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && ./build/yukti_test
+cyrius test tests/tcyr/yukti.tcyr
 
 # Benchmark
-cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && ./build/yukti_bench
+cyrius bench tests/bcyr/yukti.bcyr
 
 # Fuzz
-cat fuzz/fuzz_parse_uevent.fcyr | cc5 > build/fuzz_uevent && ./build/fuzz_uevent
-cat fuzz/fuzz_mount_table.fcyr  | cc5 > build/fuzz_mount  && ./build/fuzz_mount
+cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent && ./build/fuzz_parse_uevent
+cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table  && ./build/fuzz_mount_table
 
 # Bundle for stdlib distribution
 cyrius distlib              # writes dist/yukti.cyr
@@ -52,14 +52,15 @@ cyrius deps --verify        # CI gate: fail on hash mismatch
 cyrius publish              # tag + distlib + lock + print gh release command
 ```
 
-No Makefile — the `cyrius` tool is the whole build system. If you need
-`cyrius build/test/bench` shortcuts, they already exist natively.
+No Makefile — the `cyrius` tool is the whole build system. Never shell
+out to `cc5` directly; always go through `cyrius <subcommand>`.
 
 ## Project Structure
 
 ```
 src/
   lib.cyr              — Include chain (entry point for library consumers)
+  main.cyr             — CLI entry point (device enumeration)
   error.cyr            — 16 error kinds, heap-allocated error structs
   device.cyr           — DeviceId, DeviceInfo, DeviceClass, DeviceCapabilities
   event.cyr            — DeviceEvent, EventCollector, listener dispatch
@@ -72,8 +73,6 @@ src/
   device_db.cyr        — Persistent device history via patra
   network.cyr          — Network filesystem mount helpers (SMB/NFS)
   gpu.cyr              — GPU probe via sysfs
-programs/
-  demo.cyr             — CLI demo (device enumeration)
 lib/                   — Dep dir, managed by `cyrius deps` (gitignored;
                          symlinks into ~/.cyrius/deps/…); do NOT edit
 tests/
@@ -92,8 +91,8 @@ cyrius.lock            — SHA256 lockfile for every lib/*.cyr dep
 ### Development Loop (continuous)
 
 1. Work phase — new features, roadmap items, bug fixes
-2. Build: `cat programs/demo.cyr | cc5 > build/yukti` — must be 0 warnings
-3. Test: `cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && ./build/yukti_test` — must be 0 failures
+2. Build: `cyrius build src/main.cyr build/yukti` — must be 0 warnings
+3. Test: `cyrius test tests/tcyr/yukti.tcyr` — must be 0 failures
 4. Benchmark additions for new code
 5. Run benchmarks (`./scripts/bench-history.sh`)
 6. Audit phase — review performance, memory, security, correctness

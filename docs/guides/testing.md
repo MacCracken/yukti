@@ -4,8 +4,7 @@
 
 ```sh
 # Build and run (485 assertions)
-cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
-./build/yukti_test
+cyrius test tests/tcyr/yukti.tcyr
 ```
 
 Expected output:
@@ -42,8 +41,7 @@ Expected output:
 ## Running Benchmarks
 
 ```sh
-cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
-./build/yukti_bench
+cyrius bench tests/bcyr/yukti.bcyr
 ```
 
 45 benchmarks using `bench_run_batch()` for nanosecond precision.
@@ -52,10 +50,10 @@ cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_benc
 
 ```sh
 # Uevent parser — 1000 mutations + full truncation sweep
-cat fuzz/fuzz_parse_uevent.fcyr | cc5 > build/fuzz_uevent && ./build/fuzz_uevent
+cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent && ./build/fuzz_parse_uevent
 
 # Mount table parser — 500 mutations + full truncation sweep
-cat fuzz/fuzz_mount_table.fcyr | cc5 > build/fuzz_mount && ./build/fuzz_mount
+cyrius build fuzz/fuzz_mount_table.fcyr build/fuzz_mount_table && ./build/fuzz_mount_table
 ```
 
 ## Writing Tests

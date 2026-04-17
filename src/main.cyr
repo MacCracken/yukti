@@ -1,7 +1,6 @@
 # yukti/main.cyr — CLI entry point
 #
-# Device detection demo: enumerates all block devices and prints
-# a summary table.
+# Enumerates all block devices and prints a summary table.
 
 include "src/lib.cyr"
 

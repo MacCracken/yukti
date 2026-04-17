@@ -49,30 +49,27 @@ main();
 
 ## Build
 
-Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 5.2.x
-(`cc5` + `cyrius`).
+Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 5.2.x.
 
 ```sh
 # Resolve deps into lib/
 cyrius deps
 
-# Build
-cat programs/demo.cyr | cc5 > build/yukti && chmod +x build/yukti
+# Build the CLI
+cyrius build src/main.cyr build/yukti
 
 # Run
 ./build/yukti
 
 # Test (485 assertions)
-cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
-./build/yukti_test
+cyrius test tests/tcyr/yukti.tcyr
 
 # Benchmark
-cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
-./build/yukti_bench
+cyrius bench tests/bcyr/yukti.bcyr
 
 # Fuzz
-cat fuzz/fuzz_parse_uevent.fcyr | cc5 > build/fuzz_uevent && ./build/fuzz_uevent
-cat fuzz/fuzz_mount_table.fcyr  | cc5 > build/fuzz_mount  && ./build/fuzz_mount
+cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent && ./build/fuzz_parse_uevent
+cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table  && ./build/fuzz_mount_table
 
 # Bundle for distribution
 cyrius distlib               # dist/yukti.cyr

@@ -1,73 +1,75 @@
 # Contributing to Yukti
 
-Thank you for your interest in contributing to Yukti.
-
-## Development Workflow
-
-1. Fork and clone the repository
-2. Create a feature branch from `main`
-3. Make your changes
-4. Run `make check` to validate
-5. Open a pull request
+Thanks for taking the time to dig in.
 
 ## Prerequisites
 
-- Rust stable (MSRV 1.89)
-- Components: `rustfmt`, `clippy`
-- Optional: `cargo-audit`, `cargo-deny`, `cargo-tarpaulin`
+- Cyrius toolchain 5.2.x (`cc5` + `cyrius` on `$PATH`) —
+  <https://github.com/MacCracken/cyrius>
+- A Linux host for udev/mount behaviour to actually do anything useful
 
-## Makefile Targets
+## Development Workflow
 
-| Command | Description |
-|---------|-------------|
-| `make check` | fmt + clippy + test + audit |
-| `make fmt` | Check formatting |
-| `make clippy` | Lint with `-D warnings` |
-| `make test` | Run test suite |
-| `make audit` | Security audit |
-| `make deny` | Supply chain checks |
-| `make bench` | Run benchmarks |
-| `make coverage` | Generate coverage report |
-| `make doc` | Build documentation |
+1. Fork and clone
+2. `cyrius deps` — pull stdlib + sakshi + patra into `lib/`
+3. Create a feature branch from `main`
+4. Make your changes
+5. Build + test + fuzz (see below)
+6. Open a pull request
+
+## Build / Test / Bench / Fuzz
+
+```sh
+cat programs/demo.cyr      | cc5 > build/yukti        && chmod +x build/yukti
+cat tests/tcyr/yukti.tcyr  | cc5 > build/yukti_test   && chmod +x build/yukti_test  && ./build/yukti_test
+cat tests/bcyr/yukti.bcyr  | cc5 > build/yukti_bench  && chmod +x build/yukti_bench && ./build/yukti_bench
+for f in fuzz/*.fcyr; do
+  n=$(basename "$f" .fcyr); cat "$f" | cc5 > "build/$n" && chmod +x "build/$n" && "./build/$n"
+done
+cyrius distlib             # rebuild dist/yukti.cyr
+cyrius deps --verify       # supply-chain gate
+```
+
+There is no Makefile — the `cyrius` tool is the whole build system.
 
 ## Adding a Module
 
-1. Create `src/module_name.rs` with module doc comment
-2. Add `pub mod module_name;` to `src/lib.rs`
-3. Re-export key types from `lib.rs`
-4. Add tests in the module
-5. Update README module table
-
-If the module requires an external dependency, gate it behind a feature flag. Hardware I/O modules should be gated behind `#[cfg(target_os = "linux")]`.
+1. Create `src/your_module.cyr`
+2. Add `include "src/your_module.cyr"` to `src/lib.cyr`
+3. Add it to `[lib] modules = [...]` in `cyrius.cyml`
+4. Write tests in `tests/tcyr/yukti.tcyr` (assertion target: +30 per module)
+5. Add benchmarks in `tests/bcyr/yukti.bcyr` for any hot path
+6. Update `docs/architecture/overview.md` module table
 
 ## Code Style
 
-- `cargo fmt` — mandatory
-- `cargo clippy -- -D warnings` — zero warnings
-- Doc comments on all public items
-- `#[non_exhaustive]` on public enums
-- No `println!` — use `tracing` for logging
-- `unsafe` only for `libc` syscalls/ioctls — minimize scope, add `// SAFETY:` comments
+- Enums for constants — zero gvar cost
+- Manual struct layout — `alloc` + `store64/load64` with named offsets
+- Accessor functions — `fn type_field(ptr) { return load64(ptr + F); }`
+- `str_builder` for formatting, not temp allocations
+- Direct syscalls only — no libc, no external deps
+- `sakshi_*` for logging; no raw `println` in library code
 
 ## Testing
 
-- Unit tests colocated in modules (`#[cfg(test)] mod tests`)
-- Hardware-dependent tests marked `#[ignore]` with doc comments explaining requirements
-- Feature-gated tests with `#[cfg(feature = "...")]`
-- Parsing logic must be testable with mock data (e.g., `find_mount_in()` takes a string, not `/proc/mounts`)
-- Target: 90%+ line coverage
+- 485 assertions is the current floor — do not regress
+- Hardware-dependent logic must be reachable from mock data (see
+  `find_mount_in()` taking a string, not `/proc/mounts`)
+- Parsers get a fuzz target (`fuzz/*.fcyr`) before merge
 
 ## Benchmarks
 
-- All optimizations must include corresponding benchmarks
-- Run `./scripts/bench-history.sh` to record results
-- Benchmark history is tracked in `bench-history.csv` with 3-point trend in `BENCHMARKS.md`
+- Every optimization PR needs a benchmark showing the delta
+- `./scripts/bench-history.sh` appends to `docs/benchmarks/history.csv`
+  and regenerates `docs/benchmarks/results.md` with a 3-run trend
 
 ## Commits
 
-- Use conventional-style messages
-- One logical change per commit
+- Conventional-ish messages, one logical change per commit
+- The user (maintainer) handles all git push / tag / release — do NOT
+  push tags from a PR branch
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under GPL-3.0-only.
+By contributing, you agree that your contributions will be licensed under
+GPL-3.0-only.

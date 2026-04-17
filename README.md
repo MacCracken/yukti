@@ -57,17 +57,17 @@ Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 5.2.x
 cyrius deps
 
 # Build
-cat src/main.cyr | cc5 > build/yukti && chmod +x build/yukti
+cat programs/demo.cyr | cc5 > build/yukti && chmod +x build/yukti
 
 # Run
 ./build/yukti
 
 # Test (485 assertions)
-cat tests/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
+cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
 ./build/yukti_test
 
 # Benchmark
-cat benches/bench.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
+cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
 ./build/yukti_bench
 
 # Fuzz
@@ -162,7 +162,7 @@ var optical = filesystem_is_optical(fs);       # 0
 
 ## Rust vs Cyrius
 
-See [BENCHMARKS-rust-v-cyrius.md](BENCHMARKS-rust-v-cyrius.md) for the full comparison. Original Rust source archived in `rust-old/`.
+See [docs/benchmarks/rust-v-cyrius.md](docs/benchmarks/rust-v-cyrius.md) for the full comparison.
 
 | Metric | Rust | Cyrius |
 |--------|------|--------|

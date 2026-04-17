@@ -8,7 +8,7 @@ language = "cyrius"
 cyrius = "5.2.1"
 
 [build]
-entry = "src/main.cyr"
+entry = "programs/demo.cyr"
 output = "build/yukti"
 
 [lib]
@@ -60,4 +60,4 @@ modules = ["dist/patra.cyr"]
 
 [[bench]]
 name = "benchmarks"
-entry = "benches/bench.bcyr"
+entry = "tests/bcyr/yukti.bcyr"

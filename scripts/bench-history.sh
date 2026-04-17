@@ -2,14 +2,15 @@
 set -euo pipefail
 
 # Run Cyrius benchmarks, append results to a CSV history file,
-# and regenerate BENCHMARKS.md with the latest 3 runs for trend tracking.
+# and regenerate docs/benchmarks/results.md with the latest 3 runs for
+# trend tracking.
 #
 # Usage:
-#   ./scripts/bench-history.sh              # defaults to bench-history.csv
-#   ./scripts/bench-history.sh results.csv  # custom output file
+#   ./scripts/bench-history.sh              # defaults to docs/benchmarks/history.csv
+#   ./scripts/bench-history.sh custom.csv   # custom output file
 
-HISTORY_FILE="${1:-bench-history.csv}"
-BENCHMARKS_MD="BENCHMARKS.md"
+HISTORY_FILE="${1:-docs/benchmarks/history.csv}"
+BENCHMARKS_MD="docs/benchmarks/results.md"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
@@ -32,7 +33,7 @@ echo ""
 # Build benchmarks
 echo "Building benchmarks..."
 mkdir -p build
-cat benches/bench.bcyr | "$CC" > build/yukti_bench 2>/dev/null
+cat tests/bcyr/yukti.bcyr | "$CC" > build/yukti_bench 2>/dev/null
 chmod +x build/yukti_bench
 
 # Run benchmarks and capture output
@@ -93,7 +94,7 @@ echo "└───────────────────────�
 echo ""
 echo "Appended ${TOTAL} entries to ${HISTORY_FILE}"
 
-# ── Generate BENCHMARKS.md ────────────────────────────────────────────
+# ── Generate docs/benchmarks/results.md ───────────────────────────────
 
 mapfile -t RUNS < <(awk -F, 'NR>1 {print $1","$2}' "$HISTORY_FILE" | sort -u | tail -3)
 NUM_RUNS=${#RUNS[@]}
@@ -183,7 +184,7 @@ format_ns() {
     echo ""
     echo "Run benchmarks: \`./scripts/bench-history.sh\`"
     echo ""
-    echo "History: [\`bench-history.csv\`](bench-history.csv)"
+    echo "History: [\`history.csv\`](history.csv)"
 } > "$BENCHMARKS_MD"
 
 echo "Updated ${BENCHMARKS_MD}"

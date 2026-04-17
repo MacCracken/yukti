@@ -118,4 +118,4 @@
 
 Run benchmarks: `./scripts/bench-history.sh`
 
-History: [`bench-history.csv`](bench-history.csv)
+History: [`history.csv`](history.csv)

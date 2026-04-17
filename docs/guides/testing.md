@@ -4,7 +4,7 @@
 
 ```sh
 # Build and run (485 assertions)
-cat tests/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
+cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
 ./build/yukti_test
 ```
 
@@ -42,7 +42,7 @@ Expected output:
 ## Running Benchmarks
 
 ```sh
-cat benches/bench.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
+cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
 ./build/yukti_bench
 ```
 
@@ -106,7 +106,7 @@ main();
 ./scripts/bench-history.sh
 ```
 
-Appends to `bench-history.csv`, generates `BENCHMARKS.md` with 3-point trend tracking.
+Appends to `docs/benchmarks/history.csv`, regenerates `docs/benchmarks/results.md` with 3-point trend tracking.
 
 ## Testing Patterns
 

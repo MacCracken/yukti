@@ -29,19 +29,19 @@ re-vendor them by hand.
 cyrius deps
 
 # Build the demo binary
-cat src/main.cyr | cc5 > build/yukti
+cat programs/demo.cyr | cc5 > build/yukti
 
 # Test (485 assertions)
-cat tests/yukti.tcyr | cc5 > build/yukti_test && ./build/yukti_test
+cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && ./build/yukti_test
 
 # Benchmark
-cat benches/bench.bcyr | cc5 > build/yukti_bench && ./build/yukti_bench
+cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench && ./build/yukti_bench
 
 # Fuzz
 cat fuzz/fuzz_parse_uevent.fcyr | cc5 > build/fuzz_uevent && ./build/fuzz_uevent
 cat fuzz/fuzz_mount_table.fcyr  | cc5 > build/fuzz_mount  && ./build/fuzz_mount
 
-# Bundle for stdlib distribution (replaces old scripts/bundle.sh)
+# Bundle for stdlib distribution
 cyrius distlib              # writes dist/yukti.cyr
 
 # Supply-chain integrity
@@ -52,31 +52,39 @@ cyrius deps --verify        # CI gate: fail on hash mismatch
 cyrius publish              # tag + distlib + lock + print gh release command
 ```
 
-`make build | test | bench | fuzz | dist | lock | verify | audit` wraps
-the above.
+No Makefile — the `cyrius` tool is the whole build system. If you need
+`cyrius build/test/bench` shortcuts, they already exist natively.
 
 ## Project Structure
 
 ```
 src/
-  lib.cyr          — Include chain (entry point for library consumers)
-  main.cyr         — CLI demo (device enumeration)
-  error.cyr        — 16 error kinds, heap-allocated error structs
-  device.cyr       — DeviceId, DeviceInfo, DeviceClass, DeviceCapabilities
-  event.cyr        — DeviceEvent, EventCollector, listener dispatch
-  storage.cyr      — Filesystem enum, mount/unmount/eject, /proc/mounts
-  optical.cyr      — DiscType, tray control, TOC reading via ioctls
-  udev.cyr         — UdevEvent, sysfs enumeration, netlink monitor
-  linux.cyr        — LinuxDeviceManager (ties modules together)
-  udev_rules.cyr   — Rule rendering, validation, udevadm wrappers
-lib/               — Dep dir, managed by `cyrius deps` (symlinks into
-                     ~/.cyrius/deps/...); do NOT edit by hand
-tests/yukti.tcyr   — 485 assertions across all modules
-benches/bench.bcyr — benchmarks with batch timing
-fuzz/              — 2 fuzz targets (uevent parser, mount table parser)
-dist/yukti.cyr     — Single-file bundle produced by `cyrius distlib`
-cyrius.cyml        — Package manifest (replaces old cyrius.toml)
-cyrius.lock        — SHA256 lockfile for every lib/*.cyr dep
+  lib.cyr              — Include chain (entry point for library consumers)
+  error.cyr            — 16 error kinds, heap-allocated error structs
+  device.cyr           — DeviceId, DeviceInfo, DeviceClass, DeviceCapabilities
+  event.cyr            — DeviceEvent, EventCollector, listener dispatch
+  storage.cyr          — Filesystem enum, mount/unmount/eject, /proc/mounts
+  optical.cyr          — DiscType, tray control, TOC reading via ioctls
+  udev.cyr             — UdevEvent, sysfs enumeration, netlink monitor
+  linux.cyr            — LinuxDeviceManager (ties modules together)
+  udev_rules.cyr       — Rule rendering, validation, udevadm wrappers
+  partition.cyr        — MBR + GPT table reading
+  device_db.cyr        — Persistent device history via patra
+  network.cyr          — Network filesystem mount helpers (SMB/NFS)
+  gpu.cyr              — GPU probe via sysfs
+programs/
+  demo.cyr             — CLI demo (device enumeration)
+lib/                   — Dep dir, managed by `cyrius deps` (gitignored;
+                         symlinks into ~/.cyrius/deps/…); do NOT edit
+tests/
+  tcyr/yukti.tcyr      — 485 assertions across all modules
+  bcyr/yukti.bcyr      — Benchmarks with batch timing
+fuzz/                  — 2 fuzz targets (uevent parser, mount table parser)
+dist/yukti.cyr         — Single-file bundle produced by `cyrius distlib`
+docs/benchmarks/       — Auto-generated results.md + history.csv +
+                         rust-v-cyrius.md
+cyrius.cyml            — Package manifest (replaces old cyrius.toml)
+cyrius.lock            — SHA256 lockfile for every lib/*.cyr dep
 ```
 
 ## Development Process
@@ -84,8 +92,8 @@ cyrius.lock        — SHA256 lockfile for every lib/*.cyr dep
 ### Development Loop (continuous)
 
 1. Work phase — new features, roadmap items, bug fixes
-2. Build: `cat src/main.cyr | cc5 > build/yukti` — must be 0 warnings
-3. Test: `cat tests/yukti.tcyr | cc5 > build/yukti_test && ./build/yukti_test` — must be 0 failures
+2. Build: `cat programs/demo.cyr | cc5 > build/yukti` — must be 0 warnings
+3. Test: `cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test && ./build/yukti_test` — must be 0 failures
 4. Benchmark additions for new code
 5. Run benchmarks (`./scripts/bench-history.sh`)
 6. Audit phase — review performance, memory, security, correctness

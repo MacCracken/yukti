@@ -42,7 +42,7 @@ jobs:
       - name: Build
         run: |
           mkdir -p build
-          cat src/main.cyr | cc5 > build/yukti
+          cat programs/demo.cyr | cc5 > build/yukti
           chmod +x build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
@@ -51,7 +51,7 @@ jobs:
 
       - name: Unit tests
         run: |
-          cat tests/yukti.tcyr | cc5 > build/yukti_test
+          cat tests/tcyr/yukti.tcyr | cc5 > build/yukti_test
           chmod +x build/yukti_test
           ./build/yukti_test
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Benchmarks
         run: |
-          cat benches/bench.bcyr | cc5 > build/yukti_bench
+          cat tests/bcyr/yukti.bcyr | cc5 > build/yukti_bench
           chmod +x build/yukti_bench
           ./build/yukti_bench
 

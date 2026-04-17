@@ -1,6 +1,6 @@
 # hashmap.cyr — hash table with string keys and i64 values
 # Usage: include "lib/hashmap.cyr"
-# Requires: alloc.cyr, string.cyr
+# Requires: alloc.cyr, string.cyr, fnptr.cyr (for map_iter)
 #
 # Open addressing with linear probing. All keys are null-terminated strings.
 # All values are i64. Automatically grows at 70% load.
@@ -17,7 +17,7 @@
 #   state: 0=empty, 1=occupied, 2=tombstone
 # Map header: { entries_ptr: i64, capacity: i64, count: i64 } = 24 bytes
 
-var HASHMAP_ENTRY_SIZE = 24;
+include "lib/fnptr.cyr"
 
 # FNV-1a hash for null-terminated string
 fn hash_str(s) {
@@ -84,12 +84,23 @@ fn _map_lookup(m, key) {
     return ep;
 }
 
+# Maximum map capacity (2^26 = ~67M entries, 1.5GB data)
+var MAP_CAP_MAX = 0x4000000;
+
 # Grow the map (double capacity, rehash)
 fn _map_grow(m) {
     var old_entries = load64(m);
     var old_cap = load64(m + 8);
     var new_cap = old_cap * 2;
+    if (new_cap > MAP_CAP_MAX) {
+        syscall(1, 2, "map: capacity overflow\n", 23);
+        syscall(60, 1);
+    }
     var new_entries = alloc(new_cap * 24);
+    if (new_entries == 0) {
+        syscall(1, 2, "map: alloc failed\n", 18);
+        syscall(60, 1);
+    }
     memset(new_entries, 0, new_cap * 24);
     store64(m, new_entries);
     store64(m + 8, new_cap);
@@ -124,6 +135,16 @@ fn map_get(m, key) {
     if (ep == 0) { return 0; }
     return load64(ep + 8);
 }
+
+# Get value for key with default. Returns value or default_val if not found.
+fn map_get_or(m, key, default_val) {
+    var ep = _map_lookup(m, key);
+    if (ep == 0) { return default_val; }
+    return load64(ep + 8);
+}
+
+# Alias for map_count
+fn map_size(m) { return load64(m + 16); }
 
 # Check if key exists. Returns 1 or 0.
 fn map_has(m, key) {

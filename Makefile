@@ -1,24 +1,25 @@
-.PHONY: build test bench fuzz bundle clean check
+.PHONY: build test bench fuzz dist lock verify clean check audit
 
-CC := $(shell which cyrius 2>/dev/null || which cc3 2>/dev/null || echo $(HOME)/Repos/cyrius/build/cc3)
+# Modern Cyrius 5.x flow. cc5 is the backing compiler; `cyrius` is the build tool.
+CC := $(shell which cc5 2>/dev/null || echo $(HOME)/.cyrius/bin/cc5)
 
 build:
 	@mkdir -p build
-	cat src/main.cyr | $(CC) > build/yukti 2>/dev/null
+	@cat src/main.cyr | $(CC) > build/yukti 2>build/yukti.log
 	@chmod +x build/yukti
 	@echo "build/yukti: $$(wc -c < build/yukti) bytes"
 
 test:
 	@mkdir -p build
-	cat tests/yukti.tcyr | $(CC) > build/yukti_test 2>/dev/null
+	@cat tests/yukti.tcyr | $(CC) > build/yukti_test 2>build/yukti_test.log
 	@chmod +x build/yukti_test
-	@./build/yukti_test 2>/dev/null
+	@./build/yukti_test
 
 bench:
 	@mkdir -p build
-	cat benches/bench.bcyr | $(CC) > build/yukti_bench 2>/dev/null
+	@cat benches/bench.bcyr | $(CC) > build/yukti_bench 2>build/yukti_bench.log
 	@chmod +x build/yukti_bench
-	@./build/yukti_bench 2>/dev/null
+	@./build/yukti_bench
 
 fuzz:
 	@mkdir -p build
@@ -26,11 +27,20 @@ fuzz:
 		name=$$(basename "$$f" .fcyr); \
 		cat "$$f" | $(CC) > "build/$$name" 2>/dev/null; \
 		chmod +x "build/$$name"; \
-		./build/$$name 2>/dev/null; \
+		./build/$$name; \
 	done
 
-bundle:
-	@./scripts/bundle.sh
+dist:
+	@cyrius distlib
+
+lock:
+	@cyrius deps --lock
+
+verify:
+	@cyrius deps --verify
+
+audit:
+	@cyrius audit
 
 check: build test fuzz
 	@echo "all checks passed"

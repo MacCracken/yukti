@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CYRIUS_VERSION: "3.4.10"
+  CYRIUS_VERSION: "5.2.1"
 
 jobs:
   build-and-test:
@@ -28,44 +28,52 @@ jobs:
           CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
           mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
           cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp "$CYRIUS_DIR/scripts/cyrius" "$HOME/.cyrius/bin/cyrius" 2>/dev/null || true
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "Cyrius $CYRIUS_VERSION installed"
 
-      - name: Setup lib symlink
-        run: ln -sf "$HOME/.cyrius/lib" lib
+      - name: Resolve deps
+        run: cyrius deps
+
+      - name: Verify dep hashes
+        run: cyrius deps --verify
 
       - name: Build
         run: |
           mkdir -p build
-          cyrius build src/main.cyr build/yukti
+          cat src/main.cyr | cc5 > build/yukti
+          chmod +x build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
       - name: Verify ELF
         run: xxd -l 4 build/yukti | grep -q "7f45 4c46"
 
       - name: Unit tests
-        run: cyrius test tests/yukti.tcyr
+        run: |
+          cat tests/yukti.tcyr | cc5 > build/yukti_test
+          chmod +x build/yukti_test
+          ./build/yukti_test
 
       - name: Fuzz
         run: |
           for f in fuzz/*.fcyr; do
             name=$(basename "$f" .fcyr)
-            cyrius build "$f" "build/$name"
+            cat "$f" | cc5 > "build/$name"
+            chmod +x "build/$name"
             timeout 10 "build/$name" || { echo "FUZZ CRASH: $name"; exit 1; }
             echo "  $name: ok"
           done
 
       - name: Benchmarks
         run: |
-          cyrius build benches/bench.bcyr build/yukti_bench
+          cat benches/bench.bcyr | cc5 > build/yukti_bench
+          chmod +x build/yukti_bench
           ./build/yukti_bench
 
       - name: Bundle dist
         run: |
-          ./scripts/bundle.sh
+          cyrius distlib
           echo "dist/yukti.cyr: $(wc -l < dist/yukti.cyr) lines"
 
   security:
@@ -92,14 +100,12 @@ jobs:
       - name: Check required docs
         run: |
           MISSING=0
-          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE cyrius.toml; do
+          for doc in README.md CHANGELOG.md VERSION CONTRIBUTING.md SECURITY.md LICENSE cyrius.cyml; do
             if [ -f "$doc" ]; then echo "  OK: $doc"; else echo "  MISSING: $doc"; MISSING=1; fi
           done
           exit $MISSING
       - name: Verify version consistency
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TOML_VERSION=$(grep '^version = ' cyrius.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          [ "$FILE_VERSION" = "$TOML_VERSION" ] || { echo "VERSION ($FILE_VERSION) != cyrius.toml ($TOML_VERSION)"; exit 1; }
           grep -q "$FILE_VERSION" CHANGELOG.md || { echo "version not in changelog"; exit 1; }
-          echo "Version consistent: $FILE_VERSION"
+          echo "Version consistent: $FILE_VERSION (manifest uses \${file:VERSION})"

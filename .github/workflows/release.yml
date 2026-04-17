@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 env:
-  CYRIUS_VERSION: "3.4.10"
+  CYRIUS_VERSION: "5.2.1"
 
 jobs:
   ci:
@@ -25,10 +25,10 @@ jobs:
       - name: Verify version
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TOML_VERSION=$(grep '^version = ' cyrius.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           TAG="${GITHUB_REF_NAME}"
           [ "$FILE_VERSION" = "$TAG" ] || { echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
-          [ "$TOML_VERSION" = "$TAG" ] || { echo "cyrius.toml ($TOML_VERSION) != tag ($TAG)"; exit 1; }
+          # cyrius.cyml uses ${file:VERSION} — no separate version string to
+          # drift against the tag.
 
       - name: Install Cyrius toolchain
         run: |
@@ -37,31 +37,37 @@ jobs:
           CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
           mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
           cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp "$CYRIUS_DIR/scripts/cyrius" "$HOME/.cyrius/bin/cyrius" 2>/dev/null || true
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
 
-      - name: Setup lib symlink
-        run: ln -sf "$HOME/.cyrius/lib" lib
+      - name: Resolve deps
+        run: cyrius deps
+
+      - name: Verify dep hashes
+        run: cyrius deps --verify
 
       - name: Build
         run: |
           mkdir -p build
-          cyrius build src/main.cyr build/yukti
+          cat src/main.cyr | cc5 > build/yukti
+          chmod +x build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
       - name: Test
         run: |
-          cyrius test tests/yukti.tcyr
+          cat tests/yukti.tcyr | cc5 > build/yukti_test
+          chmod +x build/yukti_test
+          ./build/yukti_test
           for f in fuzz/*.fcyr; do
             name=$(basename "$f" .fcyr)
-            cyrius build "$f" "build/$name"
+            cat "$f" | cc5 > "build/$name"
+            chmod +x "build/$name"
             timeout 10 "build/$name"
           done
 
       - name: Bundle dist
-        run: ./scripts/bundle.sh
+        run: cyrius distlib
 
       - name: Clean toolchain artifacts
         run: rm -f cyrius-*.tar.gz
@@ -78,6 +84,7 @@ jobs:
           path: |
             yukti-*.tar.gz
             dist/yukti.cyr
+            cyrius.lock
             SHA256SUMS
 
   release:
@@ -99,4 +106,5 @@ jobs:
           files: |
             yukti-*.tar.gz
             dist/yukti.cyr
+            cyrius.lock
             SHA256SUMS

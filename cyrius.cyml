@@ -1,0 +1,63 @@
+[package]
+name = "yukti"
+version = "${file:VERSION}"
+description = "Device abstraction — USB, optical, block, GPU, network, udev hotplug, mount/eject"
+license = "GPL-3.0-only"
+repository = "https://github.com/MacCracken/yukti"
+language = "cyrius"
+cyrius = "5.2.1"
+
+[build]
+entry = "src/main.cyr"
+output = "build/yukti"
+
+[lib]
+entry = "src/lib.cyr"
+modules = [
+    "src/error.cyr",
+    "src/device.cyr",
+    "src/event.cyr",
+    "src/storage.cyr",
+    "src/optical.cyr",
+    "src/udev.cyr",
+    "src/linux.cyr",
+    "src/udev_rules.cyr",
+    "src/partition.cyr",
+    "src/device_db.cyr",
+    "src/network.cyr",
+    "src/gpu.cyr",
+]
+
+[deps]
+stdlib = [
+    "syscalls",
+    "string",
+    "alloc",
+    "str",
+    "fmt",
+    "vec",
+    "hashmap",
+    "io",
+    "fs",
+    "tagged",
+    "json",
+    "process",
+    "fnptr",
+    "chrono",
+    "args",
+    "freelist",
+]
+
+[deps.sakshi]
+git = "https://github.com/MacCracken/sakshi.git"
+tag = "2.0.0"
+modules = ["dist/sakshi.cyr"]
+
+[deps.patra]
+git = "https://github.com/MacCracken/patra.git"
+tag = "1.1.1"
+modules = ["dist/patra.cyr"]
+
+[[bench]]
+name = "benchmarks"
+entry = "benches/bench.bcyr"

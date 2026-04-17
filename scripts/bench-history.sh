@@ -13,7 +13,7 @@ BENCHMARKS_MD="BENCHMARKS.md"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-CC="${CC:-$(command -v cyrius 2>/dev/null || echo "$HOME/Repos/cyrius/build/cc3")}"
+CC="${CC:-$(command -v cc5 2>/dev/null || echo "$HOME/.cyrius/bin/cc5")}"
 
 # Create header if file doesn't exist
 if [ ! -f "$HISTORY_FILE" ]; then

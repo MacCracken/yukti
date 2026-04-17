@@ -46,7 +46,7 @@ fn str_println(s) {
 }
 
 # Compare two Strs
-fn str_eq(a, b) {
+fn str_eq(a: Str, b: Str) {
     var la = load64(a + 8);
     var lb = load64(b + 8);
     if (la != lb) { return 0; }
@@ -54,7 +54,7 @@ fn str_eq(a, b) {
 }
 
 # Concatenate two Strs (allocates new)
-fn str_cat(a, b) {
+fn str_cat(a: Str, b: Str) {
     var la = load64(a + 8);
     var lb = load64(b + 8);
     var newlen = la + lb;
@@ -79,7 +79,7 @@ fn str_clone(s) {
 }
 
 # Check if Str contains needle Str
-fn str_contains(s, needle) {
+fn str_contains(s: Str, needle: Str) {
     var slen = str_len(s);
     var nlen = str_len(needle);
     if (nlen > slen) { return 0; }
@@ -93,16 +93,15 @@ fn str_contains(s, needle) {
     return 0;
 }
 
-# Check if Str starts with a C string prefix
-fn str_starts_with(s, prefix) {
-    var plen = strlen(prefix);
+# Check if Str starts with prefix Str
+fn str_starts_with(s: Str, prefix: Str) {
+    var plen = str_len(prefix);
     if (plen > str_len(s)) { return 0; }
-    return memeq(str_data(s), prefix, plen);
+    return memeq(str_data(s), str_data(prefix), plen);
 }
 
-# Check if Str ends with a C string suffix
-# Check if Str ends with suffix Str
-fn str_ends_with(s, suffix) {
+# Check if Str ends with suffix Str (both are Str objects)
+fn str_ends_with(s: Str, suffix: Str) {
     var xlen = str_len(suffix);
     var slen = str_len(s);
     if (xlen > slen) { return 0; }
@@ -171,7 +170,7 @@ fn str_trim(s) {
 }
 
 # Split Str by byte separator, return vec of Str pointers
-fn str_split(s, sep) {
+fn str_split(s: Str, sep: Str) {
     var parts = vec_new();
     var slen = str_len(s);
     var sd = str_data(s);
@@ -216,7 +215,7 @@ fn _sb_grow(sb, n) {
 }
 
 # Append a Str to the string builder
-fn str_builder_add(sb, s) {
+fn str_builder_add(sb, s: Str) {
     var slen = str_len(s);
     _sb_grow(sb, slen);
     var buf = load64(sb);
@@ -262,23 +261,22 @@ fn str_builder_build(sb) {
 }
 
 # Join a vec of Str with separator
-fn str_join(parts, sep) {
+fn str_join(parts, sep: Str) {
     var plen = vec_len(parts);
     if (plen == 0) { return str_from(""); }
     var sb = str_builder_new();
     var ji = 0;
     while (ji < plen) {
-        if (ji > 0) { str_builder_add_cstr(sb, sep); }
+        if (ji > 0) { str_builder_add(sb, sep); }
         str_builder_add(sb, vec_get(parts, ji));
         ji = ji + 1;
     }
     return str_builder_build(sb);
 }
 
-# Method wrappers (Str_*) removed — reclaimed 16 function slots.
-# Use str_len(), str_data(), str_eq() etc. directly.
-
-# --- Extended functions for yukti ---
+# ================================================================
+# Extended functions (added for yukti v1.1.0 stdlib inclusion)
+# ================================================================
 
 # Create Str from raw buffer (copies data, adds null terminator)
 fn str_from_buf(ptr, len) {
@@ -392,3 +390,42 @@ fn str_to_hex(s) {
     }
     return val;
 }
+
+# ================================================================
+# Method wrappers — enable s.len(), s.print(), s.contains("x") etc.
+# Requires: var s: Str = str_from("hello");
+# These delegate to the str_* functions above.
+# ================================================================
+
+# Return length of string
+fn Str_len(self) { return str_len(self); }
+# Return pointer to raw byte data
+fn Str_data(self) { return str_data(self); }
+# Print string to stdout
+fn Str_print(self) { return str_print(self); }
+# Print string + newline to stdout
+fn Str_println(self) { return str_println(self); }
+# Compare two Strs for equality
+fn Str_eq(self, other) { return str_eq(self, other); }
+# Concatenate two Strs (allocates new)
+fn Str_cat(self, other) { return str_cat(self, other); }
+# Substring from start with given length
+fn Str_sub(self, start, len) { return str_sub(self, start, len); }
+# Deep copy of string
+fn Str_clone(self) { return str_clone(self); }
+# Check if string contains needle (C string)
+fn Str_contains(self, needle) { return str_contains(self, needle); }
+# Check if string starts with prefix (C string)
+fn Str_starts_with(self, prefix) { return str_starts_with(self, prefix); }
+# Check if string ends with suffix (C string)
+fn Str_ends_with(self, suffix) { return str_ends_with(self, suffix); }
+# Find first occurrence of needle, return offset or -1
+fn Str_index_of(self, needle) { return str_index_of(self, needle); }
+# Create Str from integer
+fn Str_from_int(n) { return str_from_int(n); }
+# Parse Str as integer
+fn Str_to_int(self) { return str_to_int(self); }
+# Trim whitespace from both ends
+fn Str_trim(self) { return str_trim(self); }
+# Split by separator into vec of Strs
+fn Str_split(self, sep) { return str_split(self, sep); }

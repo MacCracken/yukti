@@ -1,5 +1,5 @@
-# agnosys/syscalls.cyr — Linux x86_64 syscall wrappers
-# Usage: include "lib/agnosys/syscalls.cyr"
+# syscalls.cyr — Linux x86_64 syscall wrappers
+# Usage: include "lib/syscalls.cyr"
 #
 # Cyrius re-implementation of agnosys syscall bindings.
 # Constants use enums to avoid gvar_toks overflow (64 slot limit).
@@ -303,6 +303,26 @@ fn sys_getpid() {
     return syscall(SYS_GETPID);
 }
 
+# Get parent process ID.
+fn sys_getppid() {
+    return syscall(SYS_GETPPID);
+}
+
+# Send signal to process.
+fn sys_kill(pid, sig) {
+    return syscall(SYS_KILL, pid, sig);
+}
+
+# Wait for a signal.
+fn sys_pause() {
+    return syscall(SYS_PAUSE);
+}
+
+# Create a new session.
+fn sys_setsid() {
+    return syscall(SYS_SETSID);
+}
+
 # waitpid via wait4 with rusage=NULL
 fn sys_waitpid(pid, status_ptr, options) {
     return syscall(SYS_WAIT4, pid, status_ptr, options, 0);
@@ -314,18 +334,142 @@ fn WIFEXITED(status) {
     return 0;
 }
 
+# Get exit status from wait status.
 fn WEXITSTATUS(status) {
     return (status >> 8) & 0xFF;
 }
 
+# Check if child was killed by signal.
 fn WIFSIGNALED(status) {
     var sig = status & 0x7F;
-    if (sig > 0) { if (sig < 0x7F) { return 1; } }
+    if (sig > 0) {
+        if (sig != 0x7F) { return 1; }
+    }
     return 0;
 }
 
+# Get signal number from wait status.
 fn WTERMSIG(status) {
     return status & 0x7F;
+}
+
+# Identity
+fn sys_getuid() { return syscall(SYS_GETUID); }
+# Get group ID.
+fn sys_getgid() { return syscall(SYS_GETGID); }
+# Get effective user ID.
+fn sys_geteuid() { return syscall(SYS_GETEUID); }
+# Get effective group ID.
+fn sys_getegid() { return syscall(SYS_GETEGID); }
+# Set user ID.
+fn sys_setuid(uid) { return syscall(SYS_SETUID, uid); }
+# Set group ID.
+fn sys_setgid(gid) { return syscall(SYS_SETGID, gid); }
+# sys_setgroups syscall wrapper.
+fn sys_setgroups(size, list) { return syscall(SYS_SETGROUPS, size, list); }
+
+# Mount
+fn sys_mount(source, target, fstype, flags, data) {
+    return syscall(SYS_MOUNT, source, target, fstype, flags, data);
+}
+
+# Unmount a filesystem.
+fn sys_umount2(target, flags) {
+    return syscall(SYS_UMOUNT2, target, flags);
+}
+
+# Sync + reboot
+fn sys_sync() {
+    syscall(SYS_SYNC);
+    return 0;
+}
+
+# sys_reboot syscall wrapper.
+fn sys_reboot(cmd) {
+    return syscall(SYS_REBOOT, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, cmd, 0);
+}
+
+# Signal operations
+fn sigset_new() {
+    var set = alloc(8);
+    store64(set, 0);
+    return set;
+}
+
+# sigset_add syscall wrapper.
+fn sigset_add(set, signum) {
+    var mask = load64(set);
+    mask = mask | (1 << (signum - 1));
+    store64(set, mask);
+    return 0;
+}
+
+# sigset_has syscall wrapper.
+fn sigset_has(set, signum) {
+    var mask = load64(set);
+    if ((mask & (1 << (signum - 1))) != 0) { return 1; }
+    return 0;
+}
+
+# sys_sigprocmask syscall wrapper.
+fn sys_sigprocmask(how, set, oldset) {
+    return syscall(SYS_RT_SIGPROCMASK, how, set, oldset, 8);
+}
+
+# sys_signalfd syscall wrapper.
+fn sys_signalfd(fd, mask, flags) {
+    return syscall(SYS_SIGNALFD4, fd, mask, 8, flags);
+}
+
+# Epoll
+fn sys_epoll_create() {
+    return syscall(SYS_EPOLL_CREATE1, EPOLL_CLOEXEC);
+}
+
+# epoll_event: { u32 events, u64 data } = 12 bytes
+fn epoll_event_new(events, data) {
+    var ev = alloc(16);
+    store32(ev, events);
+    store64(ev + 4, data);
+    return ev;
+}
+
+# Control epoll: add/mod/del fd.
+fn sys_epoll_ctl(epfd, op, fd, event) {
+    return syscall(SYS_EPOLL_CTL, epfd, op, fd, event);
+}
+
+# Wait for epoll events.
+fn sys_epoll_wait(epfd, events, maxevents, timeout) {
+    return syscall(SYS_EPOLL_WAIT, epfd, events, maxevents, timeout);
+}
+
+# Timers
+fn sys_timerfd_create(clockid, flags) {
+    return syscall(SYS_TIMERFD_CREATE, clockid, flags);
+}
+
+# itimerspec: { interval: {sec, nsec}, value: {sec, nsec} } = 32 bytes
+fn timerspec_new(interval_sec, initial_sec) {
+    var ts = alloc(32);
+    store64(ts, interval_sec);
+    store64(ts + 8, 0);
+    store64(ts + 16, initial_sec);
+    store64(ts + 24, 0);
+    return ts;
+}
+
+# Set timer expiration.
+fn sys_timerfd_settime(fd, flags, new_value, old_value) {
+    return syscall(SYS_TIMERFD_SETTIME, fd, flags, new_value, old_value);
+}
+
+# timerfd_drain syscall wrapper.
+fn timerfd_drain(fd) {
+    var buf[1];
+    var n = sys_read(fd, &buf, 8);
+    if (n == 8) { return load64(&buf); }
+    return 0;
 }
 
 # Utility
@@ -338,3 +482,20 @@ fn is_err(ret) {
 fn err_code(ret) {
     return 0 - ret;
 }
+
+# Inotify — file system event monitoring
+enum InotifyEvent {
+    IN_MODIFY = 2;
+    IN_CREATE = 256;
+    IN_DELETE = 512;
+    IN_MOVED_FROM = 64;
+    IN_MOVED_TO = 128;
+    IN_CLOSE_WRITE = 8;
+}
+
+# SYS_INOTIFY_INIT1 = 294, SYS_INOTIFY_ADD_WATCH = 254, SYS_INOTIFY_RM_WATCH = 255
+fn sys_inotify_init() { return syscall(294, 0); }
+# Add a watch on a path for inotify events
+fn sys_inotify_add_watch(fd, path, mask) { return syscall(254, fd, path, mask); }
+# Remove an inotify watch
+fn sys_inotify_rm_watch(fd, wd) { return syscall(255, fd, wd); }

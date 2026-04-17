@@ -49,26 +49,37 @@ main();
 
 ## Build
 
-Requires the [Cyrius compiler](https://github.com/MacCracken/cyrius) (cc3).
+Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 5.2.x
+(`cc5` + `cyrius`).
 
 ```sh
+# Resolve deps into lib/
+cyrius deps
+
 # Build
-cat src/main.cyr | cc3 > build/yukti && chmod +x build/yukti
+cat src/main.cyr | cc5 > build/yukti && chmod +x build/yukti
 
 # Run
 ./build/yukti
 
-# Test (407 assertions)
-cat tests/yukti.tcyr | cc3 > build/yukti_test && chmod +x build/yukti_test
+# Test (485 assertions)
+cat tests/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
 ./build/yukti_test
 
-# Benchmark (45 operations)
-cat benches/bench.bcyr | cc3 > build/yukti_bench && chmod +x build/yukti_bench
+# Benchmark
+cat benches/bench.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
 ./build/yukti_bench
 
 # Fuzz
-cat fuzz/fuzz_parse_uevent.fcyr | cc3 > build/fuzz_uevent && ./build/fuzz_uevent
-cat fuzz/fuzz_mount_table.fcyr | cc3 > build/fuzz_mount && ./build/fuzz_mount
+cat fuzz/fuzz_parse_uevent.fcyr | cc5 > build/fuzz_uevent && ./build/fuzz_uevent
+cat fuzz/fuzz_mount_table.fcyr  | cc5 > build/fuzz_mount  && ./build/fuzz_mount
+
+# Bundle for distribution
+cyrius distlib               # dist/yukti.cyr
+
+# Supply-chain integrity
+cyrius deps --lock           # cyrius.lock
+cyrius deps --verify
 ```
 
 ## Example Output

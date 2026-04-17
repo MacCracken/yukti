@@ -21,7 +21,16 @@
 
 - [x] Published yukti as Cyrius stdlib module (`lib/yukti.cyr`)
 - [x] Extended `lib/str.cyr` with 12 new functions upstreamed to Cyrius stdlib
-- [x] Added `[deps.yukti]` to cyrius.toml
+- [x] Added `[deps.yukti]` to cyrius manifest
+
+## Completed (v1.2.0 → Cyrius 5.2.x modernization)
+
+- [x] Migrated manifest `cyrius.toml` → `cyrius.cyml` with `${file:VERSION}`
+- [x] Dropped `scripts/bundle.sh` — replaced by native `cyrius distlib`
+- [x] Added `cyrius.lock` (SHA256 hashes) via `cyrius deps --lock`
+- [x] CI + release workflows updated to cc5 and `cyrius deps --verify` gate
+- [x] Switched `sakshi_full.cyr` → unified `sakshi.cyr` (sakshi 2.0.0)
+- [x] Test suite grew from 407 → 485 assertions
 
 ## Next Release
 

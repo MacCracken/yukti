@@ -3,8 +3,8 @@
 ## Running Tests
 
 ```sh
-# Build and run (407 assertions)
-cat tests/yukti.tcyr | cc3 > build/yukti_test && chmod +x build/yukti_test
+# Build and run (485 assertions)
+cat tests/yukti.tcyr | cc5 > build/yukti_test && chmod +x build/yukti_test
 ./build/yukti_test
 ```
 
@@ -18,8 +18,12 @@ Expected output:
 === udev ===
 === udev_rules ===
 === linux ===
+=== device_db ===
+=== partition ===
+=== network ===
+=== gpu ===
 
-407 passed, 0 failed (407 total)
+485 passed, 0 failed (485 total)
 ```
 
 ## Test Coverage by Module
@@ -38,7 +42,7 @@ Expected output:
 ## Running Benchmarks
 
 ```sh
-cat benches/bench.bcyr | cc3 > build/yukti_bench && chmod +x build/yukti_bench
+cat benches/bench.bcyr | cc5 > build/yukti_bench && chmod +x build/yukti_bench
 ./build/yukti_bench
 ```
 
@@ -48,10 +52,10 @@ cat benches/bench.bcyr | cc3 > build/yukti_bench && chmod +x build/yukti_bench
 
 ```sh
 # Uevent parser — 1000 mutations + full truncation sweep
-cat fuzz/fuzz_parse_uevent.fcyr | cc3 > build/fuzz_uevent && ./build/fuzz_uevent
+cat fuzz/fuzz_parse_uevent.fcyr | cc5 > build/fuzz_uevent && ./build/fuzz_uevent
 
 # Mount table parser — 500 mutations + full truncation sweep
-cat fuzz/fuzz_mount_table.fcyr | cc3 > build/fuzz_mount && ./build/fuzz_mount
+cat fuzz/fuzz_mount_table.fcyr | cc5 > build/fuzz_mount && ./build/fuzz_mount
 ```
 
 ## Writing Tests

@@ -11,7 +11,7 @@
 | **Library (rlib/ELF)** | 2,281,434 bytes | 151,752 bytes | **15x smaller** |
 | **Example binary (stripped)** | 449,144 bytes | 151,752 bytes | **3x smaller** |
 | **Dependencies** | 47 crates (Cargo.lock) | 0 external deps | — |
-| **Toolchain size** | ~800 MB (rustup) | 243 KB (cc3) | **3,300x smaller** |
+| **Toolchain size** | ~800 MB (rustup) | ~300 KB (cc5) | **2,600x smaller** |
 
 ## Source Code
 

@@ -1376,6 +1376,17 @@ fn main() {
     test_gpu_info_report();
     test_gpu_device_class();
 
+    # PCI tables — kernel-safe core (9 tests)
+    test_pci_class_constants();
+    test_pci_class_name();
+    test_pci_storage_subclass_constants();
+    test_pci_class_to_device_type();
+    test_pci_vendor_constants();
+    test_pci_vendor_name();
+    test_pci_device_name_fallback();
+    test_pci_storage_predicates();
+    test_pci_display_network_predicates();
+
     var r = assert_summary();
     syscall(60, r);
 }
@@ -1696,6 +1707,103 @@ fn test_gpu_info_report() {
 fn test_gpu_device_class() {
     assert_eq(DC_GPU, 7, "DC_GPU = 7");
     assert(streq(device_class_to_str(DC_GPU), "gpu") == 1, "gpu class str");
+    return 0;
+}
+
+# ===================================================================
+# PCI tests — kernel-safe core tables (zero alloc, zero syscalls)
+# ===================================================================
+
+fn test_pci_class_constants() {
+    test_group("pci");
+    assert_eq(PCI_CLASS_UNCLASSIFIED, 0, "unclassified = 0");
+    assert_eq(PCI_CLASS_STORAGE, 1, "storage = 1");
+    assert_eq(PCI_CLASS_NETWORK, 2, "network = 2");
+    assert_eq(PCI_CLASS_DISPLAY, 3, "display = 3");
+    assert_eq(PCI_CLASS_BRIDGE, 6, "bridge = 6");
+    assert_eq(PCI_CLASS_SERIAL_BUS, 12, "serial-bus = 12");
+    return 0;
+}
+
+fn test_pci_class_name() {
+    assert(streq(pci_class_name(PCI_CLASS_STORAGE), "mass-storage") == 1, "storage name");
+    assert(streq(pci_class_name(PCI_CLASS_NETWORK), "network") == 1, "network name");
+    assert(streq(pci_class_name(PCI_CLASS_DISPLAY), "display") == 1, "display name");
+    assert(streq(pci_class_name(PCI_CLASS_BRIDGE), "bridge") == 1, "bridge name");
+    assert(streq(pci_class_name(PCI_CLASS_SERIAL_BUS), "serial-bus") == 1, "serial-bus name");
+    assert(streq(pci_class_name(99), "reserved") == 1, "unknown class -> reserved");
+    return 0;
+}
+
+fn test_pci_storage_subclass_constants() {
+    assert_eq(PCI_SUB_STORAGE_IDE, 1, "IDE = 1");
+    assert_eq(PCI_SUB_STORAGE_SATA, 6, "SATA = 6");
+    assert_eq(PCI_SUB_STORAGE_NVM, 8, "NVMe = 8");
+    return 0;
+}
+
+fn test_pci_class_to_device_type() {
+    # Storage controller → internal block
+    assert_eq(pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM), DC_BLOCK_INTERNAL, "NVMe -> block-internal");
+    assert_eq(pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_SATA), DC_BLOCK_INTERNAL, "SATA -> block-internal");
+
+    # Network → DC_NETWORK
+    assert_eq(pci_class_to_device_type(PCI_CLASS_NETWORK, PCI_SUB_NETWORK_ETHERNET), DC_NETWORK, "ethernet -> network");
+
+    # Display → DC_GPU
+    assert_eq(pci_class_to_device_type(PCI_CLASS_DISPLAY, PCI_SUB_DISPLAY_VGA), DC_GPU, "VGA -> gpu");
+    assert_eq(pci_class_to_device_type(PCI_CLASS_DISPLAY, PCI_SUB_DISPLAY_3D), DC_GPU, "3D -> gpu");
+
+    # Serial bus / USB host controller → unknown (host controller, not the devices)
+    assert_eq(pci_class_to_device_type(PCI_CLASS_SERIAL_BUS, PCI_SUB_SERIAL_USB), DC_UNKNOWN, "USB host -> unknown");
+
+    # Everything else → unknown
+    assert_eq(pci_class_to_device_type(PCI_CLASS_BRIDGE, 0), DC_UNKNOWN, "bridge -> unknown");
+    assert_eq(pci_class_to_device_type(PCI_CLASS_INPUT, 0), DC_UNKNOWN, "input -> unknown");
+    return 0;
+}
+
+fn test_pci_vendor_constants() {
+    assert_eq(PCI_VENDOR_INTEL, 0x8086, "Intel = 0x8086");
+    assert_eq(PCI_VENDOR_AMD, 0x1022, "AMD = 0x1022");
+    assert_eq(PCI_VENDOR_NVIDIA, 0x10DE, "NVIDIA = 0x10DE");
+    assert_eq(PCI_VENDOR_REALTEK, 0x10EC, "Realtek = 0x10EC");
+    assert_eq(PCI_VENDOR_REDHAT, 0x1AF4, "Red Hat virtio = 0x1AF4");
+    return 0;
+}
+
+fn test_pci_vendor_name() {
+    assert(streq(pci_vendor_name(PCI_VENDOR_INTEL), "Intel") == 1, "Intel name");
+    assert(streq(pci_vendor_name(PCI_VENDOR_AMD), "AMD") == 1, "AMD name");
+    assert(streq(pci_vendor_name(PCI_VENDOR_NVIDIA), "NVIDIA") == 1, "NVIDIA name");
+    assert(streq(pci_vendor_name(PCI_VENDOR_REDHAT), "Red Hat (virtio)") == 1, "Red Hat virtio name");
+    assert(streq(pci_vendor_name(0xFFFF), "unknown") == 1, "unknown vendor");
+    return 0;
+}
+
+fn test_pci_device_name_fallback() {
+    # Stub currently returns vendor name as best-effort
+    assert(streq(pci_device_name(PCI_VENDOR_INTEL, 0x1234), "Intel") == 1, "device name falls back to vendor");
+    assert(streq(pci_device_name(0xFFFF, 0x0001), "unknown") == 1, "unknown vendor -> unknown");
+    return 0;
+}
+
+fn test_pci_storage_predicates() {
+    assert(pci_is_storage(PCI_CLASS_STORAGE), "is_storage true for storage");
+    assert(pci_is_storage(PCI_CLASS_NETWORK) == 0, "is_storage false for network");
+    assert(pci_is_nvme(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM), "is_nvme true for NVMe");
+    assert(pci_is_nvme(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_SATA) == 0, "is_nvme false for SATA");
+    assert(pci_is_nvme(PCI_CLASS_NETWORK, PCI_SUB_STORAGE_NVM) == 0, "is_nvme false for network");
+    assert(pci_is_sata(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_SATA), "is_sata true for SATA");
+    assert(pci_is_sata(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM) == 0, "is_sata false for NVMe");
+    return 0;
+}
+
+fn test_pci_display_network_predicates() {
+    assert(pci_is_gpu(PCI_CLASS_DISPLAY), "is_gpu true for display");
+    assert(pci_is_gpu(PCI_CLASS_STORAGE) == 0, "is_gpu false for storage");
+    assert(pci_is_network(PCI_CLASS_NETWORK), "is_network true for network");
+    assert(pci_is_network(PCI_CLASS_DISPLAY) == 0, "is_network false for display");
     return 0;
 }
 

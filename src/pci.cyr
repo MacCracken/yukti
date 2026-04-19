@@ -1,0 +1,246 @@
+# yukti/pci.cyr — PCI class/subclass + vendor/device lookup tables
+#
+# Kernel-safe: zero heap allocation, zero syscalls, zero file I/O.
+# All functions return cstring literals or integer constants.
+#
+# The AGNOS kernel imports this module (plus src/core.cyr) for
+# bare-metal PCI device identification during bus enumeration.
+# Userland callers get the same API.
+#
+# Source: PCI SIG class-code registry + pci.ids (systemd/hwdata).
+# Kept intentionally small — covers the classes/vendors likely to
+# matter for boot-time device identification. Extend with specific
+# device_id entries only when a real consumer needs them.
+
+# ---------------------------------------------------------------------------
+# PCI class codes (base class, 8-bit)
+# See: https://pcisig.com/membership/member-companies
+# ---------------------------------------------------------------------------
+
+enum PciClass {
+    PCI_CLASS_UNCLASSIFIED = 0;
+    PCI_CLASS_STORAGE = 1;
+    PCI_CLASS_NETWORK = 2;
+    PCI_CLASS_DISPLAY = 3;
+    PCI_CLASS_MULTIMEDIA = 4;
+    PCI_CLASS_MEMORY = 5;
+    PCI_CLASS_BRIDGE = 6;
+    PCI_CLASS_COMMUNICATION = 7;
+    PCI_CLASS_GENERIC_SYSTEM = 8;
+    PCI_CLASS_INPUT = 9;
+    PCI_CLASS_DOCKING = 10;
+    PCI_CLASS_PROCESSOR = 11;
+    PCI_CLASS_SERIAL_BUS = 12;
+    PCI_CLASS_WIRELESS = 13;
+    PCI_CLASS_INTELLIGENT_IO = 14;
+    PCI_CLASS_SATELLITE = 15;
+    PCI_CLASS_ENCRYPTION = 16;
+    PCI_CLASS_SIGNAL_PROCESSING = 17;
+    PCI_CLASS_ACCELERATOR = 18;
+    PCI_CLASS_NON_ESSENTIAL = 19;
+}
+
+pub fn pci_class_name(class_code) {
+    if (class_code == PCI_CLASS_UNCLASSIFIED) { return "unclassified"; }
+    if (class_code == PCI_CLASS_STORAGE) { return "mass-storage"; }
+    if (class_code == PCI_CLASS_NETWORK) { return "network"; }
+    if (class_code == PCI_CLASS_DISPLAY) { return "display"; }
+    if (class_code == PCI_CLASS_MULTIMEDIA) { return "multimedia"; }
+    if (class_code == PCI_CLASS_MEMORY) { return "memory"; }
+    if (class_code == PCI_CLASS_BRIDGE) { return "bridge"; }
+    if (class_code == PCI_CLASS_COMMUNICATION) { return "communication"; }
+    if (class_code == PCI_CLASS_GENERIC_SYSTEM) { return "generic-system"; }
+    if (class_code == PCI_CLASS_INPUT) { return "input"; }
+    if (class_code == PCI_CLASS_DOCKING) { return "docking"; }
+    if (class_code == PCI_CLASS_PROCESSOR) { return "processor"; }
+    if (class_code == PCI_CLASS_SERIAL_BUS) { return "serial-bus"; }
+    if (class_code == PCI_CLASS_WIRELESS) { return "wireless"; }
+    if (class_code == PCI_CLASS_INTELLIGENT_IO) { return "intelligent-io"; }
+    if (class_code == PCI_CLASS_SATELLITE) { return "satellite"; }
+    if (class_code == PCI_CLASS_ENCRYPTION) { return "encryption"; }
+    if (class_code == PCI_CLASS_SIGNAL_PROCESSING) { return "signal-processing"; }
+    if (class_code == PCI_CLASS_ACCELERATOR) { return "accelerator"; }
+    if (class_code == PCI_CLASS_NON_ESSENTIAL) { return "non-essential"; }
+    return "reserved";
+}
+
+# ---------------------------------------------------------------------------
+# Storage subclasses (class 0x01)
+# ---------------------------------------------------------------------------
+
+enum PciStorageSubclass {
+    PCI_SUB_STORAGE_SCSI = 0;
+    PCI_SUB_STORAGE_IDE = 1;
+    PCI_SUB_STORAGE_FLOPPY = 2;
+    PCI_SUB_STORAGE_IPI = 3;
+    PCI_SUB_STORAGE_RAID = 4;
+    PCI_SUB_STORAGE_ATA = 5;
+    PCI_SUB_STORAGE_SATA = 6;
+    PCI_SUB_STORAGE_SAS = 7;
+    PCI_SUB_STORAGE_NVM = 8;
+}
+
+# ---------------------------------------------------------------------------
+# Display subclasses (class 0x03)
+# ---------------------------------------------------------------------------
+
+enum PciDisplaySubclass {
+    PCI_SUB_DISPLAY_VGA = 0;
+    PCI_SUB_DISPLAY_XGA = 1;
+    PCI_SUB_DISPLAY_3D = 2;
+}
+
+# ---------------------------------------------------------------------------
+# Network subclasses (class 0x02)
+# ---------------------------------------------------------------------------
+
+enum PciNetworkSubclass {
+    PCI_SUB_NETWORK_ETHERNET = 0;
+    PCI_SUB_NETWORK_TOKEN_RING = 1;
+    PCI_SUB_NETWORK_FDDI = 2;
+    PCI_SUB_NETWORK_ATM = 3;
+    PCI_SUB_NETWORK_ISDN = 4;
+    PCI_SUB_NETWORK_WORLDFIP = 5;
+    PCI_SUB_NETWORK_PICMG = 6;
+    PCI_SUB_NETWORK_INFINIBAND = 7;
+}
+
+# ---------------------------------------------------------------------------
+# Serial bus subclasses (class 0x0C) — host controllers
+# ---------------------------------------------------------------------------
+
+enum PciSerialBusSubclass {
+    PCI_SUB_SERIAL_FIREWIRE = 0;
+    PCI_SUB_SERIAL_ACCESS = 1;
+    PCI_SUB_SERIAL_SSA = 2;
+    PCI_SUB_SERIAL_USB = 3;
+    PCI_SUB_SERIAL_FIBRE_CHANNEL = 4;
+    PCI_SUB_SERIAL_SMBUS = 5;
+    PCI_SUB_SERIAL_INFINIBAND = 6;
+    PCI_SUB_SERIAL_IPMI = 7;
+    PCI_SUB_SERIAL_SERCOS = 8;
+    PCI_SUB_SERIAL_CANBUS = 9;
+}
+
+# ---------------------------------------------------------------------------
+# pci_class_to_device_type — map (class, subclass) → yukti DeviceClass
+#
+# This is the primary kernel-use-case lookup: given a PCI config-space
+# class/subclass pair, what kind of yukti device is it? Returns a
+# DeviceClass value from src/core.cyr.
+# ---------------------------------------------------------------------------
+
+pub fn pci_class_to_device_type(class_code, subclass) {
+    if (class_code == PCI_CLASS_STORAGE) {
+        # NVMe and most storage controllers map to internal block
+        return DC_BLOCK_INTERNAL;
+    }
+    if (class_code == PCI_CLASS_NETWORK) {
+        return DC_NETWORK;
+    }
+    if (class_code == PCI_CLASS_DISPLAY) {
+        return DC_GPU;
+    }
+    if (class_code == PCI_CLASS_SERIAL_BUS) {
+        # USB host controllers — device_class will be refined downstream
+        # when actual USB devices attach. For the host-controller itself,
+        # surface it as unknown so the enumerator doesn't mistake it for
+        # a storage device.
+        if (subclass == PCI_SUB_SERIAL_USB) { return DC_UNKNOWN; }
+        return DC_UNKNOWN;
+    }
+    return DC_UNKNOWN;
+}
+
+# ---------------------------------------------------------------------------
+# Vendor IDs — common silicon vendors.
+# List intentionally small; only vendors the AGNOS kernel is likely
+# to encounter during boot on mainstream x86/ARM hardware.
+# ---------------------------------------------------------------------------
+
+enum PciVendor {
+    PCI_VENDOR_INTEL = 0x8086;
+    PCI_VENDOR_AMD = 0x1022;
+    PCI_VENDOR_NVIDIA = 0x10DE;
+    PCI_VENDOR_REALTEK = 0x10EC;
+    PCI_VENDOR_BROADCOM = 0x14E4;
+    PCI_VENDOR_QUALCOMM = 0x17CB;
+    PCI_VENDOR_APPLE = 0x106B;
+    PCI_VENDOR_SAMSUNG = 0x144D;
+    PCI_VENDOR_MELLANOX = 0x15B3;
+    PCI_VENDOR_MARVELL = 0x11AB;
+    PCI_VENDOR_ATI = 0x1002;   # AMD GPUs still show up here
+    PCI_VENDOR_VMWARE = 0x15AD;
+    PCI_VENDOR_REDHAT = 0x1AF4; # virtio
+    PCI_VENDOR_IBM = 0x1014;
+    PCI_VENDOR_VIA = 0x1106;
+    PCI_VENDOR_ASMEDIA = 0x1B21;
+    PCI_VENDOR_STMICRO = 0x104A;
+    PCI_VENDOR_MICRON = 0x1344;
+    PCI_VENDOR_WESTERN_DIGITAL = 0x1B96;
+    PCI_VENDOR_SEAGATE = 0x1BB1;
+}
+
+pub fn pci_vendor_name(vendor_id) {
+    if (vendor_id == PCI_VENDOR_INTEL) { return "Intel"; }
+    if (vendor_id == PCI_VENDOR_AMD) { return "AMD"; }
+    if (vendor_id == PCI_VENDOR_NVIDIA) { return "NVIDIA"; }
+    if (vendor_id == PCI_VENDOR_REALTEK) { return "Realtek"; }
+    if (vendor_id == PCI_VENDOR_BROADCOM) { return "Broadcom"; }
+    if (vendor_id == PCI_VENDOR_QUALCOMM) { return "Qualcomm"; }
+    if (vendor_id == PCI_VENDOR_APPLE) { return "Apple"; }
+    if (vendor_id == PCI_VENDOR_SAMSUNG) { return "Samsung"; }
+    if (vendor_id == PCI_VENDOR_MELLANOX) { return "Mellanox"; }
+    if (vendor_id == PCI_VENDOR_MARVELL) { return "Marvell"; }
+    if (vendor_id == PCI_VENDOR_ATI) { return "ATI/AMD"; }
+    if (vendor_id == PCI_VENDOR_VMWARE) { return "VMware"; }
+    if (vendor_id == PCI_VENDOR_REDHAT) { return "Red Hat (virtio)"; }
+    if (vendor_id == PCI_VENDOR_IBM) { return "IBM"; }
+    if (vendor_id == PCI_VENDOR_VIA) { return "VIA"; }
+    if (vendor_id == PCI_VENDOR_ASMEDIA) { return "ASMedia"; }
+    if (vendor_id == PCI_VENDOR_STMICRO) { return "STMicroelectronics"; }
+    if (vendor_id == PCI_VENDOR_MICRON) { return "Micron"; }
+    if (vendor_id == PCI_VENDOR_WESTERN_DIGITAL) { return "Western Digital"; }
+    if (vendor_id == PCI_VENDOR_SEAGATE) { return "Seagate"; }
+    return "unknown";
+}
+
+# ---------------------------------------------------------------------------
+# pci_device_name — (vendor_id, device_id) → human name
+#
+# Stub for now: no per-device table. Extend when a kernel consumer
+# actually needs device-level granularity beyond vendor+class.
+# Returns the vendor name as a best-effort fallback.
+# ---------------------------------------------------------------------------
+
+pub fn pci_device_name(vendor_id, device_id) {
+    return pci_vendor_name(vendor_id);
+}
+
+# ---------------------------------------------------------------------------
+# Convenience: is this a storage controller class worth probing?
+# ---------------------------------------------------------------------------
+
+pub fn pci_is_storage(class_code) {
+    return class_code == PCI_CLASS_STORAGE;
+}
+
+pub fn pci_is_nvme(class_code, subclass) {
+    if (class_code != PCI_CLASS_STORAGE) { return 0; }
+    if (subclass != PCI_SUB_STORAGE_NVM) { return 0; }
+    return 1;
+}
+
+pub fn pci_is_sata(class_code, subclass) {
+    if (class_code != PCI_CLASS_STORAGE) { return 0; }
+    if (subclass != PCI_SUB_STORAGE_SATA) { return 0; }
+    return 1;
+}
+
+pub fn pci_is_gpu(class_code) {
+    return class_code == PCI_CLASS_DISPLAY;
+}
+
+pub fn pci_is_network(class_code) {
+    return class_code == PCI_CLASS_NETWORK;
+}

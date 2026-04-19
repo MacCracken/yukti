@@ -26,6 +26,8 @@ include "lib/patra.cyr"
 
 # --- Yukti domain modules (dependency order) ---
 include "src/error.cyr"
+include "src/core.cyr"
+include "src/pci.cyr"
 include "src/device.cyr"
 include "src/event.cyr"
 include "src/storage.cyr"

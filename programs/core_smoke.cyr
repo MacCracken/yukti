@@ -1,0 +1,91 @@
+# core_smoke.cyr — kernel-style smoke test for the yukti dual-mode split
+#
+# This program imports ONLY the kernel-safe subset of yukti:
+#   - src/core.cyr   (enums, struct layout, accessors — no alloc, no syscalls)
+#   - src/pci.cyr    (PCI class/vendor tables — no alloc, no syscalls)
+#
+# It deliberately does NOT include src/lib.cyr, src/device.cyr, or any
+# Linux-specific module. The only userland concessions are:
+#   - one SYS_EXIT syscall at program end (required to terminate)
+#   - one SYS_WRITE for a PASS/FAIL banner on stderr so we can see results
+#
+# What this smoke test proves:
+#   1. core.cyr + pci.cyr compile with 0 undefined symbols when no
+#      other yukti module is present.
+#   2. Every yukti function referenced from core.cyr / pci.cyr is
+#      satisfied within those two files — no hidden dependency on
+#      device.cyr, storage.cyr, sakshi, patra, etc.
+#
+# What it does NOT prove (pending Cyrius 5.2.3 distlib profiles):
+#   - Binary leanness. `cyrius build` auto-prepends the project's
+#     [deps] stdlib before every compile, so the output binary still
+#     contains sakshi/patra/full-stdlib code as dead code. The
+#     compiler output reports them as `dead:` — that's the signal
+#     that core.cyr never CALLS them, which is exactly what we want.
+#     True binary leanness will come from the AGNOS kernel building
+#     against a dist/yukti-core.cyr bundle with its own minimal deps.
+#
+# Build:  cyrius build programs/core_smoke.cyr build/core_smoke
+# Run:    ./build/core_smoke ; echo exit=$?
+
+# No alloc, no str_builder, no stdlib — just the two yukti modules.
+include "src/core.cyr"
+include "src/pci.cyr"
+
+fn _write(fd, msg, n) {
+    syscall(1, fd, msg, n);
+    return 0;
+}
+
+fn _assert(cond, label, label_len) {
+    if (cond) { return 1; }
+    _write(2, "FAIL: ", 6);
+    _write(2, label, label_len);
+    _write(2, "\n", 1);
+    syscall(60, 1);
+    return 0;
+}
+
+fn main() {
+    # --- DeviceClass enum values (core.cyr) ---
+    _assert(DC_USB_STORAGE == 0,    "DC_USB_STORAGE", 14);
+    _assert(DC_OPTICAL == 1,        "DC_OPTICAL", 10);
+    _assert(DC_BLOCK_INTERNAL == 2, "DC_BLOCK_INTERNAL", 17);
+    _assert(DC_NETWORK == 4,        "DC_NETWORK", 10);
+    _assert(DC_GPU == 7,            "DC_GPU", 6);
+    _assert(DC_UNKNOWN == 8,        "DC_UNKNOWN", 10);
+
+    # --- DeviceCap bitwise (pure has_cap, no heap) ---
+    _assert(has_cap(CAP_READ | CAP_WRITE, CAP_READ) != 0,  "has_cap READ", 13);
+    _assert(has_cap(CAP_READ, CAP_WRITE) == 0,             "!has_cap WRITE", 14);
+
+    # --- PCI class constants (pci.cyr) ---
+    _assert(PCI_CLASS_STORAGE == 1,    "PCI_CLASS_STORAGE", 17);
+    _assert(PCI_CLASS_NETWORK == 2,    "PCI_CLASS_NETWORK", 17);
+    _assert(PCI_CLASS_DISPLAY == 3,    "PCI_CLASS_DISPLAY", 17);
+    _assert(PCI_SUB_STORAGE_NVM == 8,  "PCI_SUB_STORAGE_NVM", 19);
+
+    # --- pci_class_to_device_type: the primary kernel-use-case lookup ---
+    _assert(pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM) == DC_BLOCK_INTERNAL,
+        "NVMe -> block-internal", 22);
+    _assert(pci_class_to_device_type(PCI_CLASS_NETWORK, PCI_SUB_NETWORK_ETHERNET) == DC_NETWORK,
+        "ethernet -> network", 19);
+    _assert(pci_class_to_device_type(PCI_CLASS_DISPLAY, PCI_SUB_DISPLAY_VGA) == DC_GPU,
+        "VGA -> gpu", 10);
+
+    # --- Vendor IDs ---
+    _assert(PCI_VENDOR_INTEL == 0x8086,  "Intel VID", 9);
+    _assert(PCI_VENDOR_AMD == 0x1022,    "AMD VID", 7);
+    _assert(PCI_VENDOR_NVIDIA == 0x10DE, "NVIDIA VID", 10);
+
+    # --- Predicates ---
+    _assert(pci_is_storage(PCI_CLASS_STORAGE) != 0,  "is_storage", 10);
+    _assert(pci_is_nvme(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM) != 0,  "is_nvme", 7);
+    _assert(pci_is_gpu(PCI_CLASS_DISPLAY) != 0,      "is_gpu", 6);
+    _assert(pci_is_network(PCI_CLASS_NETWORK) != 0,  "is_network", 10);
+
+    _write(1, "core_smoke: PASS (kernel-safe subset linked clean)\n", 51);
+    syscall(60, 0);
+}
+
+main();

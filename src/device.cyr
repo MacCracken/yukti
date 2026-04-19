@@ -1,88 +1,18 @@
-# yukti/device.cyr — Core device types, traits, and capabilities
+# yukti/device.cyr — Userland constructors, queries, and serializers
 #
-# DeviceId, DeviceClass, DeviceState, DeviceCapabilities (bitflags),
-# DeviceInfo (primary device data structure), DeviceHealth, permissions.
+# This module is the Linux-userland counterpart to src/core.cyr.
+# Everything here either allocates (alloc / str_builder / str_from),
+# makes a syscall, or touches /sys — none of which are safe in the
+# AGNOS kernel import path.
+#
+# The kernel-safe half (enums, struct layouts, accessors, pure
+# predicates) lives in src/core.cyr and is imported first.
 
 # ---------------------------------------------------------------------------
-# DeviceClass enum — 9 variants
-# ---------------------------------------------------------------------------
-
-enum DeviceClass {
-    DC_USB_STORAGE = 0;
-    DC_OPTICAL = 1;
-    DC_BLOCK_INTERNAL = 2;
-    DC_SD_CARD = 3;
-    DC_NETWORK = 4;
-    DC_LOOP = 5;
-    DC_DEVICE_MAPPER = 6;
-    DC_GPU = 7;
-    DC_UNKNOWN = 8;
-}
-
-pub fn device_class_to_str(class) {
-    if (class == DC_USB_STORAGE) { return "usb-storage"; }
-    if (class == DC_OPTICAL) { return "optical"; }
-    if (class == DC_BLOCK_INTERNAL) { return "block-internal"; }
-    if (class == DC_SD_CARD) { return "sd-card"; }
-    if (class == DC_NETWORK) { return "network"; }
-    if (class == DC_LOOP) { return "loop"; }
-    if (class == DC_DEVICE_MAPPER) { return "device-mapper"; }
-    if (class == DC_GPU) { return "gpu"; }
-    return "unknown";
-}
-
-# ---------------------------------------------------------------------------
-# DeviceState enum — 6 variants
-# ---------------------------------------------------------------------------
-
-enum DeviceState {
-    DS_READY = 0;
-    DS_MOUNTED = 1;
-    DS_NO_MEDIA = 2;
-    DS_EJECTING = 3;
-    DS_DETACHED = 4;
-    DS_ERROR = 5;
-}
-
-pub fn device_state_to_str(state) {
-    if (state == DS_READY) { return "ready"; }
-    if (state == DS_MOUNTED) { return "mounted"; }
-    if (state == DS_NO_MEDIA) { return "no-media"; }
-    if (state == DS_EJECTING) { return "ejecting"; }
-    if (state == DS_DETACHED) { return "detached"; }
-    if (state == DS_ERROR) { return "error"; }
-    return "unknown";
-}
-
-# ---------------------------------------------------------------------------
-# DeviceCapabilities — bitflags (u16 in Rust, i64 here)
-# ---------------------------------------------------------------------------
-
-enum DeviceCap {
-    CAP_READ = 1;
-    CAP_WRITE = 2;
-    CAP_EJECT = 4;
-    CAP_MEDIA_CHANGE = 8;
-    CAP_REMOVABLE = 16;
-    CAP_TRIM = 32;
-    CAP_HOTPLUG = 64;
-    CAP_TRAY_CONTROL = 128;
-    CAP_AUDIO_PLAYBACK = 256;
-    CAP_BURN = 512;
-}
-
-# Check if capabilities bitfield has a specific cap
-pub fn has_cap(caps, cap) {
-    return (caps & cap) != 0;
-}
-
-# ---------------------------------------------------------------------------
-# DeviceId — wraps a Str
-# Layout: 8 bytes — pointer to Str
+# DeviceId — wraps a Str. Allocates.
 # ---------------------------------------------------------------------------
 
 pub fn device_id_new(s) {
-    # s should be a Str (from str_from)
     var id = alloc(8);
     store64(id, s);
     return id;
@@ -101,56 +31,9 @@ pub fn device_id_eq(a, b) {
 }
 
 # ---------------------------------------------------------------------------
-# DeviceInfo — primary device structure
-# Layout: 168 bytes (21 fields x 8 bytes)
-#
-#   0: id (DeviceId ptr)
-#   8: dev_path (Str)
-#  16: sys_path (Str, 0 if none)
-#  24: class (DeviceClass)
-#  32: state (DeviceState)
-#  40: label (Str, 0 if none)
-#  48: vendor (Str, 0 if none)
-#  56: model (Str, 0 if none)
-#  64: serial (Str, 0 if none)
-#  72: fs_type (Str, 0 if none)
-#  80: mount_point (Str, 0 if none)
-#  88: size_bytes (i64)
-#  96: capabilities (bitflags i64)
-# 104: detected_at (i64 timestamp)
-# 112: uid (i64)
-# 120: gid (i64)
-# 128: mode (i64)
-# 136: usb_vendor_id (i64, 0 if none, -1 = unset)
-# 144: usb_product_id (i64, 0 if none, -1 = unset)
-# 152: partition_table (Str, 0 if none)
-# 160: properties (hashmap ptr)
+# DeviceInfo constructor — allocates the 168-byte struct.
+# Field layout + accessors are in src/core.cyr.
 # ---------------------------------------------------------------------------
-
-enum DeviceInfoField {
-    DI_ID = 0;
-    DI_DEV_PATH = 8;
-    DI_SYS_PATH = 16;
-    DI_CLASS = 24;
-    DI_STATE = 32;
-    DI_LABEL = 40;
-    DI_VENDOR = 48;
-    DI_MODEL = 56;
-    DI_SERIAL = 64;
-    DI_FS_TYPE = 72;
-    DI_MOUNT_POINT = 80;
-    DI_SIZE_BYTES = 88;
-    DI_CAPS = 96;
-    DI_DETECTED_AT = 104;
-    DI_UID = 112;
-    DI_GID = 120;
-    DI_MODE = 128;
-    DI_USB_VID = 136;
-    DI_USB_PID = 144;
-    DI_PART_TABLE = 152;
-    DI_PROPERTIES = 160;
-    DI_SIZE = 168;
-}
 
 pub fn device_info_new(id, dev_path, class) {
     var info = alloc(DI_SIZE);
@@ -178,85 +61,10 @@ pub fn device_info_new(id, dev_path, class) {
     return info;
 }
 
-# Field accessors
-pub fn di_id(info) { return load64(info + DI_ID); }
-pub fn di_dev_path(info) { return load64(info + DI_DEV_PATH); }
-pub fn di_sys_path(info) { return load64(info + DI_SYS_PATH); }
-pub fn di_class(info) { return load64(info + DI_CLASS); }
-pub fn di_state(info) { return load64(info + DI_STATE); }
-pub fn di_label(info) { return load64(info + DI_LABEL); }
-pub fn di_vendor(info) { return load64(info + DI_VENDOR); }
-pub fn di_model(info) { return load64(info + DI_MODEL); }
-pub fn di_serial(info) { return load64(info + DI_SERIAL); }
-pub fn di_fs_type(info) { return load64(info + DI_FS_TYPE); }
-pub fn di_mount_point(info) { return load64(info + DI_MOUNT_POINT); }
-pub fn di_size_bytes(info) { return load64(info + DI_SIZE_BYTES); }
-pub fn di_caps(info) { return load64(info + DI_CAPS); }
-pub fn di_detected_at(info) { return load64(info + DI_DETECTED_AT); }
-pub fn di_uid(info) { return load64(info + DI_UID); }
-pub fn di_gid(info) { return load64(info + DI_GID); }
-pub fn di_mode(info) { return load64(info + DI_MODE); }
-pub fn di_usb_vid(info) { return load64(info + DI_USB_VID); }
-pub fn di_usb_pid(info) { return load64(info + DI_USB_PID); }
-pub fn di_part_table(info) { return load64(info + DI_PART_TABLE); }
-pub fn di_properties(info) { return load64(info + DI_PROPERTIES); }
-
-# Field setters
-pub fn di_set_sys_path(info, v) { store64(info + DI_SYS_PATH, v); return 0; }
-pub fn di_set_state(info, v) { store64(info + DI_STATE, v); return 0; }
-pub fn di_set_label(info, v) { store64(info + DI_LABEL, v); return 0; }
-pub fn di_set_vendor(info, v) { store64(info + DI_VENDOR, v); return 0; }
-pub fn di_set_model(info, v) { store64(info + DI_MODEL, v); return 0; }
-pub fn di_set_serial(info, v) { store64(info + DI_SERIAL, v); return 0; }
-pub fn di_set_fs_type(info, v) { store64(info + DI_FS_TYPE, v); return 0; }
-pub fn di_set_mount_point(info, v) { store64(info + DI_MOUNT_POINT, v); return 0; }
-pub fn di_set_size_bytes(info, v) { store64(info + DI_SIZE_BYTES, v); return 0; }
-pub fn di_set_caps(info, v) { store64(info + DI_CAPS, v); return 0; }
-pub fn di_set_detected_at(info, v) { store64(info + DI_DETECTED_AT, v); return 0; }
-pub fn di_set_uid(info, v) { store64(info + DI_UID, v); return 0; }
-pub fn di_set_gid(info, v) { store64(info + DI_GID, v); return 0; }
-pub fn di_set_mode(info, v) { store64(info + DI_MODE, v); return 0; }
-pub fn di_set_usb_vid(info, v) { store64(info + DI_USB_VID, v); return 0; }
-pub fn di_set_usb_pid(info, v) { store64(info + DI_USB_PID, v); return 0; }
-pub fn di_set_part_table(info, v) { store64(info + DI_PART_TABLE, v); return 0; }
-pub fn di_set_properties(info, v) { store64(info + DI_PROPERTIES, v); return 0; }
-
 # ---------------------------------------------------------------------------
-# DeviceInfo methods
+# Size display — uses str_builder, so userland.
 # ---------------------------------------------------------------------------
 
-# Check if device has a specific capability (O(1) bitwise)
-pub fn device_info_has_cap(info, cap) {
-    return has_cap(di_caps(info), cap);
-}
-
-# Check if device is currently mounted
-pub fn device_info_is_mounted(info) {
-    if (di_state(info) == DS_MOUNTED) { return 1; }
-    if (di_mount_point(info) != 0) { return 1; }
-    return 0;
-}
-
-# Check if device is removable (USB, optical, SD, or has REMOVABLE cap)
-pub fn device_info_is_removable(info) {
-    var class = di_class(info);
-    if (class == DC_USB_STORAGE) { return 1; }
-    if (class == DC_OPTICAL) { return 1; }
-    if (class == DC_SD_CARD) { return 1; }
-    if (has_cap(di_caps(info), CAP_REMOVABLE)) { return 1; }
-    return 0;
-}
-
-# Human-readable display name: label > model > dev_path
-pub fn device_info_display_name(info) {
-    var label = di_label(info);
-    if (label != 0) { return label; }
-    var model = di_model(info);
-    if (model != 0) { return model; }
-    return di_dev_path(info);
-}
-
-# Format size as human-readable string into a string builder
 pub fn device_info_size_display(info, sb) {
     var bytes = di_size_bytes(info);
     if (bytes == 0) {
@@ -264,14 +72,12 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # Use integer division for simplicity (avoid f64 for portability)
     if (bytes < 1024) {
         str_builder_add_int(sb, bytes);
         str_builder_add_cstr(sb, " B");
         return 0;
     }
 
-    # KB
     if (bytes < 1048576) {
         var kb = bytes / 1024;
         var kb_frac = ((bytes % 1024) * 10) / 1024;
@@ -282,7 +88,6 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # MB
     if (bytes < 1073741824) {
         var mb = bytes / 1048576;
         var mb_frac = ((bytes % 1048576) * 10) / 1048576;
@@ -293,7 +98,6 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # GB
     if (bytes < 1099511627776) {
         var gb = bytes / 1073741824;
         var gb_frac = ((bytes % 1073741824) * 10) / 1073741824;
@@ -304,7 +108,6 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # TB
     var tb = bytes / 1099511627776;
     var tb_frac = ((bytes % 1099511627776) * 10) / 1099511627776;
     str_builder_add_int(sb, tb);
@@ -314,27 +117,9 @@ pub fn device_info_size_display(info, sb) {
     return 0;
 }
 
-# Add capabilities flags
-pub fn di_add_cap(info, cap) {
-    var caps = di_caps(info);
-    di_set_caps(info, caps | cap);
-    return 0;
-}
-
 # ---------------------------------------------------------------------------
-# DeviceHealth — health info from sysfs
-# Layout: 24 bytes
-#   0: rotational (0=SSD, 1=HDD, -1=unknown)
-#   8: temperature_celsius (fixed-point * 1000, 0=unknown)
-#  16: scheduler (Str, 0 if none)
+# DeviceHealth constructor — allocates.
 # ---------------------------------------------------------------------------
-
-enum DeviceHealthField {
-    DH_ROTATIONAL = 0;
-    DH_TEMP = 8;
-    DH_SCHEDULER = 16;
-    DH_SIZE = 24;
-}
 
 pub fn device_health_new() {
     var h = alloc(DH_SIZE);
@@ -344,13 +129,8 @@ pub fn device_health_new() {
     return h;
 }
 
-pub fn dh_rotational(h) { return load64(h); }
-pub fn dh_temp(h) { return load64(h + DH_TEMP); }
-pub fn dh_scheduler(h) { return load64(h + DH_SCHEDULER); }
-
 # ---------------------------------------------------------------------------
-# query_permissions — stat a device node for uid/gid/mode
-# Uses SYS_STAT (4) which fills a stat buffer
+# query_permissions — stat a device node for uid/gid/mode (SYS_STAT=4).
 # stat struct layout: st_dev(8), st_ino(8), st_nlink(8), st_mode(4),
 #   st_uid(4), st_gid(4), ...
 # ---------------------------------------------------------------------------
@@ -360,15 +140,10 @@ pub fn query_permissions(dev_path_cstr) {
     var r = syscall(4, dev_path_cstr, &buf);
     if (r < 0) { return 0; }
 
-    # st_mode at offset 24 (4 bytes)
     var mode = load32(&buf + 24);
-    # st_uid at offset 28 (4 bytes)
     var uid = load32(&buf + 28);
-    # st_gid at offset 32 (4 bytes)
     var gid = load32(&buf + 32);
 
-    # Pack into DeviceInfo fields directly (caller sets di_uid/gid/mode)
-    # Return a small struct: 24 bytes [uid, gid, mode]
     var perms = alloc(24);
     store64(perms, uid);
     store64(perms + 8, gid);
@@ -381,13 +156,12 @@ pub fn perms_gid(p) { return load64(p + 8); }
 pub fn perms_mode(p) { return load64(p + 16); }
 
 # ---------------------------------------------------------------------------
-# query_device_health — read sysfs attributes for a block device
+# query_device_health — read sysfs attributes for a block device.
 # ---------------------------------------------------------------------------
 
 pub fn query_device_health(dev_name) {
     var health = device_health_new();
 
-    # Build path: /sys/block/<dev>/queue/rotational
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "/sys/block/");
     str_builder_add_str(sb, dev_name);
@@ -408,7 +182,6 @@ pub fn query_device_health(dev_name) {
         }
     }
 
-    # Build path: /sys/block/<dev>/queue/scheduler
     var sb2 = str_builder_new();
     str_builder_add_cstr(sb2, "/sys/block/");
     str_builder_add_str(sb2, dev_name);
@@ -428,7 +201,7 @@ pub fn query_device_health(dev_name) {
 }
 
 # ---------------------------------------------------------------------------
-# DeviceInfo JSON serialization
+# DeviceInfo JSON serialization — uses str_builder.
 # ---------------------------------------------------------------------------
 
 pub fn device_info_to_json(info, sb) {

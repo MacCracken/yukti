@@ -18,6 +18,8 @@ output = "build/yukti"
 [lib]
 modules = [
     "src/error.cyr",
+    "src/core.cyr",
+    "src/pci.cyr",
     "src/device.cyr",
     "src/event.cyr",
     "src/storage.cyr",

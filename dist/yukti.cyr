@@ -201,12 +201,17 @@ pub fn map_errno_to_err(errno, operation, path) {
     return err_io(str_builder_build(sb));
 }
 
-# --- device.cyr ---
+# --- core.cyr ---
 
-# yukti/device.cyr — Core device types, traits, and capabilities
+# yukti/core.cyr — Kernel-safe core types
 #
-# DeviceId, DeviceClass, DeviceState, DeviceCapabilities (bitflags),
-# DeviceInfo (primary device data structure), DeviceHealth, permissions.
+# Pure data: enums, struct layouts, accessors, pure predicates.
+# No syscalls, no file I/O, no heap allocation. Safe for bare-metal
+# consumption (AGNOS kernel imports this for PCI device identification;
+# see src/pci.cyr for the lookup tables).
+#
+# Constructors, serializers, and sysfs queries live in src/device.cyr
+# because they pull in alloc / str_builder / SYS_STAT — userland only.
 
 # ---------------------------------------------------------------------------
 # DeviceClass enum — 9 variants
@@ -260,7 +265,7 @@ pub fn device_state_to_str(state) {
 }
 
 # ---------------------------------------------------------------------------
-# DeviceCapabilities — bitflags (u16 in Rust, i64 here)
+# DeviceCapabilities — bitflags
 # ---------------------------------------------------------------------------
 
 enum DeviceCap {
@@ -276,60 +281,13 @@ enum DeviceCap {
     CAP_BURN = 512;
 }
 
-# Check if capabilities bitfield has a specific cap
 pub fn has_cap(caps, cap) {
     return (caps & cap) != 0;
 }
 
 # ---------------------------------------------------------------------------
-# DeviceId — wraps a Str
-# Layout: 8 bytes — pointer to Str
-# ---------------------------------------------------------------------------
-
-pub fn device_id_new(s) {
-    # s should be a Str (from str_from)
-    var id = alloc(8);
-    store64(id, s);
-    return id;
-}
-
-pub fn device_id_new_cstr(cstr) {
-    return device_id_new(str_from(cstr));
-}
-
-pub fn device_id_str(id) {
-    return load64(id);
-}
-
-pub fn device_id_eq(a, b) {
-    return str_eq(device_id_str(a), device_id_str(b));
-}
-
-# ---------------------------------------------------------------------------
-# DeviceInfo — primary device structure
-# Layout: 168 bytes (21 fields x 8 bytes)
-#
-#   0: id (DeviceId ptr)
-#   8: dev_path (Str)
-#  16: sys_path (Str, 0 if none)
-#  24: class (DeviceClass)
-#  32: state (DeviceState)
-#  40: label (Str, 0 if none)
-#  48: vendor (Str, 0 if none)
-#  56: model (Str, 0 if none)
-#  64: serial (Str, 0 if none)
-#  72: fs_type (Str, 0 if none)
-#  80: mount_point (Str, 0 if none)
-#  88: size_bytes (i64)
-#  96: capabilities (bitflags i64)
-# 104: detected_at (i64 timestamp)
-# 112: uid (i64)
-# 120: gid (i64)
-# 128: mode (i64)
-# 136: usb_vendor_id (i64, 0 if none, -1 = unset)
-# 144: usb_product_id (i64, 0 if none, -1 = unset)
-# 152: partition_table (Str, 0 if none)
-# 160: properties (hashmap ptr)
+# DeviceInfo layout (168 bytes, 21 fields)
+# Constructor lives in src/device.cyr (needs alloc).
 # ---------------------------------------------------------------------------
 
 enum DeviceInfoField {
@@ -355,32 +313,6 @@ enum DeviceInfoField {
     DI_PART_TABLE = 152;
     DI_PROPERTIES = 160;
     DI_SIZE = 168;
-}
-
-pub fn device_info_new(id, dev_path, class) {
-    var info = alloc(DI_SIZE);
-    store64(info + DI_ID, id);
-    store64(info + DI_DEV_PATH, dev_path);
-    store64(info + DI_SYS_PATH, 0);
-    store64(info + DI_CLASS, class);
-    store64(info + DI_STATE, DS_READY);
-    store64(info + DI_LABEL, 0);
-    store64(info + DI_VENDOR, 0);
-    store64(info + DI_MODEL, 0);
-    store64(info + DI_SERIAL, 0);
-    store64(info + DI_FS_TYPE, 0);
-    store64(info + DI_MOUNT_POINT, 0);
-    store64(info + DI_SIZE_BYTES, 0);
-    store64(info + DI_CAPS, 0);
-    store64(info + DI_DETECTED_AT, 0);
-    store64(info + DI_UID, 0);
-    store64(info + DI_GID, 0);
-    store64(info + DI_MODE, 0);
-    store64(info + DI_USB_VID, 0 - 1);
-    store64(info + DI_USB_PID, 0 - 1);
-    store64(info + DI_PART_TABLE, 0);
-    store64(info + DI_PROPERTIES, 0);
-    return info;
 }
 
 # Field accessors
@@ -426,23 +358,18 @@ pub fn di_set_usb_pid(info, v) { store64(info + DI_USB_PID, v); return 0; }
 pub fn di_set_part_table(info, v) { store64(info + DI_PART_TABLE, v); return 0; }
 pub fn di_set_properties(info, v) { store64(info + DI_PROPERTIES, v); return 0; }
 
-# ---------------------------------------------------------------------------
-# DeviceInfo methods
-# ---------------------------------------------------------------------------
+# Pure predicates / selectors
 
-# Check if device has a specific capability (O(1) bitwise)
 pub fn device_info_has_cap(info, cap) {
     return has_cap(di_caps(info), cap);
 }
 
-# Check if device is currently mounted
 pub fn device_info_is_mounted(info) {
     if (di_state(info) == DS_MOUNTED) { return 1; }
     if (di_mount_point(info) != 0) { return 1; }
     return 0;
 }
 
-# Check if device is removable (USB, optical, SD, or has REMOVABLE cap)
 pub fn device_info_is_removable(info) {
     var class = di_class(info);
     if (class == DC_USB_STORAGE) { return 1; }
@@ -452,7 +379,6 @@ pub fn device_info_is_removable(info) {
     return 0;
 }
 
-# Human-readable display name: label > model > dev_path
 pub fn device_info_display_name(info) {
     var label = di_label(info);
     if (label != 0) { return label; }
@@ -461,7 +387,346 @@ pub fn device_info_display_name(info) {
     return di_dev_path(info);
 }
 
-# Format size as human-readable string into a string builder
+pub fn di_add_cap(info, cap) {
+    var caps = di_caps(info);
+    di_set_caps(info, caps | cap);
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# DeviceHealth layout (24 bytes)
+# Constructor + sysfs reader live in src/device.cyr.
+# ---------------------------------------------------------------------------
+
+enum DeviceHealthField {
+    DH_ROTATIONAL = 0;
+    DH_TEMP = 8;
+    DH_SCHEDULER = 16;
+    DH_SIZE = 24;
+}
+
+pub fn dh_rotational(h) { return load64(h); }
+pub fn dh_temp(h) { return load64(h + DH_TEMP); }
+pub fn dh_scheduler(h) { return load64(h + DH_SCHEDULER); }
+
+# --- pci.cyr ---
+
+# yukti/pci.cyr — PCI class/subclass + vendor/device lookup tables
+#
+# Kernel-safe: zero heap allocation, zero syscalls, zero file I/O.
+# All functions return cstring literals or integer constants.
+#
+# The AGNOS kernel imports this module (plus src/core.cyr) for
+# bare-metal PCI device identification during bus enumeration.
+# Userland callers get the same API.
+#
+# Source: PCI SIG class-code registry + pci.ids (systemd/hwdata).
+# Kept intentionally small — covers the classes/vendors likely to
+# matter for boot-time device identification. Extend with specific
+# device_id entries only when a real consumer needs them.
+
+# ---------------------------------------------------------------------------
+# PCI class codes (base class, 8-bit)
+# See: https://pcisig.com/membership/member-companies
+# ---------------------------------------------------------------------------
+
+enum PciClass {
+    PCI_CLASS_UNCLASSIFIED = 0;
+    PCI_CLASS_STORAGE = 1;
+    PCI_CLASS_NETWORK = 2;
+    PCI_CLASS_DISPLAY = 3;
+    PCI_CLASS_MULTIMEDIA = 4;
+    PCI_CLASS_MEMORY = 5;
+    PCI_CLASS_BRIDGE = 6;
+    PCI_CLASS_COMMUNICATION = 7;
+    PCI_CLASS_GENERIC_SYSTEM = 8;
+    PCI_CLASS_INPUT = 9;
+    PCI_CLASS_DOCKING = 10;
+    PCI_CLASS_PROCESSOR = 11;
+    PCI_CLASS_SERIAL_BUS = 12;
+    PCI_CLASS_WIRELESS = 13;
+    PCI_CLASS_INTELLIGENT_IO = 14;
+    PCI_CLASS_SATELLITE = 15;
+    PCI_CLASS_ENCRYPTION = 16;
+    PCI_CLASS_SIGNAL_PROCESSING = 17;
+    PCI_CLASS_ACCELERATOR = 18;
+    PCI_CLASS_NON_ESSENTIAL = 19;
+}
+
+pub fn pci_class_name(class_code) {
+    if (class_code == PCI_CLASS_UNCLASSIFIED) { return "unclassified"; }
+    if (class_code == PCI_CLASS_STORAGE) { return "mass-storage"; }
+    if (class_code == PCI_CLASS_NETWORK) { return "network"; }
+    if (class_code == PCI_CLASS_DISPLAY) { return "display"; }
+    if (class_code == PCI_CLASS_MULTIMEDIA) { return "multimedia"; }
+    if (class_code == PCI_CLASS_MEMORY) { return "memory"; }
+    if (class_code == PCI_CLASS_BRIDGE) { return "bridge"; }
+    if (class_code == PCI_CLASS_COMMUNICATION) { return "communication"; }
+    if (class_code == PCI_CLASS_GENERIC_SYSTEM) { return "generic-system"; }
+    if (class_code == PCI_CLASS_INPUT) { return "input"; }
+    if (class_code == PCI_CLASS_DOCKING) { return "docking"; }
+    if (class_code == PCI_CLASS_PROCESSOR) { return "processor"; }
+    if (class_code == PCI_CLASS_SERIAL_BUS) { return "serial-bus"; }
+    if (class_code == PCI_CLASS_WIRELESS) { return "wireless"; }
+    if (class_code == PCI_CLASS_INTELLIGENT_IO) { return "intelligent-io"; }
+    if (class_code == PCI_CLASS_SATELLITE) { return "satellite"; }
+    if (class_code == PCI_CLASS_ENCRYPTION) { return "encryption"; }
+    if (class_code == PCI_CLASS_SIGNAL_PROCESSING) { return "signal-processing"; }
+    if (class_code == PCI_CLASS_ACCELERATOR) { return "accelerator"; }
+    if (class_code == PCI_CLASS_NON_ESSENTIAL) { return "non-essential"; }
+    return "reserved";
+}
+
+# ---------------------------------------------------------------------------
+# Storage subclasses (class 0x01)
+# ---------------------------------------------------------------------------
+
+enum PciStorageSubclass {
+    PCI_SUB_STORAGE_SCSI = 0;
+    PCI_SUB_STORAGE_IDE = 1;
+    PCI_SUB_STORAGE_FLOPPY = 2;
+    PCI_SUB_STORAGE_IPI = 3;
+    PCI_SUB_STORAGE_RAID = 4;
+    PCI_SUB_STORAGE_ATA = 5;
+    PCI_SUB_STORAGE_SATA = 6;
+    PCI_SUB_STORAGE_SAS = 7;
+    PCI_SUB_STORAGE_NVM = 8;
+}
+
+# ---------------------------------------------------------------------------
+# Display subclasses (class 0x03)
+# ---------------------------------------------------------------------------
+
+enum PciDisplaySubclass {
+    PCI_SUB_DISPLAY_VGA = 0;
+    PCI_SUB_DISPLAY_XGA = 1;
+    PCI_SUB_DISPLAY_3D = 2;
+}
+
+# ---------------------------------------------------------------------------
+# Network subclasses (class 0x02)
+# ---------------------------------------------------------------------------
+
+enum PciNetworkSubclass {
+    PCI_SUB_NETWORK_ETHERNET = 0;
+    PCI_SUB_NETWORK_TOKEN_RING = 1;
+    PCI_SUB_NETWORK_FDDI = 2;
+    PCI_SUB_NETWORK_ATM = 3;
+    PCI_SUB_NETWORK_ISDN = 4;
+    PCI_SUB_NETWORK_WORLDFIP = 5;
+    PCI_SUB_NETWORK_PICMG = 6;
+    PCI_SUB_NETWORK_INFINIBAND = 7;
+}
+
+# ---------------------------------------------------------------------------
+# Serial bus subclasses (class 0x0C) — host controllers
+# ---------------------------------------------------------------------------
+
+enum PciSerialBusSubclass {
+    PCI_SUB_SERIAL_FIREWIRE = 0;
+    PCI_SUB_SERIAL_ACCESS = 1;
+    PCI_SUB_SERIAL_SSA = 2;
+    PCI_SUB_SERIAL_USB = 3;
+    PCI_SUB_SERIAL_FIBRE_CHANNEL = 4;
+    PCI_SUB_SERIAL_SMBUS = 5;
+    PCI_SUB_SERIAL_INFINIBAND = 6;
+    PCI_SUB_SERIAL_IPMI = 7;
+    PCI_SUB_SERIAL_SERCOS = 8;
+    PCI_SUB_SERIAL_CANBUS = 9;
+}
+
+# ---------------------------------------------------------------------------
+# pci_class_to_device_type — map (class, subclass) → yukti DeviceClass
+#
+# This is the primary kernel-use-case lookup: given a PCI config-space
+# class/subclass pair, what kind of yukti device is it? Returns a
+# DeviceClass value from src/core.cyr.
+# ---------------------------------------------------------------------------
+
+pub fn pci_class_to_device_type(class_code, subclass) {
+    if (class_code == PCI_CLASS_STORAGE) {
+        # NVMe and most storage controllers map to internal block
+        return DC_BLOCK_INTERNAL;
+    }
+    if (class_code == PCI_CLASS_NETWORK) {
+        return DC_NETWORK;
+    }
+    if (class_code == PCI_CLASS_DISPLAY) {
+        return DC_GPU;
+    }
+    if (class_code == PCI_CLASS_SERIAL_BUS) {
+        # USB host controllers — device_class will be refined downstream
+        # when actual USB devices attach. For the host-controller itself,
+        # surface it as unknown so the enumerator doesn't mistake it for
+        # a storage device.
+        if (subclass == PCI_SUB_SERIAL_USB) { return DC_UNKNOWN; }
+        return DC_UNKNOWN;
+    }
+    return DC_UNKNOWN;
+}
+
+# ---------------------------------------------------------------------------
+# Vendor IDs — common silicon vendors.
+# List intentionally small; only vendors the AGNOS kernel is likely
+# to encounter during boot on mainstream x86/ARM hardware.
+# ---------------------------------------------------------------------------
+
+enum PciVendor {
+    PCI_VENDOR_INTEL = 0x8086;
+    PCI_VENDOR_AMD = 0x1022;
+    PCI_VENDOR_NVIDIA = 0x10DE;
+    PCI_VENDOR_REALTEK = 0x10EC;
+    PCI_VENDOR_BROADCOM = 0x14E4;
+    PCI_VENDOR_QUALCOMM = 0x17CB;
+    PCI_VENDOR_APPLE = 0x106B;
+    PCI_VENDOR_SAMSUNG = 0x144D;
+    PCI_VENDOR_MELLANOX = 0x15B3;
+    PCI_VENDOR_MARVELL = 0x11AB;
+    PCI_VENDOR_ATI = 0x1002;   # AMD GPUs still show up here
+    PCI_VENDOR_VMWARE = 0x15AD;
+    PCI_VENDOR_REDHAT = 0x1AF4; # virtio
+    PCI_VENDOR_IBM = 0x1014;
+    PCI_VENDOR_VIA = 0x1106;
+    PCI_VENDOR_ASMEDIA = 0x1B21;
+    PCI_VENDOR_STMICRO = 0x104A;
+    PCI_VENDOR_MICRON = 0x1344;
+    PCI_VENDOR_WESTERN_DIGITAL = 0x1B96;
+    PCI_VENDOR_SEAGATE = 0x1BB1;
+}
+
+pub fn pci_vendor_name(vendor_id) {
+    if (vendor_id == PCI_VENDOR_INTEL) { return "Intel"; }
+    if (vendor_id == PCI_VENDOR_AMD) { return "AMD"; }
+    if (vendor_id == PCI_VENDOR_NVIDIA) { return "NVIDIA"; }
+    if (vendor_id == PCI_VENDOR_REALTEK) { return "Realtek"; }
+    if (vendor_id == PCI_VENDOR_BROADCOM) { return "Broadcom"; }
+    if (vendor_id == PCI_VENDOR_QUALCOMM) { return "Qualcomm"; }
+    if (vendor_id == PCI_VENDOR_APPLE) { return "Apple"; }
+    if (vendor_id == PCI_VENDOR_SAMSUNG) { return "Samsung"; }
+    if (vendor_id == PCI_VENDOR_MELLANOX) { return "Mellanox"; }
+    if (vendor_id == PCI_VENDOR_MARVELL) { return "Marvell"; }
+    if (vendor_id == PCI_VENDOR_ATI) { return "ATI/AMD"; }
+    if (vendor_id == PCI_VENDOR_VMWARE) { return "VMware"; }
+    if (vendor_id == PCI_VENDOR_REDHAT) { return "Red Hat (virtio)"; }
+    if (vendor_id == PCI_VENDOR_IBM) { return "IBM"; }
+    if (vendor_id == PCI_VENDOR_VIA) { return "VIA"; }
+    if (vendor_id == PCI_VENDOR_ASMEDIA) { return "ASMedia"; }
+    if (vendor_id == PCI_VENDOR_STMICRO) { return "STMicroelectronics"; }
+    if (vendor_id == PCI_VENDOR_MICRON) { return "Micron"; }
+    if (vendor_id == PCI_VENDOR_WESTERN_DIGITAL) { return "Western Digital"; }
+    if (vendor_id == PCI_VENDOR_SEAGATE) { return "Seagate"; }
+    return "unknown";
+}
+
+# ---------------------------------------------------------------------------
+# pci_device_name — (vendor_id, device_id) → human name
+#
+# Stub for now: no per-device table. Extend when a kernel consumer
+# actually needs device-level granularity beyond vendor+class.
+# Returns the vendor name as a best-effort fallback.
+# ---------------------------------------------------------------------------
+
+pub fn pci_device_name(vendor_id, device_id) {
+    return pci_vendor_name(vendor_id);
+}
+
+# ---------------------------------------------------------------------------
+# Convenience: is this a storage controller class worth probing?
+# ---------------------------------------------------------------------------
+
+pub fn pci_is_storage(class_code) {
+    return class_code == PCI_CLASS_STORAGE;
+}
+
+pub fn pci_is_nvme(class_code, subclass) {
+    if (class_code != PCI_CLASS_STORAGE) { return 0; }
+    if (subclass != PCI_SUB_STORAGE_NVM) { return 0; }
+    return 1;
+}
+
+pub fn pci_is_sata(class_code, subclass) {
+    if (class_code != PCI_CLASS_STORAGE) { return 0; }
+    if (subclass != PCI_SUB_STORAGE_SATA) { return 0; }
+    return 1;
+}
+
+pub fn pci_is_gpu(class_code) {
+    return class_code == PCI_CLASS_DISPLAY;
+}
+
+pub fn pci_is_network(class_code) {
+    return class_code == PCI_CLASS_NETWORK;
+}
+
+# --- device.cyr ---
+
+# yukti/device.cyr — Userland constructors, queries, and serializers
+#
+# This module is the Linux-userland counterpart to src/core.cyr.
+# Everything here either allocates (alloc / str_builder / str_from),
+# makes a syscall, or touches /sys — none of which are safe in the
+# AGNOS kernel import path.
+#
+# The kernel-safe half (enums, struct layouts, accessors, pure
+# predicates) lives in src/core.cyr and is imported first.
+
+# ---------------------------------------------------------------------------
+# DeviceId — wraps a Str. Allocates.
+# ---------------------------------------------------------------------------
+
+pub fn device_id_new(s) {
+    var id = alloc(8);
+    store64(id, s);
+    return id;
+}
+
+pub fn device_id_new_cstr(cstr) {
+    return device_id_new(str_from(cstr));
+}
+
+pub fn device_id_str(id) {
+    return load64(id);
+}
+
+pub fn device_id_eq(a, b) {
+    return str_eq(device_id_str(a), device_id_str(b));
+}
+
+# ---------------------------------------------------------------------------
+# DeviceInfo constructor — allocates the 168-byte struct.
+# Field layout + accessors are in src/core.cyr.
+# ---------------------------------------------------------------------------
+
+pub fn device_info_new(id, dev_path, class) {
+    var info = alloc(DI_SIZE);
+    store64(info + DI_ID, id);
+    store64(info + DI_DEV_PATH, dev_path);
+    store64(info + DI_SYS_PATH, 0);
+    store64(info + DI_CLASS, class);
+    store64(info + DI_STATE, DS_READY);
+    store64(info + DI_LABEL, 0);
+    store64(info + DI_VENDOR, 0);
+    store64(info + DI_MODEL, 0);
+    store64(info + DI_SERIAL, 0);
+    store64(info + DI_FS_TYPE, 0);
+    store64(info + DI_MOUNT_POINT, 0);
+    store64(info + DI_SIZE_BYTES, 0);
+    store64(info + DI_CAPS, 0);
+    store64(info + DI_DETECTED_AT, 0);
+    store64(info + DI_UID, 0);
+    store64(info + DI_GID, 0);
+    store64(info + DI_MODE, 0);
+    store64(info + DI_USB_VID, 0 - 1);
+    store64(info + DI_USB_PID, 0 - 1);
+    store64(info + DI_PART_TABLE, 0);
+    store64(info + DI_PROPERTIES, 0);
+    return info;
+}
+
+# ---------------------------------------------------------------------------
+# Size display — uses str_builder, so userland.
+# ---------------------------------------------------------------------------
+
 pub fn device_info_size_display(info, sb) {
     var bytes = di_size_bytes(info);
     if (bytes == 0) {
@@ -469,14 +734,12 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # Use integer division for simplicity (avoid f64 for portability)
     if (bytes < 1024) {
         str_builder_add_int(sb, bytes);
         str_builder_add_cstr(sb, " B");
         return 0;
     }
 
-    # KB
     if (bytes < 1048576) {
         var kb = bytes / 1024;
         var kb_frac = ((bytes % 1024) * 10) / 1024;
@@ -487,7 +750,6 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # MB
     if (bytes < 1073741824) {
         var mb = bytes / 1048576;
         var mb_frac = ((bytes % 1048576) * 10) / 1048576;
@@ -498,7 +760,6 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # GB
     if (bytes < 1099511627776) {
         var gb = bytes / 1073741824;
         var gb_frac = ((bytes % 1073741824) * 10) / 1073741824;
@@ -509,7 +770,6 @@ pub fn device_info_size_display(info, sb) {
         return 0;
     }
 
-    # TB
     var tb = bytes / 1099511627776;
     var tb_frac = ((bytes % 1099511627776) * 10) / 1099511627776;
     str_builder_add_int(sb, tb);
@@ -519,27 +779,9 @@ pub fn device_info_size_display(info, sb) {
     return 0;
 }
 
-# Add capabilities flags
-pub fn di_add_cap(info, cap) {
-    var caps = di_caps(info);
-    di_set_caps(info, caps | cap);
-    return 0;
-}
-
 # ---------------------------------------------------------------------------
-# DeviceHealth — health info from sysfs
-# Layout: 24 bytes
-#   0: rotational (0=SSD, 1=HDD, -1=unknown)
-#   8: temperature_celsius (fixed-point * 1000, 0=unknown)
-#  16: scheduler (Str, 0 if none)
+# DeviceHealth constructor — allocates.
 # ---------------------------------------------------------------------------
-
-enum DeviceHealthField {
-    DH_ROTATIONAL = 0;
-    DH_TEMP = 8;
-    DH_SCHEDULER = 16;
-    DH_SIZE = 24;
-}
 
 pub fn device_health_new() {
     var h = alloc(DH_SIZE);
@@ -549,13 +791,8 @@ pub fn device_health_new() {
     return h;
 }
 
-pub fn dh_rotational(h) { return load64(h); }
-pub fn dh_temp(h) { return load64(h + DH_TEMP); }
-pub fn dh_scheduler(h) { return load64(h + DH_SCHEDULER); }
-
 # ---------------------------------------------------------------------------
-# query_permissions — stat a device node for uid/gid/mode
-# Uses SYS_STAT (4) which fills a stat buffer
+# query_permissions — stat a device node for uid/gid/mode (SYS_STAT=4).
 # stat struct layout: st_dev(8), st_ino(8), st_nlink(8), st_mode(4),
 #   st_uid(4), st_gid(4), ...
 # ---------------------------------------------------------------------------
@@ -565,15 +802,10 @@ pub fn query_permissions(dev_path_cstr) {
     var r = syscall(4, dev_path_cstr, &buf);
     if (r < 0) { return 0; }
 
-    # st_mode at offset 24 (4 bytes)
     var mode = load32(&buf + 24);
-    # st_uid at offset 28 (4 bytes)
     var uid = load32(&buf + 28);
-    # st_gid at offset 32 (4 bytes)
     var gid = load32(&buf + 32);
 
-    # Pack into DeviceInfo fields directly (caller sets di_uid/gid/mode)
-    # Return a small struct: 24 bytes [uid, gid, mode]
     var perms = alloc(24);
     store64(perms, uid);
     store64(perms + 8, gid);
@@ -586,13 +818,12 @@ pub fn perms_gid(p) { return load64(p + 8); }
 pub fn perms_mode(p) { return load64(p + 16); }
 
 # ---------------------------------------------------------------------------
-# query_device_health — read sysfs attributes for a block device
+# query_device_health — read sysfs attributes for a block device.
 # ---------------------------------------------------------------------------
 
 pub fn query_device_health(dev_name) {
     var health = device_health_new();
 
-    # Build path: /sys/block/<dev>/queue/rotational
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "/sys/block/");
     str_builder_add_str(sb, dev_name);
@@ -613,7 +844,6 @@ pub fn query_device_health(dev_name) {
         }
     }
 
-    # Build path: /sys/block/<dev>/queue/scheduler
     var sb2 = str_builder_new();
     str_builder_add_cstr(sb2, "/sys/block/");
     str_builder_add_str(sb2, dev_name);
@@ -633,7 +863,7 @@ pub fn query_device_health(dev_name) {
 }
 
 # ---------------------------------------------------------------------------
-# DeviceInfo JSON serialization
+# DeviceInfo JSON serialization — uses str_builder.
 # ---------------------------------------------------------------------------
 
 pub fn device_info_to_json(info, sb) {

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yukti target, including the minimal `core_smoke` (no stdlib,
   no syscalls). Diagnosed as a Cyrius compiler codegen bug, not
   a yukti issue. Held pending upstream fix. Reproducer filed at
-  `docs/audit/2026-04-19-cc5-aarch64-repro.md`; one-command
+  `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`; one-command
   retest script at `scripts/retest-aarch64.sh`. The CI and
   release workflow hooks are in place and gated on
   `cc5_aarch64` existing — they stay dormant today and pick up

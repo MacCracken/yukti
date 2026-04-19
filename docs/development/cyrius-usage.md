@@ -39,7 +39,7 @@ they confirm the reachable set is smaller than the linked set.
 cleanly to an aarch64 ELF, but binaries produced by Cyrius 5.4.6's
 `cc5_aarch64` crash with `SIGILL` on real hardware due to a
 compiler codegen bug. Held until upstream fix — see
-`docs/audit/2026-04-19-cc5-aarch64-repro.md` and
+`docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
 `scripts/retest-aarch64.sh`. The CI aarch64 gate is wired but
 skips when `cc5_aarch64` isn't bundled with the toolchain
 install, so current workflows pass.

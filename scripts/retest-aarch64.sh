@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # retest-aarch64.sh — reproducer + regression guard for the
 # cc5_aarch64 SIGILL bug documented in
-#   docs/audit/2026-04-19-cc5-aarch64-repro.md
+#   docs/development/issues/2026-04-19-cc5-aarch64-repro.md
 #
 # Cross-build every yukti target for aarch64, copy to a real
 # aarch64 host, run each, report pass/fail. First time every
@@ -122,7 +122,7 @@ if [ $fail -eq 0 ]; then
     echo "  Ready to promote aarch64 from 'held' to 'shipped' in CHANGELOG."
     exit 0
 else
-    echo "=== FAIL: see docs/audit/2026-04-19-cc5-aarch64-repro.md ==="
+    echo "=== FAIL: see docs/development/issues/2026-04-19-cc5-aarch64-repro.md ==="
     echo "  cc5_aarch64 codegen still broken. Stay on 2.1.0."
     exit 1
 fi

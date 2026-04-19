@@ -92,6 +92,30 @@ jobs:
       - name: Verify ELF
         run: xxd -l 4 build/yukti | grep -q "7f45 4c46"
 
+      - name: Cross-build aarch64
+        # 2.1.1 added native aarch64 support. The toolchain translates
+        # x86_64 syscall numbers to aarch64 at codegen — no yukti
+        # source changes needed. Requires cc5_aarch64 in the toolchain
+        # bin dir. If the toolchain release didn't bundle it, skip
+        # with a warning rather than fail the whole build.
+        run: |
+          if [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            echo "::warning::cc5_aarch64 not shipped with Cyrius $CYRIUS_VERSION — skipping aarch64 cross-build"
+            exit 0
+          fi
+          CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/yukti-aarch64
+          CYRIUS_DCE=1 cyrius build --aarch64 programs/core_smoke.cyr build/core_smoke-aarch64
+          for f in fuzz/*.fcyr; do
+            name=$(basename "$f" .fcyr)
+            CYRIUS_DCE=1 cyrius build --aarch64 "$f" "build/${name}-aarch64"
+          done
+          for bin in build/yukti-aarch64 build/core_smoke-aarch64 build/*-aarch64; do
+            [ -f "$bin" ] || continue
+            file "$bin" | grep -q "aarch64" || {
+              echo "ERROR: $bin is not an aarch64 ELF"; exit 1; }
+          done
+          echo "yukti-aarch64: $(wc -c < build/yukti-aarch64) bytes"
+
       - name: Test
         run: cyrius test tests/tcyr/yukti.tcyr
 

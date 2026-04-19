@@ -59,6 +59,18 @@ jobs:
           CYRIUS_DCE=1 cyrius build src/main.cyr build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
+      - name: Cross-build aarch64 (best-effort)
+        # Produces build/yukti-aarch64 when the toolchain bundle
+        # includes cc5_aarch64. Archive step ships both x86 + aarch64
+        # binaries when present. See CHANGELOG 2.1.1.
+        run: |
+          if [ -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/yukti-aarch64
+            echo "yukti-aarch64: $(wc -c < build/yukti-aarch64) bytes"
+          else
+            echo "::warning::cc5_aarch64 not in toolchain — aarch64 binary skipped in release"
+          fi
+
       - name: Test
         run: cyrius test tests/tcyr/yukti.tcyr
 
@@ -90,7 +102,15 @@ jobs:
           git archive --format=tar.gz --prefix="yukti-${TAG}/" -o "yukti-${TAG}-src.tar.gz" HEAD
           cp dist/yukti.cyr      "yukti-${TAG}.cyr"
           cp dist/yukti-core.cyr "yukti-${TAG}-core.cyr"
-          sha256sum yukti-*.tar.gz yukti-*.cyr > SHA256SUMS
+          # Ship prebuilt binaries alongside source + bundles so
+          # consumers can grab a statically-linked ELF per arch.
+          if [ -f build/yukti ]; then
+            cp build/yukti "yukti-${TAG}-x86_64-linux"
+          fi
+          if [ -f build/yukti-aarch64 ]; then
+            cp build/yukti-aarch64 "yukti-${TAG}-aarch64-linux"
+          fi
+          sha256sum yukti-*.tar.gz yukti-*.cyr yukti-*-linux 2>/dev/null > SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
@@ -98,6 +118,7 @@ jobs:
           path: |
             yukti-*.tar.gz
             yukti-*.cyr
+            yukti-*-linux
             cyrius.lock
             SHA256SUMS
 
@@ -122,5 +143,6 @@ jobs:
           files: |
             yukti-*.tar.gz
             yukti-*.cyr
+            yukti-*-linux
             cyrius.lock
             SHA256SUMS

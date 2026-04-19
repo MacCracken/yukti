@@ -29,11 +29,20 @@ cyrius deps --verify     # CI gate: fail on hash mismatch
 ## Build
 
 ```sh
-cyrius build src/main.cyr build/yukti     # userland CLI (~348 KB static ELF)
+cyrius build src/main.cyr build/yukti     # userland CLI (~362 KB static ELF)
 ```
 
 Zero warnings is the gate. `dead:` lines from DCE are informational —
 they confirm the reachable set is smaller than the linked set.
+
+**aarch64 cross-build** (`cyrius build --aarch64 …`) compiles
+cleanly to an aarch64 ELF, but binaries produced by Cyrius 5.4.6's
+`cc5_aarch64` crash with `SIGILL` on real hardware due to a
+compiler codegen bug. Held until upstream fix — see
+`docs/audit/2026-04-19-cc5-aarch64-repro.md` and
+`scripts/retest-aarch64.sh`. The CI aarch64 gate is wired but
+skips when `cc5_aarch64` isn't bundled with the toolchain
+install, so current workflows pass.
 
 ## Test / Bench / Fuzz
 

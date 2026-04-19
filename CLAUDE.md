@@ -35,7 +35,7 @@ re-learning the layout.
 
 - **Source**: ~5270 lines across 16 domain modules (`src/*.cyr`)
 - **Tests**: 592 assertions, 3 fuzz harnesses, 45+ benchmarks
-- **Binary**: ~350 KB static ELF, zero external dependencies
+- **Binary**: ~362 KB x86_64 static ELF, zero external dependencies
 - **Stable**: 2.1.0 — kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
 - **Toolchain**: Cyrius 5.4.6 (`cyrius.cyml: cyrius = "5.4.6"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS

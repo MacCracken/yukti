@@ -11,7 +11,12 @@ completed work — don't duplicate it here.
 - [ ] aethersafha — notifications for mount/unmount events
 
 ### Platform
-- [ ] aarch64 native build (via Cyrius aarch64 backend)
+- [ ] aarch64 native build — cross-compile path is wired, but
+      Cyrius 5.4.6's `cc5_aarch64` emits an unallocated ARMv8-A
+      opcode (`0x800000d6`) that `SIGILL`s on real hardware.
+      Held pending toolchain fix. See
+      `docs/audit/2026-04-19-cc5-aarch64-repro.md` and
+      `scripts/retest-aarch64.sh`.
 - [ ] Container-aware enumeration (detect host vs container devices)
 
 ## Future

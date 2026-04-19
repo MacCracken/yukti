@@ -21,3 +21,8 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Never commit core dumps (qemu, gdb, kernel)
+*.core
+core
+core.*

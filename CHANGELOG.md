@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Investigated, held
+
+- **Native aarch64**. Cross-build succeeds with Cyrius 5.4.6's
+  `cc5_aarch64`, but the produced binaries crash with `SIGILL`
+  on real Cortex-A72 hardware (Raspberry Pi 4, Ubuntu 24.04).
+  Faulting PC lands on word `0x800000d6` — an unallocated
+  opcode in the ARMv8-A top-level encoding space. Affects every
+  yukti target, including the minimal `core_smoke` (no stdlib,
+  no syscalls). Diagnosed as a Cyrius compiler codegen bug, not
+  a yukti issue. Held pending upstream fix. Reproducer filed at
+  `docs/audit/2026-04-19-cc5-aarch64-repro.md`; one-command
+  retest script at `scripts/retest-aarch64.sh`. The CI and
+  release workflow hooks are in place and gated on
+  `cc5_aarch64` existing — they stay dormant today and pick up
+  automatically once the toolchain ships a fixed compiler.
+
 ## [2.1.0] — 2026-04-19
 
 Follow-up release to close out the LOW findings from the 2.0.0

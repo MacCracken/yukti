@@ -67,11 +67,11 @@ fn main() {
 
     # --- pci_class_to_device_type: the primary kernel-use-case lookup ---
     _assert(pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM) == DC_BLOCK_INTERNAL,
-        "NVMe -> block-internal", 22);
+    "NVMe -> block-internal", 22);
     _assert(pci_class_to_device_type(PCI_CLASS_NETWORK, PCI_SUB_NETWORK_ETHERNET) == DC_NETWORK,
-        "ethernet -> network", 19);
+    "ethernet -> network", 19);
     _assert(pci_class_to_device_type(PCI_CLASS_DISPLAY, PCI_SUB_DISPLAY_VGA) == DC_GPU,
-        "VGA -> gpu", 10);
+    "VGA -> gpu", 10);
 
     # --- Vendor IDs ---
     _assert(PCI_VENDOR_INTEL == 0x8086,  "Intel VID", 9);

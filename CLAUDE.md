@@ -2,135 +2,306 @@
 
 ## Project Identity
 
-**Yukti** (Sanskrit: device/instrument) — Device abstraction — USB, optical, block devices, udev hotplug, mount/eject
+**Yukti** (Sanskrit: device/instrument) — Device abstraction for AGNOS:
+USB storage, optical drives, block devices, GPU, network filesystems,
+udev hotplug, mount/eject.
 
-- **Language**: Cyrius 5.2.x (ported from Rust, April 2026)
-- **Type**: Flat library (include-based) + single-file dist bundle
+- **Type**: Flat library (include-based) + multi-profile dist bundles
 - **License**: GPL-3.0-only
-- **Version**: see VERSION (`${file:VERSION}` in manifest)
-- **Binary**: ~360 KB static ELF, zero external dependencies
-- **Manifest**: `cyrius.cyml` — stdlib + sakshi + patra via `[deps]`
-- **Shipped as**: `lib/yukti.cyr` in the Cyrius stdlib (since 3.4.12)
+- **Language**: Cyrius (sovereign systems language, compiled by cc5)
+- **Version**: SemVer, version file at `VERSION`
+- **Status**: 1.2.0 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
+- **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
+- **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
+- **Shared crates**: [shared-crates.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/shared-crates.md)
+
+## Goal
+
+Own device abstraction. One library answers "what hardware is on this
+box, and what can I do with it?" across USB, optical, block, GPU, and
+network devices. Kernel-safe subset (`core.cyr` + `pci.cyr`) compiles
+without alloc or syscalls so AGNOS itself can identify PCI devices
+using the same tables userland uses.
+
+## Scaffolding
+
+Ported from Rust (April 2026). Structure follows first-party AGNOS
+conventions: `src/lib.cyr` include chain, `tests/tcyr/`, `tests/bcyr/`,
+`fuzz/`, `programs/`, `dist/`. Do not restructure manually — match
+conventions so downstream projects can read this one without
+re-learning the layout.
+
+## Current State
+
+- **Source**: 5067 lines across 16 domain modules (`src/*.cyr`)
+- **Tests**: 531 assertions, 2 fuzz harnesses, 45+ benchmarks
+- **Binary**: ~348 KB static ELF, zero external dependencies
+- **Stable**: 1.2.0 — feature-complete, fuzzed parsers, benchmarked hot paths
+- **Toolchain**: Cyrius 5.4.6 (`cyrius.cyml: cyrius = "5.4.6"`)
+- **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
+  file manager; kernel-safe subset consumed by AGNOS kernel
 
 ## Consumers
 
-jalwa (auto-import), file manager (device sidebar), aethersafha (mount notifications), argonaut (automount)
+| Project      | Usage                                              |
+|--------------|----------------------------------------------------|
+| jalwa        | Auto-import on USB attach                          |
+| file manager | Device sidebar (USB, optical, block, network)      |
+| aethersafha  | Mount/unmount notifications                        |
+| argonaut     | Automount of removable media                       |
+| AGNOS kernel | `dist/yukti-core.cyr` — PCI class/vendor tables    |
 
-## Build & Test
+## Dependencies
 
-Requires the `cyrius` toolchain 5.2.x on PATH (which provides `cc5`
-internally). Deps are resolved into `lib/` by `cyrius deps`; the stdlib
-modules (alloc, str, fmt, vec, hashmap, io, fs, tagged, json, process,
-fnptr, chrono, args, freelist) and external deps (sakshi 2.0.0, patra
-1.1.1) come through that mechanism — do NOT re-vendor them by hand.
+- **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`,
+  `hashmap`, `io`, `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`,
+  `args`, `freelist` (ships with Cyrius >= 5.4.6)
+- **sakshi** 2.0.0 — structured logging (first-party)
+- **patra** 1.1.1 — persistent device history (first-party)
 
-```sh
-# Resolve deps into lib/ (once, and after any dep change)
-cyrius deps
+No external deps. No FFI. No libc. All first-party, pinned in
+`cyrius.cyml` and SHA-locked in `cyrius.lock`.
 
-# Build the CLI
-cyrius build src/main.cyr build/yukti
+## Quick Start
 
-# Test (485 assertions)
-cyrius test tests/tcyr/yukti.tcyr
+See [`docs/development/cyrius-usage.md`](docs/development/cyrius-usage.md)
+for the full command reference: build, test, bench, fuzz, distlib
+(multi-profile), deps lock/verify, and release.
 
-# Benchmark
-cyrius bench tests/bcyr/yukti.bcyr
+At a glance:
 
-# Fuzz
-cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent && ./build/fuzz_parse_uevent
-cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table  && ./build/fuzz_mount_table
-
-# Bundle for stdlib distribution
-cyrius distlib              # writes dist/yukti.cyr
-
-# Supply-chain integrity
-cyrius deps --lock          # write cyrius.lock (SHA256 of every lib/*.cyr dep)
-cyrius deps --verify        # CI gate: fail on hash mismatch
-
-# Release
-cyrius publish              # tag + distlib + lock + print gh release command
+```bash
+cyrius deps                              # resolve deps into lib/
+cyrius build src/main.cyr build/yukti    # build CLI
+cyrius test tests/tcyr/yukti.tcyr        # 531 assertions
+cyrius distlib                           # → dist/yukti.cyr (full)
+cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 ```
 
-No Makefile — the `cyrius` tool is the whole build system. Never shell
-out to `cc5` directly; always go through `cyrius <subcommand>`.
-
-## Project Structure
+## Architecture
 
 ```
 src/
-  lib.cyr              — Include chain (entry point for library consumers)
-  main.cyr             — CLI entry point (device enumeration)
-  error.cyr            — 16 error kinds, heap-allocated error structs
-  device.cyr           — DeviceId, DeviceInfo, DeviceClass, DeviceCapabilities
-  event.cyr            — DeviceEvent, EventCollector, listener dispatch
-  storage.cyr          — Filesystem enum, mount/unmount/eject, /proc/mounts
-  optical.cyr          — DiscType, tray control, TOC reading via ioctls
-  udev.cyr             — UdevEvent, sysfs enumeration, netlink monitor
-  linux.cyr            — LinuxDeviceManager (ties modules together)
-  udev_rules.cyr       — Rule rendering, validation, udevadm wrappers
-  partition.cyr        — MBR + GPT table reading
-  device_db.cyr        — Persistent device history via patra
-  network.cyr          — Network filesystem mount helpers (SMB/NFS)
-  gpu.cyr              — GPU probe via sysfs
-lib/                   — Dep dir, managed by `cyrius deps` (gitignored;
-                         symlinks into ~/.cyrius/deps/…); do NOT edit
-tests/
-  tcyr/yukti.tcyr      — 485 assertions across all modules
-  bcyr/yukti.bcyr      — Benchmarks with batch timing
-fuzz/                  — 2 fuzz targets (uevent parser, mount table parser)
-dist/yukti.cyr         — Single-file bundle produced by `cyrius distlib`
-docs/benchmarks/       — Auto-generated results.md + history.csv +
-                         rust-v-cyrius.md
-cyrius.cyml            — Package manifest (replaces old cyrius.toml)
-cyrius.lock            — SHA256 lockfile for every lib/*.cyr dep
+  lib.cyr          — include chain (deps + domain modules, in order)
+  main.cyr         — CLI entry point (device enumeration)
+  error.cyr        — 16 error kinds, heap-allocated error structs
+  core.cyr         — kernel-safe enums, struct layouts, accessors
+  pci.cyr          — kernel-safe PCI class/vendor tables + predicates
+  device.cyr       — userland constructors, serializers, sysfs queries
+  event.cyr        — DeviceEvent, EventCollector, listener dispatch
+  storage.cyr      — Filesystem enum, mount/unmount/eject, /proc/mounts
+  optical.cyr      — DiscType, tray control, TOC reading via ioctls
+  udev.cyr         — UdevEvent, sysfs enumeration, netlink monitor
+  linux.cyr        — LinuxDeviceManager (ties modules together)
+  udev_rules.cyr   — rule rendering, validation, udevadm wrappers
+  partition.cyr    — MBR + GPT table reading
+  device_db.cyr    — persistent device history via patra
+  network.cyr      — SMB/NFS mount helpers
+  gpu.cyr          — GPU probe via sysfs
+programs/
+  core_smoke.cyr   — kernel-safe invariant check (core + pci only)
+dist/
+  yukti.cyr        — full userland bundle (`cyrius distlib`)
+  yukti-core.cyr   — kernel-safe bundle (`cyrius distlib core`)
+tests/tcyr/        — 531 assertions across all modules
+tests/bcyr/        — benchmarks with batch timing
+fuzz/              — 2 fuzz targets (uevent parser, mount table parser)
+docs/benchmarks/   — auto-generated results.md + history.csv
+cyrius.cyml        — package manifest (toolchain pin, [deps], [lib.*] profiles)
+cyrius.lock        — SHA256 lockfile for every lib/*.cyr dep
 ```
+
+**Include order matters.** `src/lib.cyr` declares the full chain: stdlib
+first, first-party deps, then domain modules in dependency order.
+Stdlib includes live **only** in `lib.cyr` — never in individual
+domain modules. Domain modules are flat: zero transitive includes,
+which is what makes `cyrius distlib` (strip-include concatenation)
+produce a compile-clean bundle.
+
+## Key Constraints
+
+- **Kernel-safe subset is sacred** — `core.cyr` + `pci.cyr` must have
+  zero alloc, zero syscalls, zero stdlib dependencies. The
+  `programs/core_smoke.cyr` smoke test is the tripwire.
+- **All values are i64 or fixed-size strings** — matches Cyrius type system.
+- **No floating point** — integer math only.
+- **Manual struct layout** — `alloc()` + `load64`/`store64` with named
+  offset constants (`DI_LABEL`, `DH_TEMP`, ...). No anonymous offsets.
+- **Enums for constants** — zero `gvar_toks` cost vs. `var` globals.
+- **str_builder for formatting** — avoid temporary allocations.
+- **Bump allocator for long-lived data**; freelist for data with
+  individual lifetimes (e.g. event collectors).
+- **sakshi logging on all device operations** — structured observability
+  across attach/detach/mount/eject.
+- **Direct syscalls** — `mount(165)`, `umount2(166)`, `ioctl(16)`,
+  `socket(41)`. No libc wrappers.
 
 ## Development Process
 
-### Development Loop (continuous)
+### P(-1): Scaffold Hardening (before any new features)
+
+0. Read roadmap, CHANGELOG, open issues — know what was intended
+1. Cleanliness: `cyrius build` (0 warnings), `cyrius lint` (0 warnings),
+   `cyrius fmt --check` diff-clean, `cyrius vet src/main.cyr` clean
+2. Test sweep: 531+ assertions pass, fuzz harnesses pass
+3. Benchmark baseline: `cyrius bench tests/bcyr/yukti.bcyr`, save CSV
+4. Internal deep review — gaps, optimizations, correctness, docs
+5. External research — udev / sysfs / block-layer changes since last pass
+6. Security audit (see below) — file findings in `docs/audit/YYYY-MM-DD-audit.md`
+7. Additional tests / benchmarks from findings
+8. Post-review benchmarks — prove the wins
+9. Documentation audit — CLAUDE.md, roadmap, CHANGELOG, cyrius-usage.md
+10. Repeat if heavy
+
+### Work Loop (continuous)
 
 1. Work phase — new features, roadmap items, bug fixes
-2. Build: `cyrius build src/main.cyr build/yukti` — must be 0 warnings
-3. Test: `cyrius test tests/tcyr/yukti.tcyr` — must be 0 failures
-4. Benchmark additions for new code
-5. Run benchmarks (`./scripts/bench-history.sh`)
-6. Audit phase — review performance, memory, security, correctness
-7. Fuzz new parsers
-8. Bundle: `cyrius distlib` — verify dist/yukti.cyr rebuilds cleanly
-9. Lock: `cyrius deps --lock` — only when a dep version moves
-10. Documentation — update CHANGELOG, roadmap, docs
-11. Return to step 1
+2. Build check: `cyrius build src/main.cyr build/yukti` — 0 warnings
+3. Test + benchmark additions for new code
+4. Internal review — performance, memory, correctness
+5. **If `core.cyr` or `pci.cyr` changed**: rebuild and run `core_smoke`
+6. Security check — any new syscall usage, user input handling, buffer
+   allocation reviewed for safety
+7. Documentation — CHANGELOG, roadmap, docs
+8. Version check — `VERSION`, `cyrius.cyml`, CHANGELOG header in sync
+9. Return to step 1
 
-### Key Principles
+### Security Hardening (before release)
 
-- **Never skip benchmarks.** Numbers don't lie. The CSV history is the proof.
-- **Tests + benchmarks are the way.** 485+ assertions, 45+ benchmarks.
-- **Own the stack.** Zero external dependencies. Direct syscalls.
-- **No magic.** Every operation is measurable, auditable, traceable.
-- **Enums for constants** — zero gvar_toks cost.
-- **Manual struct layout** — alloc + store64/load64 with offset constants.
-- **Accessor functions** — `fn structname_field(ptr)` pattern.
-- **str_builder for formatting** — avoid temporary allocations.
-- **Bump allocator** — alloc() for all heap data.
-- **sakshi logging** — structured logging on all operations.
-- **Direct syscalls** — mount(165), umount2(166), ioctl(16), socket(41).
+1. **Input validation** — every function accepting external data
+   (`/proc/mounts`, uevent strings, partition tables, sysfs) validates
+   bounds, types, ranges before use
+2. **Buffer safety** — every `var buf[N]` and `alloc(N)` verified:
+   N in bytes, max offset < N, no adjacent-variable overflow
+3. **Syscall review** — every `syscall()` / `sys_*()` reviewed: args
+   validated, return values checked, error paths handled
+4. **Pointer validation** — no raw deref of untrusted input without
+   bounds check
+5. **No command injection** — no `sys_system()` / `exec_cmd()` with
+   unsanitized input. Use `exec_vec()` with explicit argv
+6. **No path traversal** — mount-point paths validated against allowed
+   directories; no `../` escape
+7. **Known CVE check** — review against current udev / kernel block-layer
+   CVEs
+8. **File findings** — `docs/audit/YYYY-MM-DD-audit.md` with severity,
+   file, line, fix
+
+Severity levels: **CRITICAL** (exploitable immediately) / **HIGH**
+(moderate effort) / **MEDIUM** (specific conditions) / **LOW**
+(defense-in-depth).
+
+### Closeout Pass (before every minor/major bump)
+
+Ship as the last patch of the current minor (e.g. 1.2.5 before 1.3.0):
+
+1. Full test suite — 531+ pass, 0 failures
+2. Benchmark baseline — `cyrius bench`, save CSV for comparison
+3. Dead code audit — review `dead:` list from `cyrius build`, remove
+   unreferenced source
+4. Stale comment sweep — grep for old version refs, outdated TODOs,
+   stale "pending Cyrius X.Y.Z" comments
+5. Security re-scan — grep for new `sys_system`, unchecked writes,
+   unsanitized input, buffer size mismatches
+6. Downstream check — jalwa, aethersafha, argonaut, AGNOS kernel still
+   build and pass tests against new version
+7. CHANGELOG / roadmap sync — docs reflect current state; version
+   numbers consistent across `VERSION`, `cyrius.cyml`, CHANGELOG header,
+   intended git tag
+8. Kernel-safe invariant — `core_smoke` passes; `dist/yukti-core.cyr`
+   contains zero `alloc` / `sys_*` / `syscall` references
+9. Full build from clean — `rm -rf build lib && cyrius deps &&
+   cyrius build` passes clean; both dist bundles regenerate clean
+
+### Task Sizing
+
+- **Low/Medium effort**: batch freely — multiple items per work loop cycle
+- **Large effort**: small bites only — break into sub-tasks, verify each
+- **If unsure**: treat it as large
+
+### Refactoring Policy
+
+- Refactor when the code tells you to — duplication, unclear
+  boundaries, measured bottlenecks
+- Never refactor speculatively. Wait for the third instance
+- Every refactor passes the same test + fuzz + benchmark gates as new code
+- 3 failed attempts = defer and document
+
+## Key Principles
+
+- **Correctness is the optimum sovereignty** — if it's wrong, you don't
+  own it, the bugs own you
+- **Numbers don't lie** — never claim a performance improvement without
+  before/after benchmark numbers. The CSV history is the proof
+- **Own the stack** — zero external dependencies; direct syscalls
+- **No magic** — every operation measurable, auditable, traceable
+- Test after EVERY change, not after the feature is done
+- ONE change at a time — never bundle unrelated changes
+- Fuzz every parser path — uevent, mount table, partition tables
+- Programs must call `main()` at top level:
+  `var exit_code = main(); syscall(60, exit_code);`
+- `cyrius build` handles everything — NEVER use raw `cat file | cc5`
+- Source files only need project includes — deps auto-resolve from
+  `cyrius.cyml`
+- Every buffer declaration is a contract: `var buf[N]` = N bytes
 
 ## Cyrius Conventions
 
-- `var buf[N]` — N is bytes, not elements
-- `str_split(s, byte)` — separator is a byte value (10 for \n, 32 for space)
-- `str_contains_cstr(s, "needle")` — for Str + cstr comparison
-- `str_index_of(s, byte)` — finds single byte (64 for @, 61 for =)
-- `file_read_all(path, &buf, maxlen)` — 3 args, returns bytes read
-- `run(cmd, arg1, arg2)` — 3 args, returns Result
-- `dir_list(str_obj)` / `is_dir(str_obj)` — take Str, not cstr
-- No `mod` directive — flat namespace
-- No closures capturing variables — use named functions + globals for benchmarks
+The full list of Yukti-relevant Cyrius idioms (buffer semantics,
+`str_split` byte separators, `run()` arity, flat namespace rules, etc.)
+lives in [`docs/development/cyrius-usage.md`](docs/development/cyrius-usage.md).
+Read it before writing a module — avoiding the common traps
+(`var buf[N]` is bytes, no closures over locals, `break` in
+`var`-heavy loops unreliable) saves a lot of debug time.
+
+## CI / Release
+
+- **Toolchain pin**: `cyrius = "5.4.6"` in `cyrius.cyml`. Release and CI
+  both read from the manifest; no hardcoded versions in YAML
+- **Dead code elimination**: `cyrius build` already strips unreachable
+  functions; the `dead:` report is informational
+- **Tag filter**: release workflow triggers on `tags: ['[0-9]*']` — semver only
+- **Version-verify gate**: release asserts `VERSION == cyrius.cyml version ==
+  git tag` before building
+- **Lint gate**: CI runs `cyrius lint` per source; treat warnings as errors
+- **Lock gate**: CI runs `cyrius deps --verify` against committed
+  `cyrius.lock`; mismatch fails the build
+- **Dist gate**: CI regenerates `dist/yukti.cyr` and `dist/yukti-core.cyr`
+  via `cyrius distlib` and `cyrius distlib core`; both must compile-check
+  clean
+- **Kernel-safe gate**: CI builds and runs `programs/core_smoke.cyr` —
+  non-zero exit fails the build
+- **Concurrency**: CI uses `cancel-in-progress: true` keyed on workflow + ref
+
+## Key References
+
+- [`docs/development/cyrius-usage.md`](docs/development/cyrius-usage.md)
+  — toolchain commands, distlib profiles, lint/fmt gates
+- [`docs/architecture/overview.md`](docs/architecture/overview.md)
+  — module map, data flow, struct layouts
+- [`docs/development/roadmap.md`](docs/development/roadmap.md)
+  — milestones, backlog, future
+- [`docs/development/threat-model.md`](docs/development/threat-model.md)
+  — attack surface, mitigations
+- [`docs/benchmarks/results.md`](docs/benchmarks/results.md)
+  — latest numbers
+- [`docs/benchmarks/history.csv`](docs/benchmarks/history.csv)
+  — regression baseline
+- `CHANGELOG.md` — source of truth for all changes
 
 ## DO NOT
+
 - **Do not commit or push** — the user handles all git operations
 - **NEVER use `gh` CLI** — use `curl` to GitHub API only
-- Do not add unnecessary dependencies — keep it lean
+- Do not add external dependencies — first-party only
 - Do not skip benchmarks before claiming performance improvements
+- Do not skip fuzz verification before claiming a parser works
 - Do not use `mod` directives (causes namespace prefixing issues)
+- Do not add Cyrius stdlib includes in individual `src/*.cyr` files —
+  `src/lib.cyr` owns the whole include chain
+- Do not use `sys_system()` with unsanitized input — command injection risk
+- Do not add alloc / syscall usage to `core.cyr` or `pci.cyr` — breaks
+  the kernel-safe invariant
+- Do not re-vendor stdlib or first-party deps into `src/` — `cyrius
+  deps` manages `lib/`
+- Do not hardcode toolchain versions in CI YAML — read `cyrius.cyml`
+- Do not shell out to `cc5` directly — always go through `cyrius <subcommand>`

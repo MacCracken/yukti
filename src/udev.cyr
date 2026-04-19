@@ -3,7 +3,6 @@
 # Reads from /sys/, monitors udev events via netlink socket.
 # UdevEvent, device classification, sysfs enumeration, uevent parsing.
 
-
 # ---------------------------------------------------------------------------
 # UdevEvent struct
 # Layout: 48 bytes

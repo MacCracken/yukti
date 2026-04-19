@@ -3,7 +3,6 @@
 # DeviceEvent, DeviceEventKind, EventCollector (for testing),
 # and listener callback pattern.
 
-
 # ---------------------------------------------------------------------------
 # DeviceEventKind enum — 6 variants
 # ---------------------------------------------------------------------------

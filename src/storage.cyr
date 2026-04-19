@@ -3,7 +3,6 @@
 # Mount, unmount, eject, filesystem detection, /proc/mounts parsing.
 # All syscalls direct — no libc dependency.
 
-
 # ---------------------------------------------------------------------------
 # Filesystem enum — 17 known types + unknown
 # ---------------------------------------------------------------------------

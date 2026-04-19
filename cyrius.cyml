@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "5.2.1"
+cyrius = "5.4.6"
 
 [build]
 entry = "src/main.cyr"
@@ -15,6 +15,15 @@ output = "build/yukti"
 # dist/yukti.cyr. Don't move `modules` into `[build]` — it makes
 # `cyrius build` prepend them before src/main.cyr, which then
 # re-includes them via src/lib.cyr and inflates the binary by ~38%.
+#
+# Multi-dist profiles (Cyrius 5.4.6+):
+#   cyrius distlib         → dist/yukti.cyr      (default [lib], full userland)
+#   cyrius distlib core    → dist/yukti-core.cyr ([lib.core], kernel-safe)
+#
+# The `core` profile is the bare-metal subset consumable by the AGNOS
+# kernel: pure enums, struct layouts, PCI class/vendor tables. No
+# alloc, no syscalls, no stdlib. See programs/core_smoke.cyr for the
+# invariant check.
 [lib]
 modules = [
     "src/error.cyr",
@@ -31,6 +40,12 @@ modules = [
     "src/device_db.cyr",
     "src/network.cyr",
     "src/gpu.cyr",
+]
+
+[lib.core]
+modules = [
+    "src/core.cyr",
+    "src/pci.cyr",
 ]
 
 [deps]

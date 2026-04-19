@@ -3,7 +3,6 @@
 # Disc type detection, tray control, TOC reading.
 # All hardware ops via direct syscalls/ioctls.
 
-
 # ---------------------------------------------------------------------------
 # DiscType enum — 10 variants
 # ---------------------------------------------------------------------------

@@ -206,7 +206,7 @@ fn test_capabilities_empty() {
 
 fn test_capabilities_all() {
     var all = CAP_READ | CAP_WRITE | CAP_EJECT | CAP_MEDIA_CHANGE | CAP_REMOVABLE |
-              CAP_TRIM | CAP_HOTPLUG | CAP_TRAY_CONTROL | CAP_AUDIO_PLAYBACK | CAP_BURN;
+    CAP_TRIM | CAP_HOTPLUG | CAP_TRAY_CONTROL | CAP_AUDIO_PLAYBACK | CAP_BURN;
     assert(has_cap(all, CAP_READ), "all read");
     assert(has_cap(all, CAP_BURN), "all burn");
     assert(has_cap(all, CAP_TRIM), "all trim");
@@ -322,10 +322,14 @@ fn test_is_mounted() {
 }
 
 fn test_is_removable() {
-    assert(device_info_is_removable(device_info_new(device_id_new_cstr("u"), str_from("/dev/sdb1"), DC_USB_STORAGE)), "usb rem");
-    assert(device_info_is_removable(device_info_new(device_id_new_cstr("s"), str_from("/dev/mmcblk0"), DC_SD_CARD)), "sd rem");
-    assert(device_info_is_removable(device_info_new(device_id_new_cstr("o"), str_from("/dev/sr0"), DC_OPTICAL)), "opt rem");
-    assert(device_info_is_removable(device_info_new(device_id_new_cstr("i"), str_from("/dev/nvme0n1"), DC_BLOCK_INTERNAL)) == 0, "int not rem");
+    var u = device_info_new(device_id_new_cstr("u"), str_from("/dev/sdb1"), DC_USB_STORAGE);
+    var s = device_info_new(device_id_new_cstr("s"), str_from("/dev/mmcblk0"), DC_SD_CARD);
+    var o = device_info_new(device_id_new_cstr("o"), str_from("/dev/sr0"), DC_OPTICAL);
+    var i = device_info_new(device_id_new_cstr("i"), str_from("/dev/nvme0n1"), DC_BLOCK_INTERNAL);
+    assert(device_info_is_removable(u), "usb rem");
+    assert(device_info_is_removable(s), "sd rem");
+    assert(device_info_is_removable(o), "opt rem");
+    assert(device_info_is_removable(i) == 0, "int not rem");
     var hi = device_info_new(device_id_new_cstr("h"), str_from("/dev/sda"), DC_BLOCK_INTERNAL);
     di_add_cap(hi, CAP_REMOVABLE);
     assert(device_info_is_removable(hi), "int+cap rem");
@@ -427,7 +431,8 @@ fn test_event_with_info() {
 }
 
 fn test_non_removable_event() {
-    var e = device_event_new(device_id_new_cstr("block:nvme0n1"), DC_BLOCK_INTERNAL, EK_ATTACHED, str_from("/dev/nvme0n1"));
+    var id = device_id_new_cstr("block:nvme0n1");
+    var e = device_event_new(id, DC_BLOCK_INTERNAL, EK_ATTACHED, str_from("/dev/nvme0n1"));
     assert(device_event_is_removable(e) == 0, "int not rem");
     return 0;
 }
@@ -831,7 +836,7 @@ fn make_usb_udev_event() {
     map_set(props, "ID_USB_DRIVER", str_from("usb-storage"));
     map_set(props, "ID_PART_ENTRY_SIZE", str_from("31457280"));
     return udev_event_new(str_from("add"), str_from("/sys/devices/pci0000:00/usb1/1-1/block/sdb/sdb1"),
-        str_from("/dev/sdb1"), str_from("block"), str_from("partition"), props);
+    str_from("/dev/sdb1"), str_from("block"), str_from("partition"), props);
 }
 
 fn make_optical_udev_event() {
@@ -842,7 +847,7 @@ fn make_optical_udev_event() {
     map_set(props, "ID_FS_TYPE", str_from("iso9660"));
     map_set(props, "ID_FS_LABEL", str_from("MOVIE_DISC"));
     return udev_event_new(str_from("change"), str_from("/sys/devices/pci0000:00/ata1/host0/block/sr0"),
-        str_from("/dev/sr0"), str_from("block"), str_from("disk"), props);
+    str_from("/dev/sr0"), str_from("block"), str_from("disk"), props);
 }
 
 fn test_classify_usb() {
@@ -860,35 +865,35 @@ fn test_classify_sd() {
     var props = map_new();
     map_set(props, "ID_BUS", str_from("mmc"));
     var e = udev_event_new(str_from("add"), str_from("/sys/block/mmcblk0"), str_from("/dev/mmcblk0"),
-                            str_from("block"), str_from("disk"), props);
+    str_from("block"), str_from("disk"), props);
     assert_eq(classify_device(e), DC_SD_CARD, "cls sd");
     return 0;
 }
 
 fn test_classify_dm() {
     var e = udev_event_new(str_from("add"), str_from("/sys/devices/virtual/block/dm-0"),
-        str_from("/dev/dm-0"), str_from("block"), str_from("disk"), map_new());
+    str_from("/dev/dm-0"), str_from("block"), str_from("disk"), map_new());
     assert_eq(classify_device(e), DC_DEVICE_MAPPER, "cls dm");
     return 0;
 }
 
 fn test_classify_loop() {
     var e = udev_event_new(str_from("add"), str_from("/sys/devices/virtual/block/loop0"),
-        str_from("/dev/loop0"), str_from("block"), str_from("disk"), map_new());
+    str_from("/dev/loop0"), str_from("block"), str_from("disk"), map_new());
     assert_eq(classify_device(e), DC_LOOP, "cls loop");
     return 0;
 }
 
 fn test_classify_block_internal() {
     var e = udev_event_new(str_from("add"), str_from("/sys/block/sda"),
-        str_from("/dev/sda"), str_from("block"), str_from("disk"), map_new());
+    str_from("/dev/sda"), str_from("block"), str_from("disk"), map_new());
     assert_eq(classify_device(e), DC_BLOCK_INTERNAL, "cls block");
     return 0;
 }
 
 fn test_classify_unknown() {
     var e = udev_event_new(str_from("add"), str_from("/sys/something"),
-        str_from("/dev/something"), str_from("net"), 0, map_new());
+    str_from("/dev/something"), str_from("net"), 0, map_new());
     assert_eq(classify_device(e), DC_UNKNOWN, "cls unk");
     return 0;
 }
@@ -949,7 +954,7 @@ fn test_device_info_from_udev_optical() {
 
 fn test_no_dev_path_error() {
     var e = udev_event_new(str_from("add"), str_from("/sys/x"), 0,
-                            str_from("block"), 0, map_new());
+    str_from("block"), 0, map_new());
     var r = device_info_from_udev(e);
     assert(is_ok(r) == 0, "no devpath err");
     return 0;
@@ -961,10 +966,12 @@ fn test_udev_event_actions() {
     assert(udev_event_is_remove(add) == 0, "ue not rm");
     assert(udev_event_is_change(add) == 0, "ue not chg");
 
-    var rem = udev_event_new(str_from("remove"), str_from("/sys/x"), str_from("/dev/x"), str_from("block"), 0, map_new());
+    var rem = udev_event_new(str_from("remove"), str_from("/sys/x"), str_from("/dev/x"),
+    str_from("block"), 0, map_new());
     assert(udev_event_is_remove(rem), "ue rm");
 
-    var chg = udev_event_new(str_from("change"), str_from("/sys/x"), str_from("/dev/x"), str_from("block"), 0, map_new());
+    var chg = udev_event_new(str_from("change"), str_from("/sys/x"), str_from("/dev/x"),
+    str_from("block"), 0, map_new());
     assert(udev_event_is_change(chg), "ue chg");
     return 0;
 }
@@ -1070,7 +1077,7 @@ fn test_udev_event_to_device_event() {
 
 fn test_udev_event_to_device_event_remove() {
     var e = udev_event_new(str_from("remove"), str_from("/sys/block/sdb"), str_from("/dev/sdb"),
-                            str_from("block"), str_from("disk"), map_new());
+    str_from("block"), str_from("disk"), map_new());
     var de = udev_event_to_device_event(e);
     assert(de != 0, "rm->de ok");
     assert(device_event_is_detach(de), "rm->de detach");
@@ -1080,7 +1087,7 @@ fn test_udev_event_to_device_event_remove() {
 
 fn test_udev_event_to_device_event_unknown() {
     var e = udev_event_new(str_from("bind"), str_from("/sys/x"), str_from("/dev/x"),
-                            str_from("block"), 0, map_new());
+    str_from("block"), 0, map_new());
     assert_eq(udev_event_to_device_event(e), 0, "bind->null");
     return 0;
 }
@@ -1089,7 +1096,7 @@ fn test_readonly_device() {
     var props = map_new();
     map_set(props, "ID_FS_READONLY", str_from("1"));
     var e = udev_event_new(str_from("add"), str_from("/sys/block/sda"),
-        str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
+    str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
     var caps = extract_capabilities(e, DC_BLOCK_INTERNAL);
     assert(has_cap(caps, CAP_READ), "ro has read");
     assert(has_cap(caps, CAP_WRITE) == 0, "ro no write");
@@ -1100,7 +1107,7 @@ fn test_trim_capability() {
     var props = map_new();
     map_set(props, "ID_ATA_FEATURE_SET_TRIM", str_from("1"));
     var e = udev_event_new(str_from("add"), str_from("/sys/block/sda"),
-        str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
+    str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
     var caps = extract_capabilities(e, DC_BLOCK_INTERNAL);
     assert(has_cap(caps, CAP_TRIM), "trim cap");
     return 0;
@@ -1744,8 +1751,10 @@ fn test_pci_storage_subclass_constants() {
 
 fn test_pci_class_to_device_type() {
     # Storage controller → internal block
-    assert_eq(pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM), DC_BLOCK_INTERNAL, "NVMe -> block-internal");
-    assert_eq(pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_SATA), DC_BLOCK_INTERNAL, "SATA -> block-internal");
+    var nvme_t = pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_NVM);
+    var sata_t = pci_class_to_device_type(PCI_CLASS_STORAGE, PCI_SUB_STORAGE_SATA);
+    assert_eq(nvme_t, DC_BLOCK_INTERNAL, "NVMe -> block-internal");
+    assert_eq(sata_t, DC_BLOCK_INTERNAL, "SATA -> block-internal");
 
     # Network → DC_NETWORK
     assert_eq(pci_class_to_device_type(PCI_CLASS_NETWORK, PCI_SUB_NETWORK_ETHERNET), DC_NETWORK, "ethernet -> network");

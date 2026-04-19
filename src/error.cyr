@@ -3,7 +3,6 @@
 # All errors that yukti can produce. Each error is a heap-allocated struct
 # with kind, detail string, and optional context string.
 
-
 # ---------------------------------------------------------------------------
 # Error kind enum — 15 variants matching Rust YuktiError
 # ---------------------------------------------------------------------------

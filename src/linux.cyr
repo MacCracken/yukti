@@ -4,7 +4,6 @@
 # Concrete implementation providing device enumeration, lookup,
 # mount/eject operations, and hotplug monitoring.
 
-
 # ---------------------------------------------------------------------------
 # LinuxDeviceManager struct
 # Layout: 40 bytes

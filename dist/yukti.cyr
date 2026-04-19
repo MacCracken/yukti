@@ -11,7 +11,6 @@
 # All errors that yukti can produce. Each error is a heap-allocated struct
 # with kind, detail string, and optional context string.
 
-
 # ---------------------------------------------------------------------------
 # Error kind enum — 15 variants matching Rust YuktiError
 # ---------------------------------------------------------------------------
@@ -920,7 +919,6 @@ pub fn device_info_to_json(info, sb) {
 # DeviceEvent, DeviceEventKind, EventCollector (for testing),
 # and listener callback pattern.
 
-
 # ---------------------------------------------------------------------------
 # DeviceEventKind enum — 6 variants
 # ---------------------------------------------------------------------------
@@ -1117,7 +1115,6 @@ pub fn dispatch_event_to_listeners(listeners_vec, event) {
 #
 # Mount, unmount, eject, filesystem detection, /proc/mounts parsing.
 # All syscalls direct — no libc dependency.
-
 
 # ---------------------------------------------------------------------------
 # Filesystem enum — 17 known types + unknown
@@ -1745,7 +1742,6 @@ pub fn storage_eject(dev_path_cstr) {
 # Disc type detection, tray control, TOC reading.
 # All hardware ops via direct syscalls/ioctls.
 
-
 # ---------------------------------------------------------------------------
 # DiscType enum — 10 variants
 # ---------------------------------------------------------------------------
@@ -2204,7 +2200,6 @@ pub fn is_dvd_video(mount_point_cstr) {
 #
 # Reads from /sys/, monitors udev events via netlink socket.
 # UdevEvent, device classification, sysfs enumeration, uevent parsing.
-
 
 # ---------------------------------------------------------------------------
 # UdevEvent struct
@@ -2908,7 +2903,6 @@ pub fn udev_monitor_run(mon, listener_fn) {
 # Concrete implementation providing device enumeration, lookup,
 # mount/eject operations, and hotplug monitoring.
 
-
 # ---------------------------------------------------------------------------
 # LinuxDeviceManager struct
 # Layout: 40 bytes
@@ -3136,7 +3130,6 @@ pub fn linux_dm_stop_monitor(mgr) {
 #
 # Create, validate, render, and install udev rules.
 # Standalone implementation (no agnosys dependency).
-
 
 # ---------------------------------------------------------------------------
 # UdevRule struct

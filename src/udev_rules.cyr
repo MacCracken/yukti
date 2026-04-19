@@ -3,7 +3,6 @@
 # Create, validate, render, and install udev rules.
 # Standalone implementation (no agnosys dependency).
 
-
 # ---------------------------------------------------------------------------
 # UdevRule struct
 # Layout: 24 bytes

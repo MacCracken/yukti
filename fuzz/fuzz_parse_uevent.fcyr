@@ -23,8 +23,11 @@ fn fuzz_one(buf, len) {
 fn main() {
     alloc_init();
 
-    # Test with known-good input
-    var good = "add@/devices/pci/usb/block/sdb\0ACTION=add\0DEVPATH=/devices/pci/usb/block/sdb\0SUBSYSTEM=block\0DEVTYPE=disk\0DEVNAME=sdb\0";
+    # Test with known-good input. strlen() stops at the first \0 byte,
+    # so only the header segment below actually reaches parse_uevent.
+    # The other segments (ACTION=, DEVPATH=, etc.) are covered by
+    # parser-level tests in tcyr.
+    var good = "add@/devices/pci/usb/block/sdb";
     fuzz_one(good, strlen(good));
 
     # Test with empty input
@@ -62,8 +65,10 @@ fn main() {
     var long_val = str_builder_build(sb);
     fuzz_one(str_data(long_val), str_len(long_val));
 
-    # Random mutation fuzzing
-    var base = "add@/devices/pci0000:00/usb1/block/sdb\0ACTION=add\0DEVPATH=/devices/pci0000:00/usb1/block/sdb\0SUBSYSTEM=block\0DEVTYPE=disk\0DEVNAME=sdb\0";
+    # Random mutation fuzzing. strlen() stops at the first \0, so
+    # `baselen` covers only the header segment — that's what the
+    # mutator actually flips bytes in.
+    var base = "add@/devices/pci0000:00/usb1/block/sdb";
     var baselen = strlen(base);
     var mutbuf[256];
     memcpy(&mutbuf, base, baselen);

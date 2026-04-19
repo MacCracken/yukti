@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-04-19
+
+### Added
+- **`core.cyr`** — kernel-safe core types extracted from `device.cyr`:
+  `DeviceClass`, `DeviceState`, `DeviceCapabilities`, struct layouts,
+  pure accessors/predicates. Zero alloc, zero syscalls, zero stdlib —
+  safe for bare-metal consumption by the AGNOS kernel for PCI device
+  identification.
+- **`pci.cyr`** — kernel-safe PCI class/subclass/vendor/device tables
+  and pure predicates (`pci_class_to_device_type`, `pci_is_storage`,
+  `pci_is_nvme`, `pci_is_gpu`, `pci_is_network`, etc.). Same
+  kernel-safe discipline as `core.cyr`.
+- **`programs/core_smoke.cyr`** — invariant check for the kernel-safe
+  subset. Links only `core.cyr` + `pci.cyr` (no `src/lib.cyr`,
+  no stdlib) and asserts every exported predicate. Tripwire for
+  accidental alloc/syscall additions to the kernel-safe modules.
+- **Multi-dist profiles** (requires Cyrius 5.4.6+):
+  - `cyrius distlib` → `dist/yukti.cyr` (full userland, 4929 lines)
+  - `cyrius distlib core` → `dist/yukti-core.cyr` (kernel-safe, 451 lines)
+  - `[lib.core]` section in `cyrius.cyml` declares the profile
+- **`docs/development/cyrius-usage.md`** — single source of truth for
+  toolchain commands (build, test, bench, fuzz, distlib, deps, release),
+  multi-profile dist bundles, quality gates, and Yukti-relevant Cyrius
+  conventions. Referenced from `CLAUDE.md`.
+- PCI class/vendor lookup tests added to `tests/tcyr/yukti.tcyr`
+
+### Changed
+- **Toolchain pin**: `cyrius.cyml` now requires Cyrius 5.4.6+
+  (was 5.2.1). Needed for multi-dist profile support (`[lib.PROFILE]`).
+- **`CLAUDE.md` restructured** to match the agnosticos first-party
+  application template (`docs/development/applications/example_claude.md`
+  in the agnosticos repo). Sections now align across AGNOS projects:
+  Project Identity, Goal, Current State, Consumers, Dependencies,
+  Quick Start, Architecture, Key Constraints, Development Process
+  (P(-1) + Work Loop + Security Hardening + Closeout), Key Principles,
+  CI/Release, Key References, DO NOT.
+- Toolchain-specific commands moved out of `CLAUDE.md` into
+  `docs/development/cyrius-usage.md`; `CLAUDE.md` now links there
+  instead of duplicating.
+
+### Fixed
+- `cyrius fmt --check` now diff-clean across `src/`, `programs/`,
+  `tests/`, `fuzz/` (3 files re-formatted: `core_smoke.cyr`,
+  `tests/tcyr/yukti.tcyr`, `tests/bcyr/yukti.bcyr`).
+- `cyrius lint` now reports 0 warnings across the whole project.
+  Previously silent byte-length overflows (Unicode box-drawing chars
+  in bench section headers counted as 3 bytes each), duplicate blank
+  lines in 7 domain modules, and long one-liner bench declarations.
+- `cyrius vet src/main.cyr` clean (1 dep, 0 untrusted, 0 missing).
+
+### Metrics
+- **Modules**: 16 (was 14 — added `core.cyr`, `pci.cyr`)
+- **Source lines**: 5067 (was 4573)
+- **Tests**: 531 assertions (was 485)
+- **Binary size**: ~348 KB static ELF
+- **Full dist bundle**: 4929 lines (`dist/yukti.cyr`)
+- **Kernel-safe dist bundle**: 451 lines (`dist/yukti-core.cyr`)
+
+### Consumers
+- AGNOS kernel now consumes `dist/yukti-core.cyr` for PCI device
+  identification — same tables userland uses, zero runtime cost.
+
 ## [1.2.0] — 2026-04-11
 
 ### Added
@@ -169,5 +231,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/detect.rs` — device detection, filesystem parsing, disc type detection
 - 175 tests (12 hardware tests `#[ignore]`d), clippy clean with `-D warnings`
 
-[Unreleased]: https://github.com/MacCracken/yukti/compare/v0.22.3...HEAD
+[Unreleased]: https://github.com/MacCracken/yukti/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/MacCracken/yukti/releases/tag/v1.3.0
+[1.2.0]: https://github.com/MacCracken/yukti/releases/tag/v1.2.0
+[1.1.2]: https://github.com/MacCracken/yukti/releases/tag/v1.1.2
+[1.1.1]: https://github.com/MacCracken/yukti/releases/tag/v1.1.1
+[1.1.0]: https://github.com/MacCracken/yukti/releases/tag/v1.1.0
+[1.0.0]: https://github.com/MacCracken/yukti/releases/tag/v1.0.0
+[0.25.3]: https://github.com/MacCracken/yukti/releases/tag/v0.25.3
 [0.22.3]: https://github.com/MacCracken/yukti/releases/tag/v0.22.3

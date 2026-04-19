@@ -32,13 +32,18 @@
 - [x] Switched `sakshi_full.cyr` → unified `sakshi.cyr` (sakshi 2.0.0)
 - [x] Test suite grew from 407 → 485 assertions
 
-## Next Release
+## Completed (v1.3.0 → kernel-safe split + Cyrius 5.4.6)
 
-### Dual-mode architecture (kernel + userland)
-- [ ] Extract kernel-safe core module: device structs, PCI class/vendor enums, DeviceType constants — pure data, no syscalls
-- [ ] Keep Linux sysfs/udev layer as optional module on top
-- [ ] AGNOS kernel can consume the core module bare-metal for PCI device identification
-- [ ] Userland (kybernet, argonaut) consumes full yukti with sysfs enumeration
+- [x] Extract kernel-safe core module (`src/core.cyr`) — device structs, DeviceClass / DeviceState / DeviceCapabilities enums, pure accessors; no alloc, no syscalls
+- [x] `src/pci.cyr` — PCI class/subclass/vendor/device tables with pure predicates (`pci_class_to_device_type`, `pci_is_storage`, `pci_is_gpu`, …)
+- [x] `programs/core_smoke.cyr` invariant tripwire — catches accidental alloc/syscall additions to the kernel-safe subset
+- [x] Multi-dist profiles via `[lib.core]` in `cyrius.cyml` — `cyrius distlib core` → `dist/yukti-core.cyr` (451 lines)
+- [x] AGNOS kernel consumes `dist/yukti-core.cyr` bare-metal for PCI device identification
+- [x] Userland (kybernet, argonaut) consumes the full `dist/yukti.cyr` bundle with sysfs enumeration
+- [x] Toolchain pin bumped to Cyrius 5.4.6
+- [x] `docs/development/cyrius-usage.md` as single source of truth for toolchain commands; `CLAUDE.md` restructured per agnosticos first-party template
+
+## Next Release (v2.0.0 / v2.0.1)
 
 ## Medium Term
 

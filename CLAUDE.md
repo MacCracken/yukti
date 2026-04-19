@@ -10,7 +10,7 @@ udev hotplug, mount/eject.
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (sovereign systems language, compiled by cc5)
 - **Version**: SemVer, version file at `VERSION`
-- **Status**: 1.2.0 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
+- **Status**: 1.3.0 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 - **Shared crates**: [shared-crates.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/shared-crates.md)
@@ -36,7 +36,7 @@ re-learning the layout.
 - **Source**: 5067 lines across 16 domain modules (`src/*.cyr`)
 - **Tests**: 531 assertions, 2 fuzz harnesses, 45+ benchmarks
 - **Binary**: ~348 KB static ELF, zero external dependencies
-- **Stable**: 1.2.0 — feature-complete, fuzzed parsers, benchmarked hot paths
+- **Stable**: 1.3.0 — kernel-safe subset, multi-profile dist, feature-complete, fuzzed parsers, benchmarked hot paths
 - **Toolchain**: Cyrius 5.4.6 (`cyrius.cyml: cyrius = "5.4.6"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel

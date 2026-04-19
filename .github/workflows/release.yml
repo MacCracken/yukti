@@ -2,7 +2,11 @@ name: Release
 
 on:
   push:
-    tags: ['[0-9]*']
+    # Accept both `v1.2.3` and `1.2.3` tag styles. The version-verify
+    # step below enforces semver shape + match against VERSION file.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write
@@ -22,8 +26,11 @@ jobs:
       - name: Verify version
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TAG="${GITHUB_REF_NAME}"
-          [ "$FILE_VERSION" = "$TAG" ] || { echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
+          TAG="${GITHUB_REF_NAME#v}"   # strip optional leading 'v' so v1.3.0 == 1.3.0
+          echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "tag ($TAG) is not semver x.y.z"; exit 1; }
+          [ "$FILE_VERSION" = "$TAG" ] || {
+            echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
           echo "Version verified: $TAG (cyrius.cyml pulls from VERSION via \${file:VERSION})"
 
       - name: Install Cyrius toolchain
@@ -55,6 +62,11 @@ jobs:
       - name: Test
         run: cyrius test tests/tcyr/yukti.tcyr
 
+      - name: Kernel-safe tripwire
+        run: |
+          CYRIUS_DCE=1 cyrius build programs/core_smoke.cyr build/core_smoke
+          ./build/core_smoke
+
       - name: Fuzz
         run: |
           for f in fuzz/*.fcyr; do
@@ -64,17 +76,20 @@ jobs:
             echo "  $name: ok"
           done
 
-      - name: Regenerate bundle
-        run: cyrius distlib
+      - name: Regenerate bundles (full + core)
+        run: |
+          cyrius distlib
+          cyrius distlib core
 
       - name: Clean toolchain artifacts
         run: rm -f cyrius-*.tar.gz
 
       - name: Archive
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${GITHUB_REF_NAME#v}"
           git archive --format=tar.gz --prefix="yukti-${TAG}/" -o "yukti-${TAG}-src.tar.gz" HEAD
-          cp dist/yukti.cyr "yukti-${TAG}.cyr"
+          cp dist/yukti.cyr      "yukti-${TAG}.cyr"
+          cp dist/yukti-core.cyr "yukti-${TAG}-core.cyr"
           sha256sum yukti-*.tar.gz yukti-*.cyr > SHA256SUMS
 
       - uses: actions/upload-artifact@v4

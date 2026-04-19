@@ -7,6 +7,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-04-19
+
+Follow-up release to close out the LOW findings from the 2.0.0
+security audit (`docs/audit/2026-04-19-audit.md`) and ship the
+near-term roadmap items. CHANGELOG is now the source of truth for
+historical work — the roadmap has been trimmed to forward-looking
+items only.
+
+### Added
+- **Dual-layer / dual-sided optical disc types**:
+  `DT_DVD_WRITABLE_DL`, `DT_DVD_ROM_DL`, `DT_DVD_DUAL_SIDED`,
+  `DT_BLURAY_DL`, `DT_BLURAY_XL`. Detection covers
+  `dvd-r-dl`, `dvd+r-dl`, `dvd-r_dl`, `dvd-rom-dl`, `dvd-ds`,
+  `dvd-dual-sided`, `bd-dl`, `bd-r-dl`, `bdxl`, `bd-xl` (case-insensitive).
+  New `disc_type_nominal_sectors(dt)` returns the expected sector
+  count per family (CD, DVD SL/DL/DS, BD SL/DL/XL) for display
+  until the drive reports actual geometry.
+- **Audio CD ripping** — `read_audio_sectors(dev, lba, nframes, buf, buflen)`
+  wraps the `CDROMREADAUDIO` ioctl (2352-byte CD-DA frames, capped
+  at 75 frames per call to bound latency). Higher-level
+  `read_audio_track(dev, toc_entry, buf, buflen)` loops the per-
+  call cap to rip a whole audio track.
+- **Freelist plumbing** for DeviceEvent + UdevEvent — matching
+  `device_event_free()` / `udev_event_free()`. Lets transient
+  events from the hotplug dispatch loop be reclaimed. Investigation
+  on `DeviceInfo` showed freelist overhead regresses the current
+  long-lived call pattern by ~30%; kept on bump allocator with a
+  no-op `device_info_free()` for API symmetry.
+- **New test coverage** (+30 assertions, 562 → 592):
+  `test_read_audio_sectors_rejects_bad_input`,
+  `test_read_audio_track_rejects_data_track`,
+  `test_detect_disc_type_layered`,
+  `test_disc_type_nominal_sectors`,
+  `test_disc_type_layered_predicates`,
+  `test_validate_mount_point_trailing_slash`.
+- **`docs/development/threat-model.md`** — full rewrite for the
+  Cyrius era (was Rust leftover: `unsafe`, `cargo-deny`,
+  `Option<String>`, `bitflags`). Covers trust boundaries, the
+  17-row attack-surface matrix, privilege model, supply-chain
+  stance, audit cadence, known gaps.
+
+### Security (LOW-severity audit findings from 2.0.0)
+
+- **[LOW-1] sysfs eject input allowlist**. `storage_eject` now
+  validates the extracted device basename as `[a-zA-Z0-9_-]{1,32}`
+  before composing `/sys/block/<name>/device/delete`. Defense-in-depth
+  against path-traversal via crafted `dev_path` (sysfs legitimately
+  uses symlinks under `/sys/block/`, so `O_NOFOLLOW` on the full
+  path isn't applicable — we gate the untrusted component instead).
+- **[LOW-2] TOC integer clamp**. `read_toc` clamps both track
+  `length` and `leadout_lba` at 128 M sectors before any
+  multiplication. A crafted disc can no longer produce nonsense
+  duration / size values via adversarial TOC entries.
+- **[LOW-3] Trailing-slash mount blacklist**. Already closed by
+  the 2.0.0 MED-1 prefix-matching fix (`_starts_with_dir` treats
+  trailing `/` as the component boundary). Regression test added.
+- **[LOW-4] Mount-path label cap**. `default_mount_point`
+  truncates the sanitized label at 64 chars to bound pathological
+  USB labels and leave room under `PATH_MAX` for downstream file
+  operations.
+- **[LOW-5] Observability on malformed uevents**. `parse_uevent`
+  emits `sakshi_warn` on empty `ACTION` / `DEVPATH` instead of
+  silently returning 0 — a burst of these during an incident is
+  a signal worth chasing.
+- **[LOW-6] Threat model rewrite**. See Added section.
+
+### Changed
+
+- `disc_type_is_writable` now also returns true for
+  `DT_DVD_WRITABLE_DL` so callers that gate burn UI behave
+  correctly for dual-layer writable media.
+- `disc_type_has_data` now covers every layered variant
+  (DVD DL/DS, BD DL/XL) — previously missed the new variants.
+- Roadmap stripped of completed items; CHANGELOG is the authoritative
+  history. Remaining roadmap tracks Medium Term + Long Term only.
+
+### Performance
+
+Investigated the "targeted freelist" and "DeviceInfo pool for
+enumerate" roadmap items. Findings:
+
+- DeviceEvent (56 B) and UdevEvent (48 B) switched to `fl_alloc`
+  with matching `_free` helpers. No bench regression in
+  microsecond-resolution event paths; unlocks pool reuse for
+  future consumers that track event lifecycle.
+- DeviceInfo (168 B) kept on the bump allocator: matched bench
+  showed a ~30% regression from fl_alloc overhead because the
+  current call pattern (enumerate → cache → listener dispatch)
+  has no `_free` call site to amortize against. Pool pays only
+  under a churn workload that doesn't exist yet.
+- `enumerate_devices` pooling deferred: same constraint —
+  returned objects are consumed by long-lived callers. Will
+  revisit when jalwa / argonaut expose a bulk-release API.
+
+### Metrics
+
+- **Tests**: 592 assertions (was 559, +33)
+- **Source lines**: ~5270 (was ~5180)
+- **Binary size**: ~350 KB static ELF (unchanged)
+- **dist/yukti.cyr**: 5228 lines
+- **dist/yukti-core.cyr**: 451 lines (unchanged — kernel-safe
+  subset preserved through 2.x)
+- **Fuzz targets**: 3 (unchanged from 2.0.0)
+
 ## [2.0.0] — 2026-04-19
 
 First major version bump. 1.3.0 formalized the kernel-safe split
@@ -352,7 +456,8 @@ All fixes below map 1:1 to findings in
 - `examples/detect.rs` — device detection, filesystem parsing, disc type detection
 - 175 tests (12 hardware tests `#[ignore]`d), clippy clean with `-D warnings`
 
-[Unreleased]: https://github.com/MacCracken/yukti/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/MacCracken/yukti/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/MacCracken/yukti/releases/tag/v2.1.0
 [2.0.0]: https://github.com/MacCracken/yukti/releases/tag/v2.0.0
 [1.3.0]: https://github.com/MacCracken/yukti/releases/tag/v1.3.0
 [1.2.0]: https://github.com/MacCracken/yukti/releases/tag/v1.2.0

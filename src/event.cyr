@@ -50,7 +50,10 @@ enum DeviceEventField {
 }
 
 pub fn device_event_new(device_id, device_class, kind, dev_path) {
-    var e = alloc(DE_SIZE);
+    # Freelist-backed so transient events from the hotplug dispatch
+    # loop can be reclaimed via device_event_free(). See 2.1.0
+    # performance roadmap entry.
+    var e = fl_alloc(DE_SIZE);
     store64(e + DE_DEVICE_ID, device_id);
     store64(e + DE_DEVICE_CLASS, device_class);
     store64(e + DE_KIND, kind);
@@ -62,6 +65,12 @@ pub fn device_event_new(device_id, device_class, kind, dev_path) {
     store64(e + DE_EXTRA, 0);
     store64(e + DE_DEVICE_INFO, 0);
     return e;
+}
+
+pub fn device_event_free(e) {
+    if (e == 0) { return 0; }
+    fl_free(e);
+    return 0;
 }
 
 # Accessors

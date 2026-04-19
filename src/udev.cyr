@@ -25,7 +25,8 @@ enum UdevEventField {
 }
 
 pub fn udev_event_new(action, sys_path, dev_path, subsystem, dev_type, props) {
-    var e = alloc(UE_SIZE);
+    # Freelist-backed — udev monitor churns these per hotplug event.
+    var e = fl_alloc(UE_SIZE);
     store64(e + UE_ACTION, action);
     store64(e + UE_SYS_PATH, sys_path);
     store64(e + UE_DEV_PATH, dev_path);
@@ -33,6 +34,12 @@ pub fn udev_event_new(action, sys_path, dev_path, subsystem, dev_type, props) {
     store64(e + UE_DEV_TYPE, dev_type);
     store64(e + UE_PROPERTIES, props);
     return e;
+}
+
+pub fn udev_event_free(e) {
+    if (e == 0) { return 0; }
+    fl_free(e);
+    return 0;
 }
 
 pub fn ue_action(e) { return load64(e + UE_ACTION); }
@@ -490,8 +497,18 @@ pub fn parse_uevent(buf, len) {
         }
     }
 
-    if (str_len(action) == 0) { return 0; }
-    if (str_len(devpath) == 0) { return 0; }
+    # Observability (audit finding LOW-5): log malformed uevents
+    # instead of silently returning 0. A burst of these during an
+    # incident is a signal worth chasing — forged messages, kernel
+    # emitting partial events under OOM, etc.
+    if (str_len(action) == 0) {
+        sakshi_warn("uevent: empty ACTION", 20);
+        return 0;
+    }
+    if (str_len(devpath) == 0) {
+        sakshi_warn("uevent: empty DEVPATH", 21);
+        return 0;
+    }
 
     # Derive dev_path from DEVNAME property
     var dev_path = 0;

@@ -398,9 +398,14 @@ pub fn default_mount_point(info) {
         name = device_id_str(di_id(info));
     }
 
-    # Sanitize: replace non-alphanumeric with underscore
+    # Sanitize: replace non-alphanumeric with underscore. Cap at
+    # 64 chars so pathological USB labels can't bloat the mount path
+    # (audit finding LOW-4). Many filesystems allow up to 255 bytes;
+    # /run/media/<64> is plenty for humans and keeps PATH_MAX wiggle
+    # room for downstream consumers that concat file names.
     var src = str_data(name);
     var slen = str_len(name);
+    if (slen > 64) { slen = 64; }
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "/run/media/");
     for (var i = 0; i < slen; i = i + 1) {
@@ -725,6 +730,34 @@ pub fn storage_eject(dev_path_cstr) {
             if (end > 0) {
                 base_name = str_substr(dev_name, 0, end);
             }
+        }
+
+        # Strict allowlist for base_name before building the sysfs path:
+        # [a-zA-Z0-9_-]+, length 1..32. Sysfs legitimately uses
+        # symlinks under /sys/block/, so O_NOFOLLOW on the full path
+        # would break the common case — we validate the untrusted
+        # component instead (audit finding LOW-1).
+        var bn_data = str_data(base_name);
+        var bn_len = str_len(base_name);
+        if (bn_len == 0) {
+            return err_eject_failed(dev_s, str_from("empty device name"));
+        }
+        if (bn_len > 32) {
+            return err_eject_failed(dev_s, str_from("device name too long"));
+        }
+        var bn_ok = 1;
+        for (var ci = 0; ci < bn_len; ci = ci + 1) {
+            var bc = load8(bn_data + ci);
+            var good = 0;
+            if (bc >= 48) { if (bc <= 57) { good = 1; } }    # 0-9
+            if (bc >= 65) { if (bc <= 90) { good = 1; } }    # A-Z
+            if (bc >= 97) { if (bc <= 122) { good = 1; } }   # a-z
+            if (bc == 45) { good = 1; }                      # -
+            if (bc == 95) { good = 1; }                      # _
+            if (good == 0) { bn_ok = 0; }
+        }
+        if (bn_ok == 0) {
+            return err_eject_failed(dev_s, str_from("invalid device name chars"));
         }
 
         # Write "1" to /sys/block/<base>/device/delete

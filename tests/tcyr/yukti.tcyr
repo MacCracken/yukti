@@ -620,6 +620,16 @@ fn test_validate_mount_point_rejects_traversal() {
     return 0;
 }
 
+# Audit 2026-04-19 LOW-3 — trailing slash on forbidden root
+# Superseded by MED-1 prefix check (`_starts_with_dir` treats a
+# trailing '/' as the component boundary). Regression test.
+fn test_validate_mount_point_trailing_slash() {
+    assert(is_ok(validate_mount_point("/etc/")) == 0, "/etc/ bad");
+    assert(is_ok(validate_mount_point("/usr/")) == 0, "/usr/ bad");
+    assert(is_ok(validate_mount_point("/home/")) == 0, "/home/ bad");
+    return 0;
+}
+
 # Audit 2026-04-19 HIGH-1 — SQL escape helper
 fn test_sql_escape() {
     assert(str_eq_cstr(_sql_escape_str_pub(str_from("abc")), "abc"), "no metachars");
@@ -818,6 +828,78 @@ fn test_detect_case_insensitive() {
     assert_eq(detect_disc_type("DVD-ROM", 0, 1), DT_DVD_ROM, "ci DVD-ROM");
     assert_eq(detect_disc_type("BD", 0, 1), DT_BLURAY, "ci BD");
     assert_eq(detect_disc_type("BLANK", 0, 0), DT_BLANK, "ci BLANK");
+    return 0;
+}
+
+# 2.1.0: dual-layer / dual-sided DVD + Blu-ray capacity variants
+fn test_detect_disc_type_layered() {
+    assert_eq(detect_disc_type("dvd-r-dl", 0, 1), DT_DVD_WRITABLE_DL, "DL DVD-R");
+    assert_eq(detect_disc_type("dvd+r-dl", 0, 1), DT_DVD_WRITABLE_DL, "DL DVD+R");
+    assert_eq(detect_disc_type("dvd-r_dl", 0, 1), DT_DVD_WRITABLE_DL, "DL DVD-R underscore");
+    assert_eq(detect_disc_type("dvd-rom-dl", 0, 1), DT_DVD_ROM_DL, "DL DVD-ROM");
+    assert_eq(detect_disc_type("dvd-ds", 0, 1), DT_DVD_DUAL_SIDED, "DS DVD");
+    assert_eq(detect_disc_type("dvd-dual-sided", 0, 1), DT_DVD_DUAL_SIDED, "DS DVD long");
+    assert_eq(detect_disc_type("bd-dl", 0, 1), DT_BLURAY_DL, "DL BD");
+    assert_eq(detect_disc_type("bd-r-dl", 0, 1), DT_BLURAY_DL, "DL BD-R");
+    assert_eq(detect_disc_type("bdxl", 0, 1), DT_BLURAY_XL, "BDXL");
+    assert_eq(detect_disc_type("bd-xl", 0, 1), DT_BLURAY_XL, "BD-XL");
+    # case-insensitive
+    assert_eq(detect_disc_type("DVD-R-DL", 0, 1), DT_DVD_WRITABLE_DL, "DL case insensitive");
+    return 0;
+}
+
+fn test_disc_type_nominal_sectors() {
+    assert(disc_type_nominal_sectors(DT_CD_AUDIO) == 333000, "CD sectors");
+    assert(disc_type_nominal_sectors(DT_DVD_ROM) == 2295104, "DVD SL sectors");
+    assert(disc_type_nominal_sectors(DT_DVD_WRITABLE_DL) == 4148608, "DVD DL sectors");
+    assert(disc_type_nominal_sectors(DT_DVD_DUAL_SIDED) == 4590208, "DVD DS sectors");
+    assert(disc_type_nominal_sectors(DT_BLURAY) == 12219392, "BD SL sectors");
+    assert(disc_type_nominal_sectors(DT_BLURAY_DL) == 24438784, "BD DL sectors");
+    assert(disc_type_nominal_sectors(DT_BLURAY_XL) == 48877568, "BD XL sectors");
+    assert(disc_type_nominal_sectors(DT_UNKNOWN) == 0, "unknown = 0");
+    return 0;
+}
+
+# 2.1.0: audio CD ripping input validation. Can't exercise the
+# ioctl itself without hardware; validate the bounds checks that
+# guard it.
+fn test_read_audio_sectors_rejects_bad_input() {
+    var small_buf[32];
+    # nframes <= 0
+    assert(is_ok(read_audio_sectors("/dev/sr0", 0, 0, &small_buf, 32)) == 0,
+    "0 frames rejected");
+    assert(is_ok(read_audio_sectors("/dev/sr0", 0, 0 - 5, &small_buf, 32)) == 0,
+    "negative frames rejected");
+    # Buffer too small (1 frame = 2352 bytes, buf = 32)
+    assert(is_ok(read_audio_sectors("/dev/sr0", 0, 1, &small_buf, 32)) == 0,
+    "undersized buf rejected");
+    return 0;
+}
+
+fn test_read_audio_track_rejects_data_track() {
+    # Build a TOC entry marked as data
+    var data_entry = toc_entry_new(1, TT_DATA, 0, 1000, 0);
+    var buf[4096];
+    assert(is_ok(read_audio_track("/dev/sr0", data_entry, &buf, 4096)) == 0,
+    "data track rejected");
+    # Zero-length audio track returns Ok(0) without any ioctl
+    var empty_entry = toc_entry_new(1, TT_AUDIO, 0, 0, 0);
+    var r = read_audio_track("/dev/sr0", empty_entry, &buf, 4096);
+    assert(is_ok(r), "empty audio track ok");
+    assert(payload(r) == 0, "empty audio track read 0 bytes");
+    return 0;
+}
+
+fn test_disc_type_layered_predicates() {
+    # Data predicate covers every layered variant
+    assert(disc_type_has_data(DT_DVD_WRITABLE_DL), "DL has data");
+    assert(disc_type_has_data(DT_DVD_DUAL_SIDED), "DS has data");
+    assert(disc_type_has_data(DT_BLURAY_XL), "XL has data");
+    # Writable predicate catches DL writable
+    assert(disc_type_is_writable(DT_DVD_WRITABLE_DL), "DL writable");
+    # Display names include the layer designation
+    assert(str_eq_cstr(str_from(disc_type_to_str(DT_DVD_WRITABLE_DL)),
+    "DVD±R DL (Dual Layer)"), "DL display");
     return 0;
 }
 
@@ -1347,6 +1429,7 @@ fn main() {
     test_validate_mount_point();
     test_validate_mount_point_blacklist_extended();
     test_validate_mount_point_rejects_traversal();
+    test_validate_mount_point_trailing_slash();
     test_unescape_mount_path();
     test_sql_escape();
     test_udevadm_sysfs_path_gate();
@@ -1368,6 +1451,11 @@ fn main() {
     test_disc_type_writable();
     test_disc_type_display_all();
     test_detect_disc_type_all();
+    test_detect_disc_type_layered();
+    test_disc_type_nominal_sectors();
+    test_disc_type_layered_predicates();
+    test_read_audio_sectors_rejects_bad_input();
+    test_read_audio_track_rejects_data_track();
     test_detect_case_insensitive();
     test_classify_toc_tracks();
     test_toc_operations();

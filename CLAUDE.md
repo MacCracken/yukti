@@ -10,7 +10,7 @@ udev hotplug, mount/eject.
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (sovereign systems language, compiled by cc5)
 - **Version**: SemVer, version file at `VERSION`
-- **Status**: 2.0.0 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
+- **Status**: 2.1.0 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 - **Shared crates**: [shared-crates.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/shared-crates.md)
@@ -33,10 +33,10 @@ re-learning the layout.
 
 ## Current State
 
-- **Source**: ~5180 lines across 16 domain modules (`src/*.cyr`)
-- **Tests**: 559 assertions, 3 fuzz harnesses, 45+ benchmarks
-- **Binary**: ~348 KB static ELF, zero external dependencies
-- **Stable**: 2.0.0 — kernel-safe subset, multi-profile dist, P(-1) security audit complete, fuzzed parsers (uevent, mount table, partition table), benchmarked hot paths
+- **Source**: ~5270 lines across 16 domain modules (`src/*.cyr`)
+- **Tests**: 592 assertions, 3 fuzz harnesses, 45+ benchmarks
+- **Binary**: ~350 KB static ELF, zero external dependencies
+- **Stable**: 2.1.0 — kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
 - **Toolchain**: Cyrius 5.4.6 (`cyrius.cyml: cyrius = "5.4.6"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel

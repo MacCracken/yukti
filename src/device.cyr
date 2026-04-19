@@ -36,6 +36,11 @@ pub fn device_id_eq(a, b) {
 # ---------------------------------------------------------------------------
 
 pub fn device_info_new(id, dev_path, class) {
+    # Bump-allocated: benchmark showed fl_alloc regresses this hot
+    # path by ~30% without matching fl_free callsites to amortize
+    # the per-alloc overhead. DeviceInfo objects are long-lived
+    # (enumerate → cache → listener dispatch) so pooling doesn't
+    # win here. Keep the 168-byte struct on the bump arena.
     var info = alloc(DI_SIZE);
     store64(info + DI_ID, id);
     store64(info + DI_DEV_PATH, dev_path);
@@ -59,6 +64,15 @@ pub fn device_info_new(id, dev_path, class) {
     store64(info + DI_PART_TABLE, 0);
     store64(info + DI_PROPERTIES, 0);
     return info;
+}
+
+# device_info_free is a no-op for now — DeviceInfo is bump-allocated
+# (see comment in device_info_new). Kept in the API for symmetry
+# with device_event_free / udev_event_free and to let consumers
+# declare intent; removes the call-site churn if we later switch
+# back to fl_alloc under a specialized short-lived workload.
+pub fn device_info_free(info) {
+    return 0;
 }
 
 # ---------------------------------------------------------------------------

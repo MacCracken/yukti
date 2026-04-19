@@ -18,6 +18,15 @@ enum DiscType {
     DT_BLURAY_VIDEO = 7;
     DT_BLANK = 8;
     DT_UNKNOWN = 9;
+    # Capacity / layout variants (2.1.0 — optical enhancements).
+    # Match the Rust crate's DVD±R DL and dual-sided classes so
+    # downstream consumers can distinguish a 4.7 GB SL disc from an
+    # 8.5 GB DL or a 9.4 GB DS on the same drive.
+    DT_DVD_WRITABLE_DL = 10;
+    DT_DVD_ROM_DL = 11;
+    DT_DVD_DUAL_SIDED = 12;
+    DT_BLURAY_DL = 13;
+    DT_BLURAY_XL = 14;
 }
 
 pub fn disc_type_to_str(dt) {
@@ -30,6 +39,11 @@ pub fn disc_type_to_str(dt) {
     if (dt == DT_BLURAY) { return "Blu-ray"; }
     if (dt == DT_BLURAY_VIDEO) { return "Blu-ray Video"; }
     if (dt == DT_BLANK) { return "Blank"; }
+    if (dt == DT_DVD_WRITABLE_DL) { return "DVD±R DL (Dual Layer)"; }
+    if (dt == DT_DVD_ROM_DL) { return "DVD-ROM DL"; }
+    if (dt == DT_DVD_DUAL_SIDED) { return "DVD Dual-Sided"; }
+    if (dt == DT_BLURAY_DL) { return "Blu-ray DL (Dual Layer, 50GB)"; }
+    if (dt == DT_BLURAY_XL) { return "Blu-ray XL (Triple/Quad Layer)"; }
     return "Unknown";
 }
 
@@ -47,12 +61,44 @@ pub fn disc_type_has_data(dt) {
     if (dt == DT_DVD_VIDEO) { return 1; }
     if (dt == DT_BLURAY) { return 1; }
     if (dt == DT_BLURAY_VIDEO) { return 1; }
+    if (dt == DT_DVD_WRITABLE_DL) { return 1; }
+    if (dt == DT_DVD_ROM_DL) { return 1; }
+    if (dt == DT_DVD_DUAL_SIDED) { return 1; }
+    if (dt == DT_BLURAY_DL) { return 1; }
+    if (dt == DT_BLURAY_XL) { return 1; }
     return 0;
 }
 
 pub fn disc_type_is_writable(dt) {
     if (dt == DT_DVD_WRITABLE) { return 1; }
+    if (dt == DT_DVD_WRITABLE_DL) { return 1; }
     if (dt == DT_BLANK) { return 1; }
+    return 0;
+}
+
+# Nominal sector capacity for a disc type (for size estimation when
+# the drive hasn't reported actual geometry yet). Returns sectors of
+# 2048 bytes; callers multiply by SECTOR_SIZE for bytes.
+#   CD-ROM ~700 MB  →  333 K sectors
+#   DVD SL ~4.7 GB  →  2.29 M sectors
+#   DVD DL ~8.5 GB  →  4.15 M sectors
+#   BD SL  ~25 GB   → 12.2 M sectors
+#   BD DL  ~50 GB   → 24.4 M sectors
+#   BD XL  ~100 GB  → 48.8 M sectors
+pub fn disc_type_nominal_sectors(dt) {
+    if (dt == DT_CD_AUDIO) { return 333000; }
+    if (dt == DT_CD_DATA) { return 333000; }
+    if (dt == DT_CD_MIXED) { return 333000; }
+    if (dt == DT_DVD_ROM) { return 2295104; }
+    if (dt == DT_DVD_WRITABLE) { return 2295104; }
+    if (dt == DT_DVD_VIDEO) { return 2295104; }
+    if (dt == DT_DVD_WRITABLE_DL) { return 4148608; }
+    if (dt == DT_DVD_ROM_DL) { return 4148608; }
+    if (dt == DT_DVD_DUAL_SIDED) { return 4590208; }
+    if (dt == DT_BLURAY) { return 12219392; }
+    if (dt == DT_BLURAY_VIDEO) { return 12219392; }
+    if (dt == DT_BLURAY_DL) { return 24438784; }
+    if (dt == DT_BLURAY_XL) { return 48877568; }
     return 0;
 }
 
@@ -92,6 +138,7 @@ enum OpticalIoctl {
     IOCTL_CDROM_DRIVE_STATUS = 0x5326;
     IOCTL_CDROMREADTOCHDR = 0x5305;
     IOCTL_CDROMREADTOCENTRY = 0x5306;
+    IOCTL_CDROMREADAUDIO = 0x530E;
     CDROM_LBA = 0x01;
     CDROM_LEADOUT = 0xAA;
     CDS_NO_DISC = 1;
@@ -99,6 +146,9 @@ enum OpticalIoctl {
     CDS_DRIVE_NOT_READY = 3;
     CDS_DISC_OK = 4;
     ENOMEDIUM = 123;
+    # Red Book CD-DA constants
+    CDDA_FRAME_SIZE = 2352;         # bytes per audio sector
+    CDDA_MAX_FRAMES_PER_READ = 75;  # 1 s of audio at 75 fps
 }
 
 # ---------------------------------------------------------------------------
@@ -360,11 +410,17 @@ pub fn read_toc(dev_path_cstr) {
     var has_data = 0;
     var num_tracks = vec_len(lba_vec) - 1;
 
+    # Largest plausible track length. A full Red Book CD holds ~333k
+    # sectors (~74 min at 75 frames/sec). Triple-layer BD holds
+    # ~50 M sectors. 128 M sectors (256 GB) is comfortably beyond the
+    # largest real disc — bigger values imply a crafted TOC.
+    # Clamp instead of trusting the drive (audit finding LOW-2).
     for (var i = 0; i < num_tracks; i = i + 1) {
         var start_lba = vec_get(lba_vec, i);
         var next_lba = vec_get(lba_vec, i + 1);
         var length = next_lba - start_lba;
         if (length < 0) { length = 0; }
+        if (length > 134217728) { length = 134217728; }   # 128M-sector cap
 
         var adr_ctrl = vec_get(ctrl_vec, i);
         var is_data_track = (adr_ctrl & 4) != 0;
@@ -378,6 +434,7 @@ pub fn read_toc(dev_path_cstr) {
             has_audio = 1;
             # Audio: 75 frames/sec -> duration = length / 75
             # x100 for centiseconds: length * 100 / 75 = length * 4 / 3
+            # length bounded above, so this multiply stays in i64.
             duration_x100 = (length * 100) / 75;
         }
 
@@ -385,7 +442,10 @@ pub fn read_toc(dev_path_cstr) {
         vec_push(tracks, entry);
     }
 
-    # Total size: lead-out LBA * 2048
+    # Total size: lead-out LBA * 2048. Clamp lead-out the same way
+    # before multiplying so `total_size` stays sane on crafted discs.
+    if (leadout_lba < 0) { leadout_lba = 0; }
+    if (leadout_lba > 134217728) { leadout_lba = 134217728; }
     var total_size = leadout_lba * 2048;
 
     # Classify disc type
@@ -394,6 +454,93 @@ pub fn read_toc(dev_path_cstr) {
     sakshi_span_exit();
 
     return Ok(disc_toc_new(dt, tracks, total_size));
+}
+
+# ---------------------------------------------------------------------------
+# read_audio_sectors — raw CD-DA sector rip (CDROMREADAUDIO ioctl)
+#
+# Reads `nframes` consecutive Red Book audio sectors starting at
+# `start_lba` into `buf`. Each sector is 2352 bytes. Caller must
+# size `buf` to at least `nframes * 2352` bytes.
+#
+# The kernel enforces a per-call cap of 75 frames (one second) to
+# keep single-ioctl latency bounded. We enforce the same cap here
+# and return the count actually requested — callers that want a
+# whole audio track loop with the LBA from `toc_entry_start_lba`.
+#
+# struct cdrom_read_audio (x86_64 layout, 24 bytes with padding):
+#    0..3  union addr (lba i32)
+#    4     addr_format u8 (CDROM_LBA = 1)
+#    5..7  padding
+#    8..11 nframes i32
+#   12..15 padding (pointer alignment)
+#   16..23 buf u64 (user pointer)
+# ---------------------------------------------------------------------------
+
+pub fn read_audio_sectors(dev_path_cstr, start_lba, nframes, buf, buflen) {
+    if (nframes <= 0) { return err_tray_failed(str_from("nframes must be > 0")); }
+    if (nframes > CDDA_MAX_FRAMES_PER_READ) { nframes = CDDA_MAX_FRAMES_PER_READ; }
+    var need = nframes * CDDA_FRAME_SIZE;
+    if (buflen < need) {
+        return err_tray_failed(str_from("read_audio_sectors: buf too small"));
+    }
+
+    sakshi_span_enter("read_audio", 10);
+    var fd_r = _open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r) == 0) {
+        sakshi_span_exit();
+        return fd_r;
+    }
+    var fd = payload(fd_r);
+
+    var req[24];
+    # Zero the struct before populating — stray bits in padding
+    # are passed to the kernel and have historically been an
+    # info-disclosure surface in ioctl drivers.
+    for (var zi = 0; zi < 24; zi = zi + 1) { store8(&req + zi, 0); }
+    store32(&req + 0, start_lba);
+    store8(&req + 4, CDROM_LBA);
+    store32(&req + 8, nframes);
+    store64(&req + 16, buf);
+
+    var rc = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADAUDIO, &req);
+    syscall(SYS_CLOSE, fd);
+    if (rc < 0) {
+        sakshi_span_exit();
+        return err_tray_failed(str_from("CDROMREADAUDIO ioctl failed"));
+    }
+    sakshi_span_exit();
+    return Ok(need);
+}
+
+# Convenience: read the whole audio track described by a TocEntry
+# into `buf`. Returns Ok(bytes_read) or Err. Loops the single-ioctl
+# cap internally — a 4-minute track is ~18000 sectors ≈ 240 calls.
+pub fn read_audio_track(dev_path_cstr, entry, buf, buflen) {
+    if (te_track_type(entry) != TT_AUDIO) {
+        return err_tray_failed(str_from("read_audio_track: not an audio track"));
+    }
+    var lba = te_start_lba(entry);
+    var remaining = te_length_sectors(entry);
+    if (remaining <= 0) { return Ok(0); }
+    var total_bytes = remaining * CDDA_FRAME_SIZE;
+    if (buflen < total_bytes) {
+        return err_tray_failed(str_from("read_audio_track: buf too small"));
+    }
+    var written = 0;
+    var off = 0;
+    while (remaining > 0) {
+        var batch = remaining;
+        if (batch > CDDA_MAX_FRAMES_PER_READ) { batch = CDDA_MAX_FRAMES_PER_READ; }
+        var batch_bytes = batch * CDDA_FRAME_SIZE;
+        var r = read_audio_sectors(dev_path_cstr, lba, batch, buf + off, buflen - off);
+        if (is_ok(r) == 0) { return r; }
+        written = written + payload(r);
+        off = off + batch_bytes;
+        lba = lba + batch;
+        remaining = remaining - batch;
+    }
+    return Ok(written);
 }
 
 # ---------------------------------------------------------------------------
@@ -423,6 +570,15 @@ pub fn detect_disc_type(media_type_cstr, has_audio, has_data) {
     }
     if (_str_eq_ci(media_type_cstr, "dvd")) { return DT_DVD_ROM; }
     if (_str_eq_ci(media_type_cstr, "dvd-rom")) { return DT_DVD_ROM; }
+    # Dual-layer + dual-sided DVDs (2.1.0).
+    if (_str_eq_ci(media_type_cstr, "dvd-r-dl")) { return DT_DVD_WRITABLE_DL; }
+    if (_str_eq_ci(media_type_cstr, "dvd+r-dl")) { return DT_DVD_WRITABLE_DL; }
+    if (_str_eq_ci(media_type_cstr, "dvd-r_dl")) { return DT_DVD_WRITABLE_DL; }
+    if (_str_eq_ci(media_type_cstr, "dvd+r_dl")) { return DT_DVD_WRITABLE_DL; }
+    if (_str_eq_ci(media_type_cstr, "dvd-rom-dl")) { return DT_DVD_ROM_DL; }
+    if (_str_eq_ci(media_type_cstr, "dvd-rom_dl")) { return DT_DVD_ROM_DL; }
+    if (_str_eq_ci(media_type_cstr, "dvd-ds")) { return DT_DVD_DUAL_SIDED; }
+    if (_str_eq_ci(media_type_cstr, "dvd-dual-sided")) { return DT_DVD_DUAL_SIDED; }
     if (_str_eq_ci(media_type_cstr, "dvd-r")) { return DT_DVD_WRITABLE; }
     if (_str_eq_ci(media_type_cstr, "dvd-rw")) { return DT_DVD_WRITABLE; }
     if (_str_eq_ci(media_type_cstr, "dvd+r")) { return DT_DVD_WRITABLE; }
@@ -432,6 +588,11 @@ pub fn detect_disc_type(media_type_cstr, has_audio, has_data) {
     if (_str_eq_ci(media_type_cstr, "blu-ray")) { return DT_BLURAY; }
     if (_str_eq_ci(media_type_cstr, "bd-rom")) { return DT_BLURAY; }
     if (_str_eq_ci(media_type_cstr, "bd-video")) { return DT_BLURAY_VIDEO; }
+    # Blu-ray capacity variants.
+    if (_str_eq_ci(media_type_cstr, "bd-dl")) { return DT_BLURAY_DL; }
+    if (_str_eq_ci(media_type_cstr, "bd-r-dl")) { return DT_BLURAY_DL; }
+    if (_str_eq_ci(media_type_cstr, "bdxl")) { return DT_BLURAY_XL; }
+    if (_str_eq_ci(media_type_cstr, "bd-xl")) { return DT_BLURAY_XL; }
     if (_str_eq_ci(media_type_cstr, "blank")) { return DT_BLANK; }
     if (_str_eq_ci(media_type_cstr, "no_disc")) { return DT_BLANK; }
     return DT_UNKNOWN;

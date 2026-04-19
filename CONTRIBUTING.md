@@ -4,7 +4,7 @@ Thanks for taking the time to dig in.
 
 ## Prerequisites
 
-- Cyrius toolchain 5.2.x (`cyrius` on `$PATH`) —
+- Cyrius toolchain 5.4.6+ (`cyrius` on `$PATH`) —
   <https://github.com/MacCracken/cyrius>
 - A Linux host for udev/mount behaviour to actually do anything useful
 
@@ -26,7 +26,9 @@ cyrius bench tests/bcyr/yukti.bcyr
 for f in fuzz/*.fcyr; do
   n=$(basename "$f" .fcyr); cyrius build "$f" "build/$n" && "./build/$n"
 done
-cyrius distlib             # rebuild dist/yukti.cyr
+cyrius distlib             # rebuild dist/yukti.cyr (full userland)
+cyrius distlib core        # rebuild dist/yukti-core.cyr (kernel-safe)
+cyrius build programs/core_smoke.cyr build/core_smoke && ./build/core_smoke
 cyrius deps --verify       # supply-chain gate
 ```
 
@@ -35,12 +37,16 @@ Never shell out to `cc5` directly; always go through `cyrius <subcommand>`.
 
 ## Adding a Module
 
-1. Create `src/your_module.cyr`
-2. Add `include "src/your_module.cyr"` to `src/lib.cyr`
+1. Create `src/your_module.cyr` — zero transitive includes (stdlib
+   includes live only in `src/lib.cyr`)
+2. Add `include "src/your_module.cyr"` to `src/lib.cyr` in dependency order
 3. Add it to `[lib] modules = [...]` in `cyrius.cyml`
-4. Write tests in `tests/tcyr/yukti.tcyr` (assertion target: +30 per module)
-5. Add benchmarks in `tests/bcyr/yukti.bcyr` for any hot path
-6. Update `docs/architecture/overview.md` module table
+4. If the module is kernel-safe (zero alloc, zero syscalls, zero stdlib
+   calls) also add it to `[lib.core] modules` and extend
+   `programs/core_smoke.cyr` with an assertion per exported symbol
+5. Write tests in `tests/tcyr/yukti.tcyr` (assertion target: +30 per module)
+6. Add benchmarks in `tests/bcyr/yukti.bcyr` for any hot path
+7. Update `docs/architecture/overview.md` module table
 
 ## Code Style
 
@@ -53,7 +59,7 @@ Never shell out to `cc5` directly; always go through `cyrius <subcommand>`.
 
 ## Testing
 
-- 485 assertions is the current floor — do not regress
+- 531 assertions is the current floor — do not regress
 - Hardware-dependent logic must be reachable from mock data (see
   `find_mount_in()` taking a string, not `/proc/mounts`)
 - Parsers get a fuzz target (`fuzz/*.fcyr`) before merge

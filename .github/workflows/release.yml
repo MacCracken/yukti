@@ -111,12 +111,14 @@ jobs:
         with:
           name: release-artifacts
       - name: Changelog
-        run: awk "/^## \\[${GITHUB_REF_NAME}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          awk "/^## \\[${TAG}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
       - uses: softprops/action-gh-release@v2
         with:
           name: "yukti ${{ github.ref_name }}"
           body_path: /tmp/body.md
-          prerelease: ${{ startsWith(github.ref_name, '0.') }}
+          prerelease: ${{ startsWith(github.ref_name, '0.') || startsWith(github.ref_name, 'v0.') }}
           files: |
             yukti-*.tar.gz
             yukti-*.cyr

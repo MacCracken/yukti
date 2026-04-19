@@ -39,23 +39,49 @@ jobs:
         run: cyrius deps --verify
 
       - name: Lint
+        # Auto-discover so new modules are covered without editing CI.
+        # Treat any warning as a failure (fail on any cyrlint "  warn " line).
         run: |
-          for f in src/error.cyr src/device.cyr src/event.cyr src/storage.cyr \
-                   src/optical.cyr src/udev.cyr src/linux.cyr src/udev_rules.cyr \
-                   src/partition.cyr src/device_db.cyr src/network.cyr src/gpu.cyr \
-                   src/lib.cyr src/main.cyr; do
-            cyrius lint "$f" || true
+          fail=0
+          for f in src/*.cyr programs/*.cyr tests/tcyr/*.tcyr tests/bcyr/*.bcyr fuzz/*.fcyr; do
+            out=$(cyrius lint "$f" 2>&1)
+            echo "$out"
+            if echo "$out" | grep -qE '^\s*warn '; then
+              fail=1
+            fi
           done
+          [ $fail -eq 0 ] || { echo "lint: warnings present"; exit 1; }
 
-      - name: Verify dist/yukti.cyr is in sync with src/
+      - name: Format check
+        # cyrius fmt --check emits the formatted source; diff against the
+        # committed file to enforce no drift.
+        run: |
+          fail=0
+          for f in src/*.cyr programs/*.cyr tests/tcyr/*.tcyr tests/bcyr/*.bcyr fuzz/*.fcyr; do
+            if ! diff -q <(cyrius fmt "$f" --check 2>/dev/null) "$f" > /dev/null; then
+              echo "needs fmt: $f"
+              fail=1
+            fi
+          done
+          [ $fail -eq 0 ] || { echo "fmt: drift detected"; exit 1; }
+
+      - name: Vet
+        run: cyrius vet src/main.cyr
+
+      - name: Verify dist bundles are in sync with src/
         run: |
           cyrius distlib
-          if ! git diff --quiet dist/yukti.cyr; then
-            echo "ERROR: dist/yukti.cyr is stale. Run 'cyrius distlib' and commit the result."
-            git --no-pager diff dist/yukti.cyr | head -40
-            exit 1
-          fi
-          echo "dist/yukti.cyr matches src/"
+          cyrius distlib core
+          fail=0
+          for bundle in dist/yukti.cyr dist/yukti-core.cyr; do
+            if ! git diff --quiet "$bundle"; then
+              echo "ERROR: $bundle is stale. Run 'cyrius distlib [core]' and commit the result."
+              git --no-pager diff "$bundle" | head -40
+              fail=1
+            fi
+          done
+          [ $fail -eq 0 ] || exit 1
+          echo "dist bundles match src/"
 
       - name: Build (DCE)
         run: |
@@ -68,6 +94,15 @@ jobs:
 
       - name: Test
         run: cyrius test tests/tcyr/yukti.tcyr
+
+      - name: Kernel-safe tripwire
+        # programs/core_smoke.cyr links ONLY src/core.cyr + src/pci.cyr
+        # and asserts every exported kernel-safe const/predicate. Non-zero
+        # exit = something alloc/syscall-using leaked into the kernel-safe
+        # subset. This must stay green for AGNOS kernel consumption.
+        run: |
+          CYRIUS_DCE=1 cyrius build programs/core_smoke.cyr build/core_smoke
+          ./build/core_smoke
 
       - name: Fuzz
         run: |
@@ -87,15 +122,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Scan for dangerous patterns
+        # Matches code lines only — rejects patterns in # comments.
+        # Use awk instead of "grep -v '# '" which would eat any line with
+        # an inline comment and hide real hits.
         run: |
-          WARN=0
-          if grep -rn 'syscall(59' src/ 2>/dev/null | grep -v "# "; then
-            echo "WARN: raw execve in src/"; WARN=1
-          fi
-          if grep -rn '"/etc/' src/ 2>/dev/null; then
-            echo "WARN: hardcoded /etc paths"; WARN=1
-          fi
-          echo "security scan complete (warnings: $WARN)"
+          FAIL=0
+          scan() {
+            local label="$1"; shift
+            local pat="$1"; shift
+            local hits
+            hits=$(grep -rn "$pat" src/ 2>/dev/null | awk -F: '
+              { line=$3; for(i=4;i<=NF;i++) line=line":"$i;
+                sub(/^[[:space:]]+/,"",line);
+                if (substr(line,1,1) != "#") print $1":"$2":"line }')
+            if [ -n "$hits" ]; then
+              echo "FAIL: $label"
+              echo "$hits"
+              FAIL=1
+            fi
+          }
+          # execve(59) / fork(57) / exec* family — no raw spawn without audit
+          scan "raw execve"   'syscall( *59'
+          scan "raw fork"     'syscall( *57'
+          # sys_system in src/ requires explicit sanitization review
+          scan "sys_system"   '\bsys_system\s*('
+          # Hardcoded system paths that shouldn't be writable by yukti
+          scan "writes to /etc"  '"/etc/'
+          scan "writes to /bin"  '"/bin/'
+          scan "writes to /sbin" '"/sbin/'
+          # Unbounded stack buffers (>= 64KB — force heap review)
+          awk -F: '
+            /var [A-Za-z_][A-Za-z0-9_]*\[[0-9]+\]/ {
+              match($0, /\[[0-9]+\]/); s=substr($0,RSTART+1,RLENGTH-2); n=s+0;
+              if (n >= 65536) print FILENAME":"NR": large stack buffer ("n" bytes): "$0
+            }' src/*.cyr | tee /tmp/bigbuf.txt
+          [ -s /tmp/bigbuf.txt ] && FAIL=1
+          echo "security scan complete (fail: $FAIL)"
+          exit $FAIL
 
   docs:
     name: Documentation

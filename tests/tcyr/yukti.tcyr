@@ -589,6 +589,66 @@ fn test_validate_mount_point() {
     return 0;
 }
 
+# Audit 2026-04-19 MED-1 regressions — blacklist gap + prefix
+fn test_validate_mount_point_blacklist_extended() {
+    # Newly forbidden roots
+    assert(is_ok(validate_mount_point("/var")) == 0, "/var bad");
+    assert(is_ok(validate_mount_point("/root")) == 0, "/root bad");
+    assert(is_ok(validate_mount_point("/home")) == 0, "/home bad");
+    assert(is_ok(validate_mount_point("/lib")) == 0, "/lib bad");
+    assert(is_ok(validate_mount_point("/lib64")) == 0, "/lib64 bad");
+    assert(is_ok(validate_mount_point("/srv")) == 0, "/srv bad");
+    assert(is_ok(validate_mount_point("/opt")) == 0, "/opt bad");
+    # Prefix match (was a gap before MED-1 fix)
+    assert(is_ok(validate_mount_point("/etc/foo")) == 0, "/etc/foo bad");
+    assert(is_ok(validate_mount_point("/usr/local/bin")) == 0, "/usr/local bad");
+    assert(is_ok(validate_mount_point("/home/alice/mnt")) == 0, "/home/alice bad");
+    # Near-miss ("/etcetera" is NOT under "/etc/")
+    assert(is_ok(validate_mount_point("/etcetera")), "/etcetera allowed");
+    assert(is_ok(validate_mount_point("/vaultstore")), "/vaultstore allowed");
+    return 0;
+}
+
+# Audit 2026-04-19 MED-1 — path traversal rejection
+fn test_validate_mount_point_rejects_traversal() {
+    assert(is_ok(validate_mount_point("/mnt/../etc")) == 0, "dotdot bad");
+    assert(is_ok(validate_mount_point("/mnt//usb")) == 0, "double slash bad");
+    assert(is_ok(validate_mount_point("/..")) == 0, "leading dotdot bad");
+    assert(is_ok(validate_mount_point("/mnt/../..")) == 0, "trailing dotdot bad");
+    # Single dots are not rejected (valid path component)
+    assert(is_ok(validate_mount_point("/mnt/./usb")), "single dot ok");
+    return 0;
+}
+
+# Audit 2026-04-19 HIGH-1 — SQL escape helper
+fn test_sql_escape() {
+    assert(str_eq_cstr(_sql_escape_str_pub(str_from("abc")), "abc"), "no metachars");
+    assert(str_eq_cstr(_sql_escape_str_pub(str_from("a'b")), "a''b"), "single quote doubled");
+    assert(str_eq_cstr(_sql_escape_str_pub(str_from("'")), "''"), "bare quote doubled");
+    # Newline dropped (defense-in-depth)
+    var r_nl = _sql_escape_str_pub(str_from("a\nb"));
+    assert(str_eq_cstr(r_nl, "ab"), "newline dropped");
+    # Injection payload neutralized
+    var payload = str_from("'); DROP TABLE devices; --");
+    var esc = _sql_escape_str_pub(payload);
+    assert(str_eq_cstr(esc, "''); DROP TABLE devices; --"), "injection doubled");
+    # Empty / null
+    assert(str_len(_sql_escape_str_pub(0)) == 0, "null -> empty");
+    return 0;
+}
+
+# Audit 2026-04-19 MED-5 — sysfs path gate in udevadm wrappers
+fn test_udevadm_sysfs_path_gate() {
+    # trigger_device rejects non-/sys/ paths before spawning udevadm
+    assert(is_ok(trigger_device("/etc/passwd")) == 0, "trigger rejects /etc");
+    assert(is_ok(trigger_device("sys/block/sda")) == 0, "trigger rejects rel");
+    assert(is_ok(trigger_device("/")) == 0, "trigger rejects root");
+    # query_device rejects same
+    assert(is_ok(query_device("/etc/passwd")) == 0, "query rejects /etc");
+    assert(is_ok(query_device("")) == 0, "query rejects empty");
+    return 0;
+}
+
 fn test_unescape_mount_path() {
     var r1 = unescape_mount_path("/mnt/usb", 8);
     assert(str_eq_cstr(r1, "/mnt/usb"), "unescape normal");
@@ -1285,7 +1345,11 @@ fn main() {
     test_filesystem_optical();
     test_filesystem_display_all();
     test_validate_mount_point();
+    test_validate_mount_point_blacklist_extended();
+    test_validate_mount_point_rejects_traversal();
     test_unescape_mount_path();
+    test_sql_escape();
+    test_udevadm_sysfs_path_gate();
     test_find_mount_in_simple();
     test_find_mount_in_no_match();
     test_find_mount_in_empty();

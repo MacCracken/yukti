@@ -486,7 +486,16 @@ pub fn read_partition_table(dev_path_cstr) {
         var entry_start_lba = load64(&gpt_hdr + 72);
         var num_entries = load32(&gpt_hdr + 80);
         var entry_size = load32(&gpt_hdr + 84);
-        if (entry_size == 0) { entry_size = GPT_ENTRY_SIZE; }
+        # GPT spec permits entry_size multiples of 128, but every real-world
+        # producer writes exactly 128 and our stack buffer in
+        # _parse_gpt_entries is sized for 128. A crafted disk with
+        # entry_size > 128 would overflow that buffer (see
+        # docs/audit/2026-04-19-audit.md finding HIGH-2) — reject instead.
+        if (entry_size != GPT_ENTRY_SIZE) {
+            syscall(SYS_CLOSE, fd);
+            sakshi_span_exit();
+            return err_parse(str_from("GPT entry_size must be 128"));
+        }
         if (num_entries > GPT_MAX_ENTRIES) { num_entries = GPT_MAX_ENTRIES; }
 
         # Disk GUID

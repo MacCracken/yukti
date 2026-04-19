@@ -642,10 +642,22 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
     }
     if (ret == 0) { return Ok(0); }
 
-    # Receive data
+    # Receive data. Provide src_addr + addrlen so we can verify the
+    # sender is the kernel (nl_pid == 0) — defense-in-depth against
+    # CVE-2009-1185-class uevent spoofing (audit finding MED-4).
+    #   struct sockaddr_nl { u16 family, u16 pad, u32 pid, u32 groups }
     var buf[8192];
-    var n = syscall(SYS_RECVFROM, fd, &buf, 8192, 0, 0, 0);
+    var src_addr[12];
+    var src_len[1];
+    store32(&src_len, 12);
+    var n = syscall(SYS_RECVFROM, fd, &buf, 8192, 0, &src_addr, &src_len);
     if (n <= 0) { return Ok(0); }
+
+    # Reject non-kernel senders — the kernel always sends with pid=0.
+    # Unprivileged user processes with CAP_NET_ADMIN could otherwise
+    # inject forged uevents into our monitor.
+    var src_pid = load32(&src_addr + 4);
+    if (src_pid != 0) { return Ok(0); }
 
     var uevent = parse_uevent(&buf, n);
     return Ok(uevent);

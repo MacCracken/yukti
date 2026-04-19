@@ -7,6 +7,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-04-19
+
+First major version bump. 1.3.0 formalized the kernel-safe split
+(`core.cyr` + `pci.cyr`) and multi-profile dist bundles; 2.0.0
+follows up with a full P(-1) security audit pass, fixing every
+HIGH and MEDIUM finding from `docs/audit/2026-04-19-audit.md`.
+
+### Breaking
+
+- **Stricter mount-path validation**. `validate_mount_point()` now
+  rejects any path containing `..` or `//`, and the forbidden-root
+  list matches both the root itself and everything under it
+  (`/etc` + `/etc/foo`), plus new roots: `/var`, `/root`, `/home`,
+  `/lib`, `/lib64`, `/srv`, `/opt`. Callers that previously relied
+  on being able to mount under `/usr/local` or with un-canonical
+  paths must pre-resolve.
+- **GPT entry_size must be exactly 128 bytes**. `read_partition_table`
+  now rejects GPT headers whose `entry_size` is not 128 (the
+  single-size value produced by every real-world GPT writer). Disks
+  with vendor extensions using larger entries will fail to parse —
+  intentional; see HIGH-2.
+- **`trigger_device` / `query_device` reject non-`/sys/` paths**.
+  Previously the function accepted arbitrary paths and silently
+  failed when udevadm rejected them; now returns `err_udev` on
+  non-sysfs input before spawning any subprocess.
+- **Udevadm wrappers now use absolute `/usr/bin/udevadm`**. Prior
+  releases used a bare `"udevadm"` which `sys_execve` cannot resolve
+  (no PATH lookup) — those code paths were effectively dead. Systems
+  with udevadm only at `/sbin/udevadm` need to arrange for the
+  `/usr/bin` symlink (modern distros already do).
+
+### Security
+
+All fixes below map 1:1 to findings in
+`docs/audit/2026-04-19-audit.md`.
+
+- **[HIGH-1] SQL injection via malicious USB descriptor fields** —
+  `device_db.cyr` built every `patra_exec` / `patra_query` statement
+  by string concatenation, allowing a USB stick advertising a
+  crafted `ID_SERIAL` to tamper with the device-history DB.
+  Introduced `_sql_escape_str` (doubles single quotes, drops NUL and
+  newline bytes) and routed every user-influenced field (`key`,
+  `vendor`, `model`, `dev_path`, `mount_point`, `fs_type`, `serial`)
+  through it.
+- **[HIGH-2] Stack buffer overflow via crafted GPT entry_size** —
+  `_parse_gpt_entries` read `entry_size` bytes into a 128-byte stack
+  buffer; a malicious disk setting `entry_size > 128` in the GPT
+  header triggered stack corruption during partition scan. Parser
+  now rejects any `entry_size != 128`.
+- **[MED-1] Incomplete mount-point blacklist** — exact-match check
+  missed `/var`, `/root`, `/home`, `/lib`, `/lib64`, `/srv`, `/opt`,
+  and did not prefix-match (so `/etc/foo` was allowed). Replaced
+  with `_starts_with_dir` prefix check over an extended list, plus
+  a new `_path_has_traversal` gate that rejects `..` and `//`.
+- **[MED-2] Mount TOCTOU (CVE-2026-27456 class)** — between
+  `validate_mount_point` and `mount(2)` an attacker with write
+  access to the mount parent could symlink the target. `storage_mount`
+  now `newfstatat`s the final component with `AT_SYMLINK_NOFOLLOW`
+  after `mkdir` and refuses to proceed if the target is a symlink
+  or not a directory.
+- **[MED-3] `/proc/mounts` truncation at 8 KB** — on container /
+  btrfs / snap hosts, `/proc/mounts` exceeds 8 KB and
+  `find_mount_point` silently returned false negatives.
+  Reader now loops 4 KB chunks until EOF into a `str_builder`
+  (capped at 1 MB as a DoS bound).
+- **[MED-4] Netlink uevent spoofing (CVE-2009-1185 class)** —
+  `udev_monitor_poll` called `recvfrom` with NULL `src_addr`, so
+  kernel-origin was never verified. Now passes `sockaddr_nl`,
+  checks `nl_pid == 0`, and drops messages with non-zero pid
+  (defense-in-depth on pre-hardening kernels).
+- **[MED-5] Broken `run("udevadm", ...)` pattern** — existing
+  wrappers passed multi-token arg strings into a single argv slot
+  and used a relative command name that `sys_execve` cannot
+  resolve. Every udevadm caller now builds an argv vec with
+  `/usr/bin/udevadm` as absolute cmd and one token per element,
+  via `exec_vec` / `exec_capture`. Closes a latent command-injection
+  surface that would have opened if `run()` ever grew shell support.
+
+### Added
+
+- `docs/audit/2026-04-19-audit.md` — full P(-1) audit report:
+  methodology, 13 findings with file/line references, CVE sweep
+  of 10 adjacent kernel/util-linux/udev classes, remediation plan.
+- `fuzz/fuzz_partition_table.fcyr` — closes the audit-flagged
+  coverage gap: MBR + GPT parser fuzzing via temp-file fixture,
+  500 mutation rounds + truncation pass, explicit HIGH-2
+  regression check (malicious entry_size must be rejected).
+- 28 new test assertions for the security fixes:
+  `test_validate_mount_point_blacklist_extended`,
+  `test_validate_mount_point_rejects_traversal`,
+  `test_sql_escape`, `test_udevadm_sysfs_path_gate`.
+
+### Changed
+
+- CI release and main workflows rewritten for 5.4.6 toolchain +
+  multi-dist + kernel-safe tripwire (see 1.3.0 entry).
+- `docs/development/roadmap.md` reorganized — LOW audit findings
+  scheduled for 2.1.0; `Future` section retained verbatim.
+
+### Metrics
+
+- **Tests**: 559 assertions (was 531, +28 security regressions)
+- **Fuzz targets**: 3 (was 2; added `fuzz_partition_table`)
+- **Binary size**: ~348 KB static ELF (unchanged)
+- **Source lines**: ~5180 (was 5067)
+- **dist/yukti.cyr**: 5147 lines
+- **dist/yukti-core.cyr**: 451 lines (unchanged — kernel-safe subset
+  untouched by security fixes, which is by design)
+
+### Non-findings (verified clean during audit)
+
+- No memory-unsafe primitives in user code (Cyrius has no raw
+  pointer arithmetic).
+- No libc / FFI.
+- No `sys_system()` in `src/`.
+- No raw `execve(59)` / `fork(57)` in `src/` (only in audited
+  `lib/process.cyr` stdlib).
+- No writes to `/etc`, `/bin`, `/sbin`.
+- Kernel-safe invariant verified — `dist/yukti-core.cyr` contains
+  zero `alloc` / `syscall` / `sys_*` references.
+
 ## [1.3.0] — 2026-04-19
 
 ### Added
@@ -231,7 +352,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/detect.rs` — device detection, filesystem parsing, disc type detection
 - 175 tests (12 hardware tests `#[ignore]`d), clippy clean with `-D warnings`
 
-[Unreleased]: https://github.com/MacCracken/yukti/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/MacCracken/yukti/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/MacCracken/yukti/releases/tag/v2.0.0
 [1.3.0]: https://github.com/MacCracken/yukti/releases/tag/v1.3.0
 [1.2.0]: https://github.com/MacCracken/yukti/releases/tag/v1.2.0
 [1.1.2]: https://github.com/MacCracken/yukti/releases/tag/v1.1.2

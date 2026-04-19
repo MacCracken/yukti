@@ -214,16 +214,74 @@ pub fn mr_read_only(r) { return load64(r + 32); }
 # Forbidden system mount points
 # ---------------------------------------------------------------------------
 
+# Check that path starts with prefix + ('/' or '\0').
+# Examples: _starts_with_dir("/etc/foo", "/etc") == 1
+#           _starts_with_dir("/etcetera", "/etc") == 0
+fn _starts_with_dir(path_cstr, prefix) {
+    var plen = strlen(prefix);
+    var i = 0;
+    while (i < plen) {
+        if (load8(path_cstr + i) != load8(prefix + i)) { return 0; }
+        i = i + 1;
+    }
+    var next = load8(path_cstr + plen);
+    if (next == 0) { return 1; }
+    if (next == 47) { return 1; }
+    return 0;
+}
+
+# Reject paths that contain `..` as a path component, or `//` (double
+# slash — our string compare below treats these as distinct from the
+# canonical form, so tighten the input requirement).
+fn _path_has_traversal(path_cstr) {
+    var len = strlen(path_cstr);
+    if (len == 0) { return 1; }
+    var i = 0;
+    while (i < len) {
+        var c = load8(path_cstr + i);
+        # Reject empty components (double slash) except a leading "/"
+        if (c == 47) {
+            if (i > 0) {
+                if (load8(path_cstr + i - 1) == 47) { return 1; }
+            }
+        }
+        # Reject ".." component: "/../" or trailing "/.."
+        if (c == 46) {
+            if (load8(path_cstr + i + 1) == 46) {
+                var prev = 47;
+                if (i > 0) { prev = load8(path_cstr + i - 1); }
+                var nxt = load8(path_cstr + i + 2);
+                if (prev == 47) {
+                    if (nxt == 47) { return 1; }
+                    if (nxt == 0) { return 1; }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
 fn _is_forbidden_mount(path_cstr) {
+    # Root is a literal match only — no prefix rule can apply to "/".
     if (streq(path_cstr, "/")) { return 1; }
-    if (streq(path_cstr, "/bin")) { return 1; }
-    if (streq(path_cstr, "/sbin")) { return 1; }
-    if (streq(path_cstr, "/usr")) { return 1; }
-    if (streq(path_cstr, "/etc")) { return 1; }
-    if (streq(path_cstr, "/boot")) { return 1; }
-    if (streq(path_cstr, "/sys")) { return 1; }
-    if (streq(path_cstr, "/proc")) { return 1; }
-    if (streq(path_cstr, "/dev")) { return 1; }
+    # Protected system directories — block the dir itself AND anything
+    # under it (addresses audit finding MED-1).
+    if (_starts_with_dir(path_cstr, "/bin"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/sbin"))   { return 1; }
+    if (_starts_with_dir(path_cstr, "/lib"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/lib64"))  { return 1; }
+    if (_starts_with_dir(path_cstr, "/usr"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/etc"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/boot"))   { return 1; }
+    if (_starts_with_dir(path_cstr, "/sys"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/proc"))   { return 1; }
+    if (_starts_with_dir(path_cstr, "/dev"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/root"))   { return 1; }
+    if (_starts_with_dir(path_cstr, "/var"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/home"))   { return 1; }
+    if (_starts_with_dir(path_cstr, "/srv"))    { return 1; }
+    if (_starts_with_dir(path_cstr, "/opt"))    { return 1; }
     return 0;
 }
 
@@ -295,11 +353,38 @@ pub fn find_mount_in(dev_path_cstr, mount_table) {
 # ---------------------------------------------------------------------------
 
 pub fn find_mount_point(dev_path_cstr) {
-    var readbuf[8192];
-    var nbytes = file_read_all("/proc/mounts", &readbuf, 8192);
-    if (nbytes <= 0) { return 0; }
-    var table = str_from_buf(&readbuf, nbytes);
-    return find_mount_in(dev_path_cstr, table);
+    # /proc/mounts can exceed 8 KB on container / btrfs / snap-heavy
+    # systems — a fixed stack buffer silently truncated the tail and
+    # caused false-negative mount lookups (audit finding MED-3).
+    # Read in 4 KB chunks until EOF and assemble via str_builder.
+    # Syscalls inlined: open=2, read=0, close=3. O_RDONLY=0.
+    var fd = syscall(2, "/proc/mounts", 0, 0);
+    if (fd < 0) { return 0; }
+    var sb = str_builder_new();
+    var chunk[4096];
+    var total = 0;
+    var going = 1;
+    while (going == 1) {
+        var n = syscall(0, fd, &chunk, 4096);
+        if (n < 0) { going = 0; }
+        elif (n == 0) { going = 0; }
+        else {
+            # Cap total at 1 MB to bound memory under a hostile /proc/mounts
+            if (total + n > 1048576) {
+                going = 0;
+            } else {
+                var i = 0;
+                while (i < n) {
+                    str_builder_add_byte(sb, load8(&chunk + i));
+                    i = i + 1;
+                }
+                total = total + n;
+            }
+        }
+    }
+    syscall(3, fd);
+    if (total == 0) { return 0; }
+    return find_mount_in(dev_path_cstr, str_builder_build(sb));
 }
 
 # ---------------------------------------------------------------------------
@@ -348,6 +433,17 @@ pub fn validate_mount_point(path_cstr) {
     if (load8(path_cstr) != 47) {
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "mount point must be absolute: ");
+        str_builder_add_cstr(sb, path_cstr);
+        return err_mount_failed(str_from(""), str_builder_build(sb));
+    }
+
+    # Reject `..` components and `//` — path must already be in
+    # canonical form. Callers must pre-resolve symlinks or pass
+    # a simple absolute path. Prevents the _is_forbidden_mount
+    # blacklist below from being bypassed by "/mnt/../etc".
+    if (_path_has_traversal(path_cstr)) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "mount point contains traversal ('..' or '//'): ");
         str_builder_add_cstr(sb, path_cstr);
         return err_mount_failed(str_from(""), str_builder_build(sb));
     }
@@ -452,8 +548,36 @@ pub fn storage_mount(dev_path_cstr, options) {
 
     sakshi_span_enter("mount", 5);
 
-    # Create mount point directory: SYS_MKDIR = 83
+    # Create mount point directory: SYS_MKDIR = 83, mode 0755.
     syscall(83, mount_cstr, 493);
+
+    # TOCTOU guard (audit finding MED-2, CVE-2026-27456 class):
+    # between validate_mount_point and mount(2) an attacker with write
+    # access to the mount parent could symlink the target at /etc or
+    # similar. lstat via newfstatat(AT_SYMLINK_NOFOLLOW) refuses to
+    # follow the final component — if it's a symlink we abort.
+    #   newfstatat = 262, AT_FDCWD = -100, AT_SYMLINK_NOFOLLOW = 256
+    #   struct stat: st_mode is u32 at offset 24
+    #   S_IFMT = 0xF000, S_IFLNK = 0xA000, S_IFDIR = 0x4000
+    var stbuf[144];
+    var st_rc = syscall(262, 0 - 100, mount_cstr, &stbuf, 256);
+    if (st_rc < 0) {
+        sakshi_span_exit();
+        return err_mount_failed(str_from(dev_path_cstr),
+        str_from("mount target stat failed"));
+    }
+    var mode = load32(&stbuf + 24);
+    var fmt = mode & 61440;   # 0xF000
+    if (fmt == 40960) {       # 0xA000 — symlink
+        sakshi_span_exit();
+        return err_mount_failed(str_from(dev_path_cstr),
+        str_from("mount target is a symlink (TOCTOU guard)"));
+    }
+    if (fmt != 16384) {       # 0x4000 — directory
+        sakshi_span_exit();
+        return err_mount_failed(str_from(dev_path_cstr),
+        str_from("mount target is not a directory"));
+    }
 
     var read_only = load64(options + 8);
     var opts_str = load64(options + 16);

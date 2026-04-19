@@ -9,6 +9,38 @@
 #   preferences   — per-device mount preferences (mount point, read-only, fs type)
 
 # ---------------------------------------------------------------------------
+# SQL string-literal escape
+#
+# patra 1.1.1 has no prepared-statement API, so every string
+# interpolated into SQL must be escaped here. Malicious USB descriptor
+# fields (ID_SERIAL, vendor, model) can otherwise break out of the
+# surrounding quotes — see docs/audit/2026-04-19-audit.md finding
+# HIGH-1.
+#
+# Rules (kept strict — err toward dropping metacharacters):
+#   '  -> ''           (standard SQL single-quote escape)
+#   \0 -> dropped      (terminates cstr; never belongs in a row value)
+#   \n -> dropped      (no multi-line SQL values; defense-in-depth)
+# ---------------------------------------------------------------------------
+
+fn _sql_escape_str(s) {
+    if (s == 0) { return str_from(""); }
+    var n = str_len(s);
+    var src = str_data(s);
+    var sb = str_builder_new();
+    for (var i = 0; i < n; i = i + 1) {
+        var c = load8(src + i);
+        if (c == 0) { continue; }
+        if (c == 10) { continue; }
+        str_builder_add_byte(sb, c);
+        if (c == 39) { str_builder_add_byte(sb, c); }   # '' escape
+    }
+    return str_builder_build(sb);
+}
+
+pub fn _sql_escape_str_pub(s) { return _sql_escape_str(s); }
+
+# ---------------------------------------------------------------------------
 # Database lifecycle
 # ---------------------------------------------------------------------------
 
@@ -109,9 +141,10 @@ pub fn device_db_record_seen(info) {
     var now = load64(&ts);
 
     # Check if device exists
+    var key_esc = _sql_escape_str(key);
     var sql_sb = str_builder_new();
     str_builder_add_cstr(sql_sb, "SELECT mount_count FROM devices WHERE serial = '");
-    str_builder_add_str(sql_sb, key);
+    str_builder_add_str(sql_sb, key_esc);
     str_builder_add_cstr(sql_sb, "'");
     var sql = str_builder_build(sql_sb);
 
@@ -126,7 +159,7 @@ pub fn device_db_record_seen(info) {
             str_builder_add_cstr(upd_sb, "UPDATE devices SET last_seen = ");
             str_builder_add_int(upd_sb, now);
             str_builder_add_cstr(upd_sb, " WHERE serial = '");
-            str_builder_add_str(upd_sb, key);
+            str_builder_add_str(upd_sb, key_esc);
             str_builder_add_cstr(upd_sb, "'");
             patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
             return 0;
@@ -135,13 +168,15 @@ pub fn device_db_record_seen(info) {
     }
 
     # Insert new device
+    var vendor_esc = _sql_escape_str(vendor);
+    var model_esc = _sql_escape_str(model);
     var ins_sb = str_builder_new();
     str_builder_add_cstr(ins_sb, "INSERT INTO devices VALUES ('");
-    str_builder_add_str(ins_sb, key);
+    str_builder_add_str(ins_sb, key_esc);
     str_builder_add_cstr(ins_sb, "', '");
-    if (vendor != 0) { str_builder_add_str(ins_sb, vendor); }
+    str_builder_add_str(ins_sb, vendor_esc);
     str_builder_add_cstr(ins_sb, "', '");
-    if (model != 0) { str_builder_add_str(ins_sb, model); }
+    str_builder_add_str(ins_sb, model_esc);
     str_builder_add_cstr(ins_sb, "', ");
     str_builder_add_int(ins_sb, class);
     str_builder_add_cstr(ins_sb, ", ");
@@ -174,15 +209,19 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     syscall(228, 0, &ts);
     var now = load64(&ts);
 
+    var key_esc = _sql_escape_str(key);
+    var dev_path_esc = _sql_escape_str(dev_path);
+    var mount_point_esc = _sql_escape_str(mount_point);
+    var fs_type_esc = _sql_escape_str(fs_type_str);
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "INSERT INTO mount_history VALUES ('");
-    str_builder_add_str(sb, key);
+    str_builder_add_str(sb, key_esc);
     str_builder_add_cstr(sb, "', '");
-    str_builder_add_str(sb, dev_path);
+    str_builder_add_str(sb, dev_path_esc);
     str_builder_add_cstr(sb, "', '");
-    if (mount_point != 0) { str_builder_add_str(sb, mount_point); }
+    str_builder_add_str(sb, mount_point_esc);
     str_builder_add_cstr(sb, "', '");
-    if (fs_type_str != 0) { str_builder_add_str(sb, fs_type_str); }
+    str_builder_add_str(sb, fs_type_esc);
     str_builder_add_cstr(sb, "', ");
     str_builder_add_int(sb, now);
     str_builder_add_cstr(sb, ", ");
@@ -197,7 +236,7 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
         str_builder_add_cstr(upd_sb, "mount_count = mount_count + 1, last_seen = ");
         str_builder_add_int(upd_sb, now);
         str_builder_add_cstr(upd_sb, " WHERE serial = '");
-        str_builder_add_str(upd_sb, key);
+        str_builder_add_str(upd_sb, key_esc);
         str_builder_add_cstr(upd_sb, "'");
         patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
     }
@@ -213,22 +252,25 @@ pub fn device_db_set_preference(serial, mount_point, read_only, fs_type, auto_mo
     if (_yukti_db == 0) { return 0; }
 
     # Delete existing preference
+    var serial_esc = _sql_escape_str(serial);
+    var mount_point_esc = _sql_escape_str(mount_point);
+    var fs_type_esc = _sql_escape_str(fs_type);
     var del_sb = str_builder_new();
     str_builder_add_cstr(del_sb, "DELETE FROM preferences WHERE serial = '");
-    str_builder_add_str(del_sb, serial);
+    str_builder_add_str(del_sb, serial_esc);
     str_builder_add_cstr(del_sb, "'");
     patra_exec(_yukti_db, str_cstr(str_builder_build(del_sb)));
 
     # Insert new preference
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "INSERT INTO preferences VALUES ('");
-    str_builder_add_str(sb, serial);
+    str_builder_add_str(sb, serial_esc);
     str_builder_add_cstr(sb, "', '");
-    if (mount_point != 0) { str_builder_add_str(sb, mount_point); }
+    str_builder_add_str(sb, mount_point_esc);
     str_builder_add_cstr(sb, "', ");
     str_builder_add_int(sb, read_only);
     str_builder_add_cstr(sb, ", '");
-    if (fs_type != 0) { str_builder_add_str(sb, fs_type); }
+    str_builder_add_str(sb, fs_type_esc);
     str_builder_add_cstr(sb, "', ");
     str_builder_add_int(sb, auto_mount);
     str_builder_add_cstr(sb, ")");
@@ -242,11 +284,12 @@ pub fn device_db_set_preference(serial, mount_point, read_only, fs_type, auto_mo
 pub fn device_db_get_preference(serial) {
     if (_yukti_db == 0) { return 0; }
 
+    var serial_esc = _sql_escape_str(serial);
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "SELECT mount_point, read_only, ");
     str_builder_add_cstr(sb, "fs_type, auto_mount ");
     str_builder_add_cstr(sb, "FROM preferences WHERE serial = '");
-    str_builder_add_str(sb, serial);
+    str_builder_add_str(sb, serial_esc);
     str_builder_add_cstr(sb, "'");
 
     var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
@@ -297,9 +340,10 @@ pub fn pref_auto_mount(p) { return load64(p + 24); } # 0/1: auto-mount on plug
 pub fn device_db_mount_count(serial) {
     if (_yukti_db == 0) { return 0; }
 
+    var serial_esc = _sql_escape_str(serial);
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "SELECT mount_count FROM devices WHERE serial = '");
-    str_builder_add_str(sb, serial);
+    str_builder_add_str(sb, serial_esc);
     str_builder_add_cstr(sb, "'");
 
     var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));
@@ -327,9 +371,10 @@ pub fn device_db_device_count() {
 pub fn device_db_is_known(serial) {
     if (_yukti_db == 0) { return 0; }
 
+    var serial_esc = _sql_escape_str(serial);
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "SELECT serial FROM devices WHERE serial = '");
-    str_builder_add_str(sb, serial);
+    str_builder_add_str(sb, serial_esc);
     str_builder_add_cstr(sb, "'");
 
     var rs = patra_query(_yukti_db, str_cstr(str_builder_build(sb)));

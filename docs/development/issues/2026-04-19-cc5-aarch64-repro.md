@@ -1,15 +1,27 @@
 # cc5_aarch64 Codegen Bug — Native SIGILL on real aarch64
 
-**Status**: held. Yukti's aarch64 cross-build path (`cyrius build
---aarch64 …`) produces ELF files that `file(1)` accepts as valid
-aarch64 static executables, but the binaries `SIGILL` immediately
-on every target that we've tested. The problem is in Cyrius's
-aarch64 codegen, not in yukti — even the minimal `core_smoke`
-(no stdlib, no syscalls, just enum compares) dies the same way.
+**Status**: **resolved in Cyrius 5.4.8** (2026-04-19). `cc5_aarch64`
+sha `5d9e42cba3cdb430d2a376cadafa149c9ec8602ee770e2ff3ef9cb2927c4be74`
+no longer emits the unallocated `0x800000d6` word. Verified on a
+Raspberry Pi 4 (Cortex-A72) via `scripts/retest-aarch64.sh pi`:
+`core_smoke`, all three fuzz targets, and the main `yukti` CLI run
+to exit 0 on real aarch64 hardware.
 
-**Filed for**: review in the next yukti release. Re-run
-`scripts/retest-aarch64.sh` once Cyrius ships a fixed
-`cc5_aarch64`; flip the version claim in CHANGELOG when green.
+**Remaining aarch64 blocker**: `yukti-test-aarch64` segfaults at
+`test_query_permissions_dev_null` because yukti is compiled with
+x86_64 Linux syscall numbers (syscall 4 = `stat` on x86_64, but
+`pivot_root` on aarch64; dozens more mismatches across the codebase
+and Cyrius stdlib `syscalls.cyr`). That is a yukti/stdlib portability
+issue, not a toolchain bug — tracked separately in
+[2026-04-19-aarch64-syscall-portability.md](2026-04-19-aarch64-syscall-portability.md).
+
+**Retained as**: reproduction record for the historical opcode bug.
+`scripts/retest-aarch64.sh pi` stays useful as a regression guard
+against future codegen regressions.
+
+---
+
+## Original report (pre-fix, Cyrius 5.4.6 / 5.4.7-WIP)
 
 ## Reproduction
 

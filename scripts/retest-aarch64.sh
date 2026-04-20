@@ -12,7 +12,10 @@
 #   scripts/retest-aarch64.sh [SSH_TARGET]
 #
 # Environment:
-#   SSH_TARGET    default: runner@agnosarm.local
+#   SSH_TARGET    default: pi (expects an alias in ~/.ssh/config
+#                 pointing at an aarch64 Linux host with scp/bash).
+#                 Override with any ssh-reachable target, e.g.
+#                   scripts/retest-aarch64.sh runner@agnosarm.local
 #   SSHPASS       if set + `sshpass` on PATH, used for password auth
 #                 (do NOT export a real password into a shell rc;
 #                 pass inline: `SSHPASS=... scripts/retest-aarch64.sh`)
@@ -24,9 +27,18 @@
 
 set -e
 
-SSH_TARGET="${1:-${SSH_TARGET:-runner@agnosarm.local}}"
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=${SSHPASS:+no}${SSHPASS:-yes}"
+SSH_TARGET="${1:-${SSH_TARGET:-pi}}"
 REMOTE_DIR="/tmp/yukti-aarch64-retest-$$"
+
+# SSH_OPTS: only relax host-key checking in the SSHPASS path. Under key
+# auth we trust the user's ~/.ssh/config + known_hosts and keep the
+# output clean (the "Permanently added" warning otherwise poisons the
+# `uname -m` arch check below).
+if [ -n "$SSHPASS" ]; then
+    SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=no"
+else
+    SSH_OPTS="-o BatchMode=yes"
+fi
 
 ssh_cmd() {
     if [ -n "$SSHPASS" ] && command -v sshpass >/dev/null 2>&1; then

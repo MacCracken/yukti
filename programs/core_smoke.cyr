@@ -16,14 +16,16 @@
 #      satisfied within those two files — no hidden dependency on
 #      device.cyr, storage.cyr, sakshi, patra, etc.
 #
-# What it does NOT prove (pending Cyrius 5.2.3 distlib profiles):
-#   - Binary leanness. `cyrius build` auto-prepends the project's
-#     [deps] stdlib before every compile, so the output binary still
-#     contains sakshi/patra/full-stdlib code as dead code. The
-#     compiler output reports them as `dead:` — that's the signal
-#     that core.cyr never CALLS them, which is exactly what we want.
-#     True binary leanness will come from the AGNOS kernel building
-#     against a dist/yukti-core.cyr bundle with its own minimal deps.
+# What it does NOT prove:
+#   - Binary leanness of this smoke-test executable. `cyrius build`
+#     auto-prepends the project's [deps] stdlib before every compile,
+#     so this binary still contains sakshi/patra/full-stdlib code as
+#     dead code. The compiler output reports them as `dead:` — that's
+#     the signal that core.cyr never CALLS them, which is exactly
+#     what we want. True binary leanness is realised by the
+#     `dist/yukti-core.cyr` bundle produced by `cyrius distlib core`;
+#     the AGNOS kernel consumes that bundle directly with its own
+#     minimal deps, not this smoke-test binary.
 #
 # Build:  cyrius build programs/core_smoke.cyr build/core_smoke
 # Run:    ./build/core_smoke ; echo exit=$?

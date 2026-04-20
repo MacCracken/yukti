@@ -33,11 +33,11 @@ re-learning the layout.
 
 ## Current State
 
-- **Source**: ~5270 lines across 16 domain modules (`src/*.cyr`)
+- **Source**: ~5490 lines across 16 domain modules (`src/*.cyr`)
 - **Tests**: 592 assertions, 3 fuzz harnesses, 45+ benchmarks
-- **Binary**: ~362 KB x86_64 static ELF, zero external dependencies
+- **Binary**: ~341 KB x86_64 static ELF, zero external dependencies
 - **Stable**: 2.1.0 — kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
-- **Toolchain**: Cyrius 5.4.6 (`cyrius.cyml: cyrius = "5.4.6"`)
+- **Toolchain**: Cyrius 5.5.11 (`cyrius.cyml: cyrius = "5.5.11"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel
 
@@ -55,7 +55,7 @@ re-learning the layout.
 
 - **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`,
   `hashmap`, `io`, `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`,
-  `args`, `freelist` (ships with Cyrius >= 5.4.6)
+  `args`, `freelist` (ships with Cyrius >= 5.5.11)
 - **sakshi** 2.0.0 — structured logging (first-party)
 - **patra** 1.1.1 — persistent device history (first-party)
 
@@ -73,7 +73,7 @@ At a glance:
 ```bash
 cyrius deps                              # resolve deps into lib/
 cyrius build src/main.cyr build/yukti    # build CLI
-cyrius test tests/tcyr/yukti.tcyr        # 531 assertions
+cyrius test tests/tcyr/yukti.tcyr        # 592 assertions
 cyrius distlib                           # → dist/yukti.cyr (full)
 cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 ```
@@ -103,7 +103,7 @@ programs/
 dist/
   yukti.cyr        — full userland bundle (`cyrius distlib`)
   yukti-core.cyr   — kernel-safe bundle (`cyrius distlib core`)
-tests/tcyr/        — 531 assertions across all modules
+tests/tcyr/        — 592 assertions across all modules
 tests/bcyr/        — benchmarks with batch timing
 fuzz/              — 2 fuzz targets (uevent parser, mount table parser)
 docs/benchmarks/   — auto-generated results.md + history.csv
@@ -255,7 +255,7 @@ Read it before writing a module — avoiding the common traps
 
 ## CI / Release
 
-- **Toolchain pin**: `cyrius = "5.4.6"` in `cyrius.cyml`. Release and CI
+- **Toolchain pin**: `cyrius = "5.5.11"` in `cyrius.cyml`. Release and CI
   both read from the manifest; no hardcoded versions in YAML
 - **Dead code elimination**: `cyrius build` already strips unreachable
   functions; the `dead:` report is informational

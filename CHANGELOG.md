@@ -7,19 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-04-20
+
+Housekeeping patch. Toolchain pin bumped from Cyrius 5.4.8 to
+5.5.11 with the project's standard closeout-pass discipline —
+dead-code audit, stale-comment sweep, version-consistency check,
+security re-scan, full clean rebuild, all gates re-run. No new
+features, no API changes, no behavioural shift for downstream
+consumers (jalwa / file manager / aethersafha / argonaut / AGNOS
+kernel). Ship as the last patch of the 2.1.x minor before any
+further roadmap work lands.
+
+### Changed
+
+- **Toolchain pin bumped 5.4.8 → 5.5.11** (`cyrius.cyml`). The
+  intervening Cyrius 5.4.9–5.5.11 arc is entirely Windows PE /
+  Apple Silicon Mach-O / aarch64 backend work — no language-level
+  breaking changes for Linux x86_64. Clean bump, zero source edits
+  required for the upgrade itself. Full gate verified on the
+  5.5.11-pinned toolchain: build 0 warnings in yukti code,
+  `cyrius lint` 0 warnings across every `src/*.cyr`, `cyrius vet`
+  clean (1 dep, 0 untrusted, 0 missing), 592/592 tests pass,
+  3/3 fuzz targets pass, `core_smoke` PASS, both dist profiles
+  (`yukti.cyr` / `yukti-core.cyr`) regenerate clean, benchmark
+  numbers match the 5.4.8 baseline within noise. Lockfile
+  (`cyrius.lock`) unchanged — sakshi 2.0.0 and patra 1.1.1
+  tags didn't move. Notable upstream additions yukti doesn't
+  currently exercise: `--strict` CLI flag (v5.4.19) escalates
+  undef-fn warnings to hard errors; `#ifplat PLAT` / `#endplat`
+  preprocessor directives (v5.4.19) as a cleaner alternative to
+  `#ifdef CYRIUS_ARCH_*`; fncall arity ceiling raised 6→8
+  (v5.4.13). One upstream stdlib warning
+  (`lib/syscalls_x86_64_linux.cyr:358: syscall arity mismatch`)
+  is flagged by 5.5.11 — known benign, documented in Cyrius
+  v5.4.20 CHANGELOG as "standalone include emits warning;
+  low-priority cleanup" — will be picked up automatically when
+  upstream resolves it.
+
+### Removed
+
+- **`_is_dangerous_action` in `src/udev_rules.cyr`** — private
+  helper that recognised `RUN` / `PROGRAM` / `IMPORT` as
+  privileged udev-rule action keys. Defined but never wired into
+  `validate_rule` (which still returns `Ok(0)` silently when
+  those actions appear). Dead code today; if the threat model
+  later calls for flagging these keys, the policy re-lands with
+  explicit tests rather than an orphaned predicate.
+- **`_map_ioctl_error` in `src/optical.cyr`** — private helper
+  whose comment read "Read errno from last syscall failure —
+  we pass it from caller" but whose body ignored the `op`
+  argument and unconditionally returned `err_tray_failed`. Never
+  called. Removed rather than completed, since no production path
+  needed it and each ioctl call site already composes its own
+  specific error.
+
+### Fixed
+
+- **Stale "pending Cyrius 5.2.3 distlib profiles" comment** in
+  `programs/core_smoke.cyr` header. Distlib profiles shipped in
+  Cyrius 5.4.6 and `dist/yukti-core.cyr` has been produced via
+  `cyrius distlib core` ever since. Comment rewritten to describe
+  current reality (AGNOS kernel consumes `dist/yukti-core.cyr`
+  directly; this smoke binary is just the invariant check).
+- **Stale assertion / line-count numbers** across `CLAUDE.md` and
+  `docs/development/cyrius-usage.md` — `531 assertions` updated to
+  `592`, source line count bumped from `~5270` to `~5490`,
+  binary size reference from `~362 KB` to `~341 KB` (matches
+  current `cyrius build` output).
+- **Stale toolchain version refs** — `README.md` now says
+  "Cyrius 5.5.11 or newer" (was `5.2.x`); `CLAUDE.md`, roadmap,
+  and threat-model all reference 5.5.11 consistently; the
+  held-aarch64 note now flags that the 5.4.6 Cortex-A72 repro
+  needs a retest on the 5.5.11 cc5_aarch64 (v5.4.19 added an
+  aarch64 `EW` alignment assert; v5.5.11 shipped an Apple
+  Silicon Mach-O probe — both touched aarch64 codegen and the
+  Linux repro has not yet been re-run).
+
 ### Investigated, held
 
-- **Native aarch64**. Cross-build succeeds with Cyrius 5.4.6's
-  `cc5_aarch64`, but the produced binaries crash with `SIGILL`
+- **Native aarch64**. Cross-build succeeded with Cyrius 5.4.6's
+  `cc5_aarch64`, but the produced binaries crashed with `SIGILL`
   on real Cortex-A72 hardware (Raspberry Pi 4, Ubuntu 24.04).
-  Faulting PC lands on word `0x800000d6` — an unallocated
-  opcode in the ARMv8-A top-level encoding space. Affects every
+  Faulting PC landed on word `0x800000d6` — an unallocated
+  opcode in the ARMv8-A top-level encoding space. Affected every
   yukti target, including the minimal `core_smoke` (no stdlib,
   no syscalls). Diagnosed as a Cyrius compiler codegen bug, not
-  a yukti issue. Held pending upstream fix. Reproducer filed at
-  `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`; one-command
-  retest script at `scripts/retest-aarch64.sh`. The CI and
-  release workflow hooks are in place and gated on
+  a yukti issue. Pending retest on the 5.5.11 toolchain (Cyrius
+  v5.4.19 added an `EW` aarch64 alignment assert; v5.5.11 shipped
+  an Apple Silicon Mach-O probe — both touch aarch64 codegen,
+  and the Cortex-A72 Linux repro has not yet been re-run).
+  Reproducer filed at
+  `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`;
+  one-command retest script at `scripts/retest-aarch64.sh`. The
+  CI and release workflow hooks are in place and gated on
   `cc5_aarch64` existing — they stay dormant today and pick up
   automatically once the toolchain ships a fixed compiler.
 

@@ -253,12 +253,6 @@ fn _open_optical_device(dev_path_cstr) {
     return Ok(fd);
 }
 
-# Map ioctl errno to error
-fn _map_ioctl_error(dev_path_cstr, op) {
-    # Read errno from last syscall failure - we pass it from caller
-    return err_tray_failed(str_from(op));
-}
-
 # ---------------------------------------------------------------------------
 # open_tray — eject/open optical drive tray
 # ---------------------------------------------------------------------------

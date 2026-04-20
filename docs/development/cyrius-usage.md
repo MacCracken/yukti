@@ -4,15 +4,24 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 5.4.6 (`cyrius = "5.4.6"` in `cyrius.cyml`).
+**Toolchain pin**: 5.5.11 (`cyrius = "5.5.11"` in `cyrius.cyml`).
 `cyrius` provides `cc5` internally — never shell out to `cc5` directly.
+
+Upgrade notes (5.4.8 → 5.5.11): the intervening 5.4.9–5.5.11 arc is
+entirely Windows PE / Apple Silicon Mach-O / aarch64 backend work —
+no language-level breaking changes for Linux x86_64. Clean bump,
+no source changes required. Notable behavioral additions yukti
+doesn't currently exercise: `--strict` CLI flag (v5.4.19) escalates
+undef-fn warnings to hard errors; `#ifplat PLAT` / `#endplat`
+directives (v5.4.19) as a cleaner alternative to
+`#ifdef CYRIUS_ARCH_*`; fncall arity ceiling raised 6→8 (v5.4.13).
 
 ## Dependencies
 
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 5.4.6):
+- **Stdlib modules** (ship with Cyrius 5.5.11):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
   `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`, `args`,
   `freelist`
@@ -37,9 +46,12 @@ they confirm the reachable set is smaller than the linked set.
 
 **aarch64 cross-build** (`cyrius build --aarch64 …`) compiles
 cleanly to an aarch64 ELF, but binaries produced by Cyrius 5.4.6's
-`cc5_aarch64` crash with `SIGILL` on real hardware due to a
-compiler codegen bug. Held until upstream fix — see
-`docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
+`cc5_aarch64` crashed with `SIGILL` on real hardware due to a
+compiler codegen bug. Held pending retest on 5.5.11's `cc5_aarch64`
+— the Cyrius 5.5.x arc includes aarch64 backend touches
+(EW alignment assert in v5.4.19, Apple Silicon Mach-O probe in
+v5.5.11); the original Cortex-A72 repro has not yet been re-run.
+See `docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
 `scripts/retest-aarch64.sh`. The CI aarch64 gate is wired but
 skips when `cc5_aarch64` isn't bundled with the toolchain
 install, so current workflows pass.
@@ -47,7 +59,7 @@ install, so current workflows pass.
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 531 assertions, must be 0 failures
+cyrius test  tests/tcyr/yukti.tcyr        # 592 assertions, must be 0 failures
 cyrius bench tests/bcyr/yukti.bcyr        # 45+ benchmarks (batch timing)
 cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent
@@ -58,7 +70,7 @@ cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 5.5.11)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so

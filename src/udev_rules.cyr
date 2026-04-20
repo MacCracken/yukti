@@ -96,14 +96,6 @@ pub fn render_rule(rule) {
 # validate_rule — check rule for correctness
 # ---------------------------------------------------------------------------
 
-# Dangerous action keys that should be flagged
-fn _is_dangerous_action(key_cstr) {
-    if (streq(key_cstr, "RUN")) { return 1; }
-    if (streq(key_cstr, "PROGRAM")) { return 1; }
-    if (streq(key_cstr, "IMPORT")) { return 1; }
-    return 0;
-}
-
 pub fn validate_rule(rule) {
     var name = ur_name(rule);
     if (str_len(name) == 0) {

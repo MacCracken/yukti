@@ -156,40 +156,46 @@ be replaced with a yukti-owned per-arch constant block.
   The `syscall(SYS_IOCTL, ...)` sites are fine once `SYS_IOCTL`
   resolves to 29 on aarch64 instead of 16.
 
-## Remediation options
+## Remediation
 
-### (A) Wait for stdlib arch dispatch
+This is a multi-platform stdlib gap, not a yukti-local issue —
+every first-party project that consumes `lib/syscalls.cyr` has
+the same bug. The fix therefore belongs upstream in Cyrius.
 
-Cyrius stdlib already has `agnosys/1.0.0/lib/syscalls_agnos.cyr`
-alongside `syscalls_linux.cyr`. Add a `syscalls_aarch64_linux.cyr`
-peer and have `syscalls.cyr` select one at compile time based on
-the `--aarch64` flag. Every consumer (yukti, sigil, bote, majra,
-nous, agnosys) picks up the fix automatically.
+**Upstream proposal**:
+[`cyrius/docs/proposals/2026-04-19-aarch64-syscall-stdlib.md`](../../../../cyrius/docs/proposals/2026-04-19-aarch64-syscall-stdlib.md)
+— split `lib/syscalls.cyr` into `syscalls_x86_64_linux.cyr` +
+`syscalls_aarch64_linux.cyr`, dispatch via the existing
+`#ifdef CYRIUS_ARCH_AARCH64` macro. Tracked on the Cyrius
+roadmap at v5.5.x under the Platform Targets table.
 
-- **Pro**: single point of fix, benefits every first-party
-  project. Matches the "sovereign stack" posture — arch dispatch
-  belongs in the stdlib, not scattered across consumers.
-- **Con**: requires Cyrius toolchain work; yukti can't fix it
-  unilaterally.
+**yukti-side follow-up (after the proposal lands)**:
 
-### (B) Yukti-local per-arch constants
+1. Bump `cyrius.cyml` pin to the toolchain release that ships
+   the split stdlib.
+2. Replace every bare-literal `syscall(N, ...)` call listed in
+   the scope table above with the corresponding `SYS_*` enum.
+   The stdlib split makes identifiers arch-correct but it
+   doesn't rewrite bare literals — that's yukti's responsibility.
+3. Migrate `query_permissions` from direct `syscall(4, ...)` to
+   `sys_stat(path, &buf)` wrapper (which dispatches to
+   `newfstatat` on aarch64).
+4. Replace hardcoded `struct stat` offsets (`+24/+28/+32` for
+   `mode/uid/gid` in `device.cyr:157-159`) with `STAT_MODE`,
+   `STAT_UID`, `STAT_GID` constants from the stdlib (also
+   arch-dispatched per the proposal).
+5. Re-run `scripts/retest-aarch64.sh pi` — every target exits 0.
+6. Flip aarch64 from `held` to `shipped` in CHANGELOG and
+   roadmap; cut the yukti minor that claims native aarch64.
 
-Introduce `src/sys_linux_x86_64.cyr` and `src/sys_linux_aarch64.cyr`
-in yukti with the full `SYS_*` plus yukti-specific extras
-(`SYS_STAT`, `SYS_STATFS`, `SYS_MOUNT`, `SYS_UMOUNT2`,
-`SYS_CLOCK_GETTIME`, etc.), pick one via the include chain in
-`src/lib.cyr` based on a build flag, and rewrite every bare literal
-in yukti to use the enum.
+Scope on the yukti side: **medium**, one minor release (2.2.0).
+Gated on the Cyrius stdlib work landing first.
 
-- **Pro**: unblocks yukti immediately without waiting on stdlib.
-- **Con**: duplicates effort every downstream project will also
-  have to do; two arch enums to keep in sync with the stdlib one
-  if/when (A) lands.
-
-### (C) Hybrid
-
-Fix yukti locally with (B) for now; delete the local enum when
-(A) lands. This is the pragmatic path if (A) is not imminent.
+**Do not** fix this locally in yukti. A yukti-local arch enum
+would duplicate effort every downstream project already needs,
+and would go stale the moment the stdlib version lands. The
+right answer is to wait, and to be explicit about the upstream
+dependency.
 
 ## When to re-run the retest
 

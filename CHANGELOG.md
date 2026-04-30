@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] — 2026-04-30
+
+Docs-only patch. Captures the audio-domain work that vani's 0.3.x
+roadmap is blocked on so the requirements live in yukti's own
+roadmap rather than only in a sibling repo's notes. No code
+changes, no behavioural shift, no API surface change.
+
+### Changed
+
+- `docs/development/roadmap.md` gains a new "Next minor — 2.2.0"
+  section detailing the audio device discovery work needed to
+  unblock vani v0.3.0 #8 (typed yukti audio descriptor adapter)
+  and #9 (multi-device routing). Spelled out as a concrete
+  punch list:
+  - `src/audio.cyr` enumerator over `/dev/snd/` + `/proc/asound/`
+  - `AudioDeviceInfo` struct (card, device, subdevice,
+    direction, name, driver, hw_id)
+  - `yukti_audio_devices()` + direction / card filters
+  - udev hotplug subscription for `SUBSYSTEM=sound`
+  - `device_db` persistence scoped by hw_id
+  - Vani descriptor adapter API: `yukti_audio_card(d)` /
+    `_device` / `_subdevice` / `_direction` / `_name` / `_hw_id`
+  Capability queries explicitly stay on the vani side
+  (`audio_query_caps` via `SNDRV_PCM_IOCTL_HW_REFINE`); yukti
+  reports presence + identity only.
+- `vani — audio device discovery → descriptor → open` added to
+  the "Ecosystem Integration" list, gated on the new audio
+  module.
+
 ## [2.1.1] — 2026-04-20
 
 Housekeeping patch. Toolchain pin bumped from Cyrius 5.4.8 to

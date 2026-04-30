@@ -106,6 +106,10 @@ aethersafha / argonaut / AGNOS kernel) build and link unchanged.
 - `vani — audio device discovery → descriptor → open` added to
   the "Ecosystem Integration" list, gated on the new audio
   module.
+- `src/device.cyr` re-formatted (lines 222-263, `device_info_to_json`
+  body): pre-existing 8-space indentation dedented to the canonical
+  4-space. The 5.5.11 `cyrfmt` was tolerant; 5.7.43 catches it. Pure
+  whitespace, no semantic change.
 - aarch64 retest note (CHANGELOG 2.1.0 "Investigated, held",
   `docs/development/cyrius-usage.md`, `roadmap.md`) rolls
   forward from "pending retest on 5.5.11" to "pending retest

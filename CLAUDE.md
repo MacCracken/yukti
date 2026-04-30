@@ -35,9 +35,9 @@ re-learning the layout.
 
 - **Source**: ~5490 lines across 16 domain modules (`src/*.cyr`)
 - **Tests**: 592 assertions, 3 fuzz harnesses, 45+ benchmarks
-- **Binary**: ~341 KB x86_64 static ELF, zero external dependencies
-- **Stable**: 2.1.0 — kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
-- **Toolchain**: Cyrius 5.5.11 (`cyrius.cyml: cyrius = "5.5.11"`)
+- **Binary**: ~380 KB x86_64 static ELF, zero external dependencies
+- **Stable**: 2.1.2 — kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
+- **Toolchain**: Cyrius 5.7.43 (`cyrius.cyml: cyrius = "5.7.43"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel
 
@@ -55,7 +55,7 @@ re-learning the layout.
 
 - **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`,
   `hashmap`, `io`, `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`,
-  `args`, `freelist` (ships with Cyrius >= 5.5.11)
+  `args`, `freelist` (ships with Cyrius >= 5.7.43)
 - **sakshi** 2.0.0 — structured logging (first-party)
 - **patra** 1.1.1 — persistent device history (first-party)
 
@@ -250,12 +250,13 @@ The full list of Yukti-relevant Cyrius idioms (buffer semantics,
 `str_split` byte separators, `run()` arity, flat namespace rules, etc.)
 lives in [`docs/development/cyrius-usage.md`](docs/development/cyrius-usage.md).
 Read it before writing a module — avoiding the common traps
-(`var buf[N]` is bytes, no closures over locals, `break` in
-`var`-heavy loops unreliable) saves a lot of debug time.
+(`var buf[N]` is bytes and is static data when declared inside a
+function, no closures over locals, `break` in `var`-heavy loops
+unreliable) saves a lot of debug time.
 
 ## CI / Release
 
-- **Toolchain pin**: `cyrius = "5.5.11"` in `cyrius.cyml`. Release and CI
+- **Toolchain pin**: `cyrius = "5.7.43"` in `cyrius.cyml`. Release and CI
   both read from the manifest; no hardcoded versions in YAML
 - **Dead code elimination**: `cyrius build` already strips unreachable
   functions; the `dead:` report is informational

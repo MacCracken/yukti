@@ -9,12 +9,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.2] — 2026-04-30
 
-Docs-only patch. Captures the audio-domain work that vani's 0.3.x
-roadmap is blocked on so the requirements live in yukti's own
-roadmap rather than only in a sibling repo's notes. No code
-changes, no behavioural shift, no API surface change.
+Modernization sweep + roadmap docs. Toolchain pin steps from
+Cyrius 5.5.11 to 5.7.43 with the project's standard closeout-pass
+discipline (audit, gates, dist regen). Adds the 2.2.0 audio-domain
+roadmap so the requirements blocking vani 0.3.x live here rather
+than only in a sibling repo's notes. No yukti API changes. No
+behavioural shift. Downstream consumers (jalwa / file manager /
+aethersafha / argonaut / AGNOS kernel) build and link unchanged.
 
 ### Changed
+
+- **Toolchain pin bumped 5.5.11 → 5.7.43** (`cyrius.cyml`). The
+  5.5.x → 5.7.x arc is mostly stdlib expansion (json
+  pretty-print/streaming/pointer in v5.7.40-5.7.42, sandhi
+  HTTP/TLS folded into the toolchain at v5.7.0, Landlock +
+  getrandom syscall wrappers in v5.7.35) and aarch64 backend
+  hardening (f64 basic ops v5.7.30, EB() codebuf cap raised
+  v5.7.34). Two latent language gotchas surface during the
+  bump — both audited, neither requires a yukti code change:
+  - `var buf[N]` inside a function is **static data**, not
+    stack — consecutive calls share backing memory, so any
+    `Str` or pointer aliasing into `buf` dangles on the next
+    call. Yukti has six such sites (`device.cyr:153`,
+    `partition.cyr:358`, `storage.cyr:125`, `udev.cyr:666`,
+    `udev_rules.cyr:246`, `udev_rules.cyr:293`); all six are
+    safe today because the parsing-bound sites pass through
+    `str_from_buf` (`alloc + memcpy` at `lib/str.cyr:283-284`)
+    before any `Str` escapes, and the syscall-buffer sites
+    only do scalar i64 loads. Build warning to watch for:
+    "large static data (N bytes)".
+  - 5.x stdlib lookup helpers (`toml_get`, `args_get`, etc.)
+    take cstr keys, not `Str`; passing `str_from("…")` silently
+    returns 0 because `str_eq_cstr` calls `strlen` on a NUL-less
+    Str. Yukti uses `map_*` exclusively (cstr-keyed via
+    `map_new()`), with bare-cstr literals or `str_cstr(s)` at
+    every call site (`linux.cyr:80,95`, `udev.cyr:67`,
+    `udev.cyr:298,301,304,309,316,322,327,330,493,515`). No
+    consumers of the affected helpers in yukti src/.
+
+  Sandhi (HTTP/TLS service-boundary stdlib) is now available
+  via `lib/sandhi.cyr`; not pulled into yukti's `[deps] stdlib`
+  because yukti has no HTTP surface.
+
+  Full gate verified on 5.7.43: build 0 warnings in yukti code,
+  `cyrius lint` 0 warnings across every `src/*.cyr`, `cyrius vet`
+  clean (1 dep, 0 untrusted, 0 missing), 592/592 tests pass,
+  3/3 fuzz targets pass (uevent / mount table / partition table),
+  `core_smoke` PASS, kernel-safe invariant holds (zero
+  `alloc`/`sys_*`/`syscall` references in `dist/yukti-core.cyr`),
+  both dist profiles regenerate clean. Binary 341 KB → 380 KB
+  (~11% growth from the json/freelist/chrono stdlib expansion).
+  Lockfile (sakshi 2.0.0, patra 1.1.1) unchanged — neither tag
+  moved.
+
+  One known upstream warning, benign:
+  `lib/patra.cyr:2097: duplicate fn 'json_build' (last definition
+  wins)`. Stdlib `json.cyr` grew its own `json_build(pairs)` in
+  v5.7.40-5.7.42; patra still vendors a different-arity
+  `json_build(buf, max, keys, vals, types, n)` from before. Yukti
+  src/ calls neither directly. Cleanup tracked for 2.1.3 — drop
+  `"json"` from `[deps] stdlib` since yukti only uses str_builder
+  for its own JSON serialization (`device_info_to_json`); patra's
+  vendored copy stays internal to patra.
+
+  Notable additions yukti doesn't currently exercise but worth
+  flagging for follow-on work:
+  - `cyrius smoke` / `cyrius soak` subcommands (v5.7.38) —
+    natural fit for `programs/core_smoke.cyr` to replace the
+    current manual build+run dance.
+  - `cyrius api-surface` (v5.7.33) — public-API diff gate; could
+    formalize yukti's stable surface for jalwa / argonaut /
+    aethersafha / AGNOS kernel.
+  - `lib/security.cyr` Landlock + `lib/random.cyr` getrandom
+    (v5.7.35) — useful for path-traversal hardening on mount
+    points (currently defense-in-depth at MED-2 in the
+    2026-04-19 audit).
+  - `lib/test.cyr` v1 with `test_each` table-driven dispatch
+    (v5.7.43) — could compress the 592-assertion suite.
 
 - `docs/development/roadmap.md` gains a new "Next minor — 2.2.0"
   section detailing the audio device discovery work needed to
@@ -35,6 +106,12 @@ changes, no behavioural shift, no API surface change.
 - `vani — audio device discovery → descriptor → open` added to
   the "Ecosystem Integration" list, gated on the new audio
   module.
+- aarch64 retest note (CHANGELOG 2.1.0 "Investigated, held",
+  `docs/development/cyrius-usage.md`, `roadmap.md`) rolls
+  forward from "pending retest on 5.5.11" to "pending retest
+  on 5.7.43" — the 5.7.30 f64 fixes and 5.7.34 codebuf cap
+  raise are the meaningful aarch64 deltas since the original
+  5.4.6 SIGILL repro.
 
 ## [2.1.1] — 2026-04-20
 

@@ -4,24 +4,57 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 5.5.11 (`cyrius = "5.5.11"` in `cyrius.cyml`).
+**Toolchain pin**: 5.7.43 (`cyrius = "5.7.43"` in `cyrius.cyml`).
 `cyrius` provides `cc5` internally — never shell out to `cc5` directly.
 
-Upgrade notes (5.4.8 → 5.5.11): the intervening 5.4.9–5.5.11 arc is
-entirely Windows PE / Apple Silicon Mach-O / aarch64 backend work —
-no language-level breaking changes for Linux x86_64. Clean bump,
-no source changes required. Notable behavioral additions yukti
-doesn't currently exercise: `--strict` CLI flag (v5.4.19) escalates
-undef-fn warnings to hard errors; `#ifplat PLAT` / `#endplat`
-directives (v5.4.19) as a cleaner alternative to
-`#ifdef CYRIUS_ARCH_*`; fncall arity ceiling raised 6→8 (v5.4.13).
+Upgrade notes (5.5.11 → 5.7.43): the arc is mostly stdlib expansion
+(json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
+HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
+wrappers in 5.7.35) and aarch64 backend hardening (f64 basic ops
+in v5.7.30, EB() codebuf cap raised in v5.7.34). Two latent
+language gotchas surface during the bump — neither requires a
+yukti code change but both are worth knowing:
+
+- `var buf[N]` inside a function body is **static data**, not
+  stack. Consecutive calls share the backing memory, so any
+  `Str` or pointer that aliases into the buffer dangles on the
+  next call. Yukti's parsing-bound buffers
+  (`udev.cyr:666 parse_uevent`, `udev_rules.cyr:246 query_device`,
+  `udev_rules.cyr:293 list_devices`) are safe because they pass
+  through `str_from_buf` (`alloc + memcpy`) before any `Str`
+  escapes; the syscall-buffer sites (`device.cyr:153
+  query_permissions`, `partition.cyr:358 _parse_gpt_entries`,
+  `storage.cyr:125 filesystem_usage`) only do scalar i64 loads.
+  Build warning to watch for: "large static data (N bytes)".
+- 5.x stdlib lookup helpers (`toml_get`, `args_get`, etc.) take
+  cstr keys, not `Str` — passing `str_from("…")` silently returns
+  0 because `str_eq_cstr` calls `strlen` on a NUL-less Str. Yukti
+  uses `map_*` (cstr-keyed via `map_new()`) with bare-cstr literals
+  or `str_cstr(s)` everywhere; no consumers of the affected helpers.
+
+sandhi (HTTP/TLS service-boundary stdlib) is now available via
+`lib/sandhi.cyr`; not pulled into yukti's `[deps] stdlib` because
+yukti has no HTTP surface. Notable additions yukti doesn't
+currently exercise but worth flagging:
+`cyrius smoke` / `cyrius soak` subcommands (v5.7.38) — natural
+fit for `programs/core_smoke.cyr`; `cyrius api-surface`
+(v5.7.33) — public-API diff gate for downstream consumers;
+`lib/security.cyr` Landlock + `lib/random.cyr` getrandom
+(v5.7.35) — useful for path-traversal hardening.
+
+One known upstream warning, benign: `lib/patra.cyr:2097: duplicate
+fn 'json_build'`. Stdlib `json.cyr` grew its own `json_build(pairs)`
+in 5.7.40-5.7.42; patra still vendors a different-arity
+`json_build(buf, max, keys, vals, types, n)` from before. Yukti's
+src/ calls neither directly. Cleanup tracked for 2.1.3 (drop
+`"json"` from `[deps] stdlib`).
 
 ## Dependencies
 
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 5.5.11):
+- **Stdlib modules** (ship with Cyrius 5.7.43):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
   `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`, `args`,
   `freelist`
@@ -38,7 +71,7 @@ cyrius deps --verify     # CI gate: fail on hash mismatch
 ## Build
 
 ```sh
-cyrius build src/main.cyr build/yukti     # userland CLI (~362 KB static ELF)
+cyrius build src/main.cyr build/yukti     # userland CLI (~380 KB static ELF)
 ```
 
 Zero warnings is the gate. `dead:` lines from DCE are informational —
@@ -47,10 +80,11 @@ they confirm the reachable set is smaller than the linked set.
 **aarch64 cross-build** (`cyrius build --aarch64 …`) compiles
 cleanly to an aarch64 ELF, but binaries produced by Cyrius 5.4.6's
 `cc5_aarch64` crashed with `SIGILL` on real hardware due to a
-compiler codegen bug. Held pending retest on 5.5.11's `cc5_aarch64`
-— the Cyrius 5.5.x arc includes aarch64 backend touches
-(EW alignment assert in v5.4.19, Apple Silicon Mach-O probe in
-v5.5.11); the original Cortex-A72 repro has not yet been re-run.
+compiler codegen bug. Held pending retest on 5.7.43's `cc5_aarch64`
+— the 5.5.x → 5.7.x arc lands real aarch64 fixes (EW alignment
+assert v5.4.19, Apple Silicon Mach-O probe v5.5.11, f64 basic
+ops v5.7.30, EB() codebuf cap raised v5.7.34); the original
+Cortex-A72 repro has not yet been re-run.
 See `docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
 `scripts/retest-aarch64.sh`. The CI aarch64 gate is wired but
 skips when `cc5_aarch64` isn't bundled with the toolchain
@@ -70,7 +104,7 @@ cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 5.5.11)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 5.7.43)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so

@@ -84,10 +84,11 @@ v0.2.0 #6/#7 hardware coverage roadmap).
 - [ ] aarch64 native build — cross-compile path is wired, but
       Cyrius 5.4.6's `cc5_aarch64` emitted an unallocated ARMv8-A
       opcode (`0x800000d6`) that `SIGILL`ed on real hardware.
-      Needs retest on the 5.5.11 toolchain (Cyrius 5.4.19 added
-      an `EW` alignment assert + v5.5.11 shipped an Apple Silicon
-      Mach-O probe — both touch aarch64 codegen; Cortex-A72 Linux
-      repro has not yet been re-run). See
+      Needs retest on the 5.7.43 toolchain — the 5.5.x → 5.7.x
+      arc lands real aarch64 fixes (EW alignment assert v5.4.19,
+      Apple Silicon Mach-O probe v5.5.11, f64 basic ops v5.7.30,
+      EB() codebuf cap raised v5.7.34). Cortex-A72 Linux repro
+      has not yet been re-run. See
       `docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
       `scripts/retest-aarch64.sh`.
 - [ ] Container-aware enumeration (detect host vs container devices)

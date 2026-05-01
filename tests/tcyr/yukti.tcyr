@@ -1554,6 +1554,17 @@ fn main() {
     test_audio_parse_pcm_rejects_invalid();
     test_audio_unpack_helpers();
     test_audio_info_accessors();
+    # 2.2.1 audio hotplug + device_db
+    test_classify_audio_pcm_playback();
+    test_classify_audio_pcm_capture();
+    test_classify_audio_drops_control();
+    test_classify_audio_drops_seq();
+    test_classify_audio_drops_timer();
+    test_audio_db_open_creates_table();
+    test_audio_db_record_seen();
+    test_audio_db_record_seen_upsert();
+    test_audio_db_known_lookup();
+    test_audio_db_last_seen();
 
     var r = assert_summary();
     syscall(60, r);
@@ -2060,6 +2071,166 @@ fn test_audio_unpack_helpers() {
     assert(_audio_parsed_card(p2) == 99, "max card extract");
     assert(_audio_parsed_device(p2) == 99, "max device extract");
     assert(_audio_parsed_direction(p2) == 0, "playback extract");
+    return 0;
+}
+
+fn _make_sound_event(action, dev_path, sys_path) {
+    return udev_event_new(str_from(action),
+    str_from(sys_path), str_from(dev_path),
+    str_from("sound"), str_from(""), map_new());
+}
+
+fn test_classify_audio_pcm_playback() {
+    test_group("audio classify pcm playback");
+    var e = _make_sound_event("add", "/dev/snd/pcmC0D3p",
+    "/sys/devices/pci0000:00/0000:04:00.1/sound/card0/pcmC0D3p");
+    assert_eq(classify_device(e), DC_AUDIO, "pcmC0D3p -> DC_AUDIO");
+    return 0;
+}
+
+fn test_classify_audio_pcm_capture() {
+    test_group("audio classify pcm capture");
+    var e = _make_sound_event("add", "/dev/snd/pcmC1D0c",
+    "/sys/devices/pci0000:00/0000:04:00.6/sound/card1/pcmC1D0c");
+    assert_eq(classify_device(e), DC_AUDIO, "pcmC1D0c -> DC_AUDIO");
+    return 0;
+}
+
+fn test_classify_audio_drops_control() {
+    test_group("audio classify drops control nodes");
+    # Control nodes share SUBSYSTEM=sound but aren't PCM endpoints.
+    # Hotplug consumers (file manager) shouldn't see add/remove
+    # events for these.
+    var e = _make_sound_event("add", "/dev/snd/controlC0",
+    "/sys/devices/pci0000:00/0000:04:00.1/sound/card0/controlC0");
+    assert_eq(classify_device(e), DC_UNKNOWN, "controlC0 dropped");
+    return 0;
+}
+
+fn test_classify_audio_drops_seq() {
+    var e = _make_sound_event("add", "/dev/snd/seq",
+    "/sys/devices/virtual/sound/seq");
+    assert_eq(classify_device(e), DC_UNKNOWN, "seq dropped");
+    return 0;
+}
+
+fn test_classify_audio_drops_timer() {
+    var e = _make_sound_event("add", "/dev/snd/timer",
+    "/sys/devices/virtual/sound/timer");
+    assert_eq(classify_device(e), DC_UNKNOWN, "timer dropped");
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# Audio device_db persistence (2.2.1)
+# ---------------------------------------------------------------------------
+
+fn _make_audio_info(card, device, direction, name_cstr, driver_cstr, hw_id_cstr) {
+    return _audio_info_new(card, device, 0, direction,
+    str_from(name_cstr), str_from(driver_cstr), str_from(hw_id_cstr),
+    str_from(""), str_from(""));
+}
+
+fn test_audio_db_open_creates_table() {
+    test_group("audio_db open creates table");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_test_audio_db1.patra");
+    if (is_ok(r) == 0) { return 0; }
+    # Empty audio table on fresh db — count is 0, not an error.
+    assert_eq(device_db_audio_count(), 0, "fresh audio_devices empty");
+    device_db_close();
+    syscall(87, "/tmp/yukti_test_audio_db1.patra");
+    syscall(87, "/tmp/yukti_test_audio_db1.patra.wal");
+    return 0;
+}
+
+fn test_audio_db_record_seen() {
+    test_group("audio_db record_audio_seen");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_test_audio_db2.patra");
+    if (is_ok(r) == 0) { return 0; }
+
+    var d = _make_audio_info(0, 3, YUKTI_AUDIO_PLAYBACK,
+    "HDMI 0", "HDA-Intel", "pci:0000:04:00.1:dev3:p");
+    device_db_record_audio_seen(d);
+
+    assert(device_db_audio_count() >= 1, "row inserted");
+    assert(device_db_audio_known(str_from("pci:0000:04:00.1:dev3:p")) == 1, "known by hw_id");
+
+    device_db_close();
+    syscall(87, "/tmp/yukti_test_audio_db2.patra");
+    syscall(87, "/tmp/yukti_test_audio_db2.patra.wal");
+    return 0;
+}
+
+fn test_audio_db_record_seen_upsert() {
+    test_group("audio_db UPSERT on same hw_id");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_test_audio_db3.patra");
+    if (is_ok(r) == 0) { return 0; }
+
+    # Plug a USB DAC, record it.
+    var d1 = _make_audio_info(2, 0, YUKTI_AUDIO_PLAYBACK,
+    "USB DAC v1", "USB-Audio", "usb:1234/5678/100:SN42:dev0:p");
+    device_db_record_audio_seen(d1);
+    var count_after_first = device_db_audio_count();
+
+    # Re-plug the same DAC (perhaps after a reboot — kernel renames
+    # it but hw_id stays stable). Should UPDATE not INSERT.
+    var d2 = _make_audio_info(2, 0, YUKTI_AUDIO_PLAYBACK,
+    "USB DAC v1 (renamed)", "USB-Audio", "usb:1234/5678/100:SN42:dev0:p");
+    device_db_record_audio_seen(d2);
+    var count_after_second = device_db_audio_count();
+
+    assert_eq(count_after_first, count_after_second, "no duplicate row on UPSERT");
+
+    device_db_close();
+    syscall(87, "/tmp/yukti_test_audio_db3.patra");
+    syscall(87, "/tmp/yukti_test_audio_db3.patra.wal");
+    return 0;
+}
+
+fn test_audio_db_known_lookup() {
+    test_group("audio_db known lookup");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_test_audio_db4.patra");
+    if (is_ok(r) == 0) { return 0; }
+
+    # Unknown before any record
+    assert_eq(device_db_audio_known(str_from("pci:NEVER:dev0:p")), 0, "unknown before record");
+
+    # Known after record
+    var d = _make_audio_info(1, 0, YUKTI_AUDIO_CAPTURE,
+    "ALC897 Analog", "HDA-Intel", "pci:0000:04:00.6:dev0:c");
+    device_db_record_audio_seen(d);
+    assert_eq(device_db_audio_known(str_from("pci:0000:04:00.6:dev0:c")), 1, "known after record");
+    assert_eq(device_db_audio_known(str_from("pci:NEVER:dev0:p")), 0, "unrelated still unknown");
+
+    device_db_close();
+    syscall(87, "/tmp/yukti_test_audio_db4.patra");
+    syscall(87, "/tmp/yukti_test_audio_db4.patra.wal");
+    return 0;
+}
+
+fn test_audio_db_last_seen() {
+    test_group("audio_db last_seen returns timestamp");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_test_audio_db5.patra");
+    if (is_ok(r) == 0) { return 0; }
+
+    # Unknown hw_id returns 0 (no row).
+    assert_eq(device_db_audio_last_seen(str_from("pci:NEVER:dev0:p")), 0, "unknown last_seen=0");
+
+    # Recorded hw_id returns a non-zero timestamp.
+    var d = _make_audio_info(0, 7, YUKTI_AUDIO_PLAYBACK,
+    "HDMI 1", "HDA-Intel", "pci:0000:04:00.1:dev7:p");
+    device_db_record_audio_seen(d);
+    var ts = device_db_audio_last_seen(str_from("pci:0000:04:00.1:dev7:p"));
+    assert(ts > 0, "last_seen positive epoch");
+
+    device_db_close();
+    syscall(87, "/tmp/yukti_test_audio_db5.patra");
+    syscall(87, "/tmp/yukti_test_audio_db5.patra.wal");
     return 0;
 }
 

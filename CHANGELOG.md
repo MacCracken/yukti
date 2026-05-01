@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-04-30
+
+Audio domain follow-on. Wires the 2.2.0 audio enumerator into
+yukti's hotplug pipeline (so a USB DAC plug-in surfaces as a
+`DeviceEvent` the same way a USB drive does) and adds the
+`audio_devices` table to `device_db` so re-plugging the same
+DAC carries history forward. Both items were intentionally
+deferred from 2.2.0 — vani's `vani_open_yukti(desc, direction)`
+adapter calls `yukti_audio_devices()` on demand and never needed
+either, but the file-manager / aethersafha / jalwa consumer flow
+does.
+
+### Added
+
+- **`SUBSYSTEM=sound` classification in `src/udev.cyr`**
+  (`classify_device` line 109+). Sound subsystem events are
+  filtered to the `pcmC*D*` substring on `DEVPATH` — control
+  nodes / sequencer / timer share the subsystem but aren't PCM
+  endpoints, and downstream hotplug consumers shouldn't see
+  them. The substring filter is the cheap form of the strict
+  filename grammar in `src/audio.cyr`'s `_audio_parse_pcm_name`
+  used by the enumerator. PCM devices classify as `DC_AUDIO`;
+  everything else falls through to `DC_UNKNOWN`.
+- **`audio_devices` table in `src/device_db.cyr`**:
+  `(hw_id STR, friendly_name STR, driver STR, direction INT,
+  card INT, device INT, first_seen INT, last_seen INT)`. Schema
+  mirrors the existing `devices` table shape; keyed by
+  `hw_id` so the PCI-BDF / USB-VID:PID:SERIAL anchors from the
+  audio enumerator carry forward across reboots and ALSA
+  reorderings.
+- **Audio device_db public API** (4 functions, all `pub`):
+  - `device_db_record_audio_seen(audio_info)` — UPSERT by
+    `hw_id`. First call inserts with `first_seen = last_seen
+    = now`; subsequent calls bump `last_seen` and refresh
+    `friendly_name` / `driver` / `card` / `device` fields. The
+    most recently observed display name wins (e.g. when a
+    kernel firmware update renames a card).
+  - `device_db_audio_count()` — total rows; convenient for
+    "how many audio devices have I ever seen" diagnostics.
+  - `device_db_audio_known(hw_id)` — 1 if seen before, 0
+    otherwise. Cheap probe for "is this a new DAC?".
+  - `device_db_audio_last_seen(hw_id)` — unix epoch of the
+    most recent record, or 0 if never seen. Powers
+    "show me devices I haven't plugged in for a while" UIs.
+
+- **14 new test assertions** in `tests/tcyr/yukti.tcyr`
+  covering: 5 classify-sound paths (pcm playback / capture
+  → `DC_AUDIO`; control / sequencer / timer → `DC_UNKNOWN`),
+  5 audio_db paths (open creates table, record_seen inserts,
+  re-plug UPSERTs without duplicating, known-lookup on
+  recorded vs unrecorded hw_ids, last_seen returns
+  positive epoch). Total: 639 → 653.
+
+### Verified
+
+- Build clean on 5.7.48, lint 0 warnings, fmt 0 drift across
+  every CI-scanned file, 653/653 tests, 3/3 fuzz, bench,
+  `core_smoke` PASS, kernel-safe invariant holds (zero
+  `alloc`/`sys_*`/`syscall` references in
+  `dist/yukti-core.cyr`).
+- aarch64 cross-build emits valid ARM ELFs for all 5 CI
+  targets.
+- Both dist profiles regenerate clean (`yukti.cyr` 6098
+  lines, `yukti-core.cyr` 458 lines, both v2.2.1). Lockfile
+  unchanged (sakshi 2.0.0, patra 1.9.2).
+
 ## [2.2.0] — 2026-04-30
 
 Audio device discovery — unblocks vani 0.3.x. New `src/audio.cyr`

@@ -3,26 +3,6 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.2.1: audio domain follow-on
-
-The two stretch items dropped from 2.2.0 because they don't gate
-vani's `vani_open_yukti(desc, direction)` adapter. They serve the
-file-manager / aethersafha / jalwa consumer flow — same shape as
-the existing block / optical hotplug pipeline.
-
-- [ ] **udev hotplug subscription for `SUBSYSTEM=sound`** with a
-      `pcmC*D*[pc]` DEVPATH filter to drop control / sequencer /
-      timer event noise. Wires audio plug/unplug into the same
-      `DeviceEvent` flow the existing block / optical path uses
-      (`src/udev.cyr` `classify_device` +
-      `udev_event_to_device_event`).
-- [ ] **`device_db` persistence for audio devices** — new
-      `audio_devices` table mirroring the existing `devices`
-      shape (first_seen / last_seen / friendly_name) keyed by
-      `hw_id` so re-plugging the same USB DAC carries forward
-      its history. Patra's stable surface (`patra_open` /
-      `_exec` / `_query` / `_result_*`) is the only API touched.
-
 ## Next minor — 2.3.0: security hardening + prepared statements
 
 Second pass on the 2026-04-19 P(-1) audit. Pulls in cyrius

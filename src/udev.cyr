@@ -106,6 +106,19 @@ pub fn classify_device(event) {
         if (str_eq_cstr(dev_type, "partition")) { return DC_BLOCK_INTERNAL; }
     }
 
+    # Audio devices (2.2.1: SUBSYSTEM=sound, filtered to PCM endpoints).
+    # The kernel emits separate events for control nodes / sequencer /
+    # timer under the same subsystem; we only care about pcmC<n>D<m>{p|c}
+    # for vani's adapter. The /pcmC substring check is the cheap form
+    # of the full filename grammar (see audio.cyr's _audio_parse_pcm_name
+    # for the strict version used by the enumerator).
+    if (str_eq_cstr(subsystem, "sound")) {
+        var sound_dev_path = ue_dev_path(event);
+        if (sound_dev_path != 0) {
+            if (str_contains_cstr(sound_dev_path, "/pcmC")) { return DC_AUDIO; }
+        }
+    }
+
     return DC_UNKNOWN;
 }
 

@@ -151,7 +151,7 @@ pub fn device_health_new() {
 
 pub fn query_permissions(dev_path_cstr) {
     var buf[144];
-    var r = syscall(4, dev_path_cstr, &buf);
+    var r = sys_stat(dev_path_cstr, &buf);
     if (r < 0) { return 0; }
 
     var mode = load32(&buf + 24);

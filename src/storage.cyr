@@ -123,7 +123,7 @@ pub fn filesystem_usage(mount_point_cstr) {
     # SYS_STATFS = 137
     # struct statfs is 120 bytes on x86_64
     var buf[120];
-    var r = syscall(137, mount_point_cstr, &buf);
+    var r = syscall(SYS_STATFS, mount_point_cstr, &buf);
     if (r < 0) {
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "statfs failed: errno ");
@@ -358,14 +358,14 @@ pub fn find_mount_point(dev_path_cstr) {
     # caused false-negative mount lookups (audit finding MED-3).
     # Read in 4 KB chunks until EOF and assemble via str_builder.
     # Syscalls inlined: open=2, read=0, close=3. O_RDONLY=0.
-    var fd = syscall(2, "/proc/mounts", 0, 0);
+    var fd = sys_open("/proc/mounts", 0, 0);
     if (fd < 0) { return 0; }
     var sb = str_builder_new();
     var chunk[4096];
     var total = 0;
     var going = 1;
     while (going == 1) {
-        var n = syscall(0, fd, &chunk, 4096);
+        var n = sys_read(fd, &chunk, 4096);
         if (n < 0) { going = 0; }
         elif (n == 0) { going = 0; }
         else {
@@ -554,7 +554,7 @@ pub fn storage_mount(dev_path_cstr, options) {
     sakshi_span_enter("mount", 5);
 
     # Create mount point directory: SYS_MKDIR = 83, mode 0755.
-    syscall(83, mount_cstr, 493);
+    sys_mkdir(mount_cstr, 493);
 
     # TOCTOU guard (audit finding MED-2, CVE-2026-27456 class):
     # between validate_mount_point and mount(2) an attacker with write
@@ -565,7 +565,7 @@ pub fn storage_mount(dev_path_cstr, options) {
     #   struct stat: st_mode is u32 at offset 24
     #   S_IFMT = 0xF000, S_IFLNK = 0xA000, S_IFDIR = 0x4000
     var stbuf[144];
-    var st_rc = syscall(262, 0 - 100, mount_cstr, &stbuf, 256);
+    var st_rc = syscall(SYS_NEWFSTATAT, 0 - 100, mount_cstr, &stbuf, 256);
     if (st_rc < 0) {
         sakshi_span_exit();
         return err_mount_failed(str_from(dev_path_cstr),
@@ -593,7 +593,7 @@ pub fn storage_mount(dev_path_cstr, options) {
     if (fs_type_str != 0) {
         # Explicit filesystem type
         var fs_cstr = str_cstr(fs_type_str);
-        var r = syscall(165, dev_path_cstr, mount_cstr, fs_cstr, flags, 0);
+        var r = sys_mount(dev_path_cstr, mount_cstr, fs_cstr, flags, 0);
         if (r < 0) {
             var errno = 0 - r;
             return map_errno_to_err(errno, "mount", str_from(dev_path_cstr));
@@ -609,7 +609,7 @@ pub fn storage_mount(dev_path_cstr, options) {
     for (var i = 0; i < AUTO_FS_COUNT; i = i + 1) {
         var fs_try = _get_auto_fs_type(i);
         if (fs_try == 0) { break; }
-        var r = syscall(165, dev_path_cstr, mount_cstr, fs_try, flags, 0);
+        var r = sys_mount(dev_path_cstr, mount_cstr, fs_try, flags, 0);
         if (r == 0) {
             sakshi_span_exit();
             var dev_id = device_id_new_cstr(dev_path_cstr);
@@ -630,7 +630,7 @@ pub fn storage_unmount(mount_point_cstr) {
     sakshi_span_enter("unmount", 7);
 
     # SYS_UMOUNT2 = 166, flags = 0
-    var r = syscall(166, mount_point_cstr, 0);
+    var r = sys_umount2(mount_point_cstr, 0);
     if (r < 0) {
         var errno = 0 - r;
         sakshi_span_exit();
@@ -653,7 +653,7 @@ pub fn storage_unmount(mount_point_cstr) {
     # SYS_RMDIR = 84
     var mp_s = str_from(mount_point_cstr);
     if (str_starts_with(mp_s, "/run/media/")) {
-        syscall(84, mount_point_cstr);
+        sys_rmdir(mount_point_cstr);
     }
 
     return Ok(0);
@@ -768,7 +768,7 @@ pub fn storage_eject(dev_path_cstr) {
         if (fd < 0) {
             return err_eject_failed(dev_s, str_from("failed to open sysfs delete"));
         }
-        syscall(1, fd, "1", 1);
+        sys_write(fd, "1", 1);
         sys_close(fd);
     }
 

@@ -1,0 +1,49 @@
+# yukti/syscalls.cyr — arch-conditional SYS_* constants + shims for
+# syscalls that lib/syscalls_{x86_64,aarch64}_linux.cyr doesn't expose.
+#
+# Centralises the arch divergence so the rest of yukti src/ can call
+# `syscall(SYS_NAME, ...)` portably and the value resolves correctly
+# at compile time per `CYRIUS_ARCH_*`. Mirrors the
+# `lib/syscalls.cyr` dispatch pattern.
+#
+# Scope: socket family (socket / bind / connect / setsockopt /
+# recvfrom / ppoll), filesystem (statfs / newfstatat /
+# clock_gettime), and the x86-only `sys_stat` shim that fills the
+# stdlib gap (aarch64 already provides `sys_stat(path, buf)` that
+# dispatches via newfstatat). Items live here and not in the
+# upstream stdlib because they haven't been promoted yet — track
+# in `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`.
+
+#ifdef CYRIUS_ARCH_X86
+enum YkSyscalls {
+    SYS_SOCKET = 41;
+    SYS_CONNECT = 42;
+    SYS_BIND = 49;
+    SYS_RECVFROM = 45;
+    SYS_SETSOCKOPT = 54;
+    SYS_PPOLL = 271;
+    SYS_STATFS = 137;
+    SYS_NEWFSTATAT = 262;
+    SYS_CLOCK_GETTIME = 228;
+}
+
+# Stdlib provides sys_stat on aarch64 only; fill the x86 gap so
+# yukti src/ can call sys_stat(path, buf) portably.
+fn sys_stat(path, buf) {
+    return syscall(SYS_STAT, path, buf);
+}
+#endif
+
+#ifdef CYRIUS_ARCH_AARCH64
+enum YkSyscalls {
+    SYS_SOCKET = 198;
+    SYS_CONNECT = 203;
+    SYS_BIND = 200;
+    SYS_RECVFROM = 207;
+    SYS_SETSOCKOPT = 208;
+    SYS_STATFS = 43;
+    SYS_CLOCK_GETTIME = 113;
+}
+# Stdlib aarch64 already defines: SYS_NEWFSTATAT = 79, SYS_PPOLL = 73,
+# fn sys_stat(path, buf) — don't redefine here.
+#endif

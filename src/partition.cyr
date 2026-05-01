@@ -158,17 +158,17 @@ pub fn mbr_type_to_str(type_id) {
 fn _read_sector(fd, lba, buf) {
     # lseek to lba * 512: SYS_LSEEK = 8, SEEK_SET = 0
     var offset = lba * SECTOR_SIZE;
-    var r = syscall(8, fd, offset, 0);
+    var r = syscall(SYS_LSEEK, fd, offset, 0);
     if (r < 0) { return r; }
     # read 512 bytes
-    return syscall(0, fd, buf, SECTOR_SIZE);
+    return sys_read(fd, buf, SECTOR_SIZE);
 }
 
 # Read N bytes at an exact byte offset
 fn _read_at(fd, byte_offset, buf, count) {
-    var r = syscall(8, fd, byte_offset, 0);
+    var r = syscall(SYS_LSEEK, fd, byte_offset, 0);
     if (r < 0) { return r; }
-    return syscall(0, fd, buf, count);
+    return sys_read(fd, buf, count);
 }
 
 # ---------------------------------------------------------------------------

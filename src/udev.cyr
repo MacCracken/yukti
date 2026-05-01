@@ -595,12 +595,9 @@ enum NetlinkConst {
     SOL_SOCKET = 1;
     SO_RCVBUF = 8;
     RECV_BUF_SIZE = 262144;
-    SYS_SOCKET = 41;
-    SYS_BIND = 49;
-    SYS_SETSOCKOPT = 54;
-    SYS_POLL = 7;
-    SYS_RECVFROM = 45;
 }
+# Syscall numbers for socket/bind/setsockopt/recvfrom/ppoll come from
+# src/syscalls.cyr (arch-conditional; was hardcoded x86_64 here pre-2.1.4).
 
 pub fn udev_monitor_new() {
     return udev_monitor_with_filter(0);
@@ -653,9 +650,16 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
     store16(&pfd + 4, 1);
     store16(&pfd + 6, 0);
 
-    var ret = syscall(SYS_POLL, &pfd, 1, timeout_ms);
+    # ppoll(2) instead of poll(2) — aarch64's syscall table has no
+    # SYS_POLL, only SYS_PPOLL. ppoll takes a timespec* (not int ms)
+    # and an extra (sigmask, sigsetsize) pair. We drive both arches
+    # through ppoll uniformly via SYS_PPOLL (defined in src/syscalls.cyr).
+    var ts[16];
+    store64(&ts, timeout_ms / 1000);
+    store64(&ts + 8, (timeout_ms - (timeout_ms / 1000) * 1000) * 1000000);
+    var ret = syscall(SYS_PPOLL, &pfd, 1, &ts, 0, 8);
     if (ret < 0) {
-        return err_udev_socket(str_from("poll() failed"));
+        return err_udev_socket(str_from("ppoll() failed"));
     }
     if (ret == 0) { return Ok(0); }
 

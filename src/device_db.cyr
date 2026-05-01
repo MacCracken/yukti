@@ -137,7 +137,7 @@ pub fn device_db_record_seen(info) {
 
     # Get current timestamp
     var ts[16];
-    syscall(228, 0, &ts);
+    syscall(SYS_CLOCK_GETTIME, 0, &ts);
     var now = load64(&ts);
 
     # Check if device exists
@@ -206,7 +206,7 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     var dev_path = di_dev_path(info);
 
     var ts[16];
-    syscall(228, 0, &ts);
+    syscall(SYS_CLOCK_GETTIME, 0, &ts);
     var now = load64(&ts);
 
     var key_esc = _sql_escape_str(key);

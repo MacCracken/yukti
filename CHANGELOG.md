@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4] — 2026-04-30
+
+aarch64 runtime correctness — closes the second held-aarch64
+thread (raw-number arch-divergent syscalls) flagged in 2.1.3.
+2.1.3 made cross-builds *compile* clean; 2.1.4 makes them
+*run* the right syscalls. The remaining held aarch64 work is
+the original 5.4.6 SIGILL retest on real Cortex-A72 — that's
+hardware-bound, not a code change. No yukti API changes. No
+behavioural shift on x86_64 (every migration is pass-through:
+either to a stdlib wrapper that resolves to the same syscall
+on x86, or to an arch-conditional `SYS_*` constant whose
+x86 value matches the hardcoded number it replaces).
+
+### Changed
+
+- **Raw-number `syscall(N, …)` calls migrated — 33 sites
+  across 9 modules.** Pre-2.1.4 yukti src/ had hardcoded
+  x86_64 syscall numbers throughout — the aarch64 binary
+  built and linked but would invoke the *wrong* syscalls at
+  runtime. Two migration paths depending on stdlib coverage:
+
+  - **To stdlib wrappers** (which arch-translate internally):
+    - `syscall(0, …)` → `sys_read(…)` — partition.cyr × 2,
+      storage.cyr.
+    - `syscall(1, …)` → `sys_write(…)` — main.cyr × 6,
+      udev_rules.cyr × 2, storage.cyr.
+    - `syscall(2, …)` → `sys_open(…)` — storage.cyr (the
+      `/proc/mounts` reader; was missed in 2.1.3 because it
+      used the literal `2` rather than the `SYS_OPEN`
+      symbol).
+    - `syscall(4, …)` → `sys_stat(…)` — device.cyr.
+      Stdlib only ships `sys_stat` for aarch64; x86 gap
+      filled with a yukti-local shim in `src/syscalls.cyr`
+      (`fn sys_stat(path, buf) { return syscall(SYS_STAT,
+      path, buf); }` under `#ifdef CYRIUS_ARCH_X86`). On
+      aarch64 the stdlib's `sys_stat` (which routes through
+      `SYS_NEWFSTATAT(AT_FDCWD, …)`) takes over.
+    - `syscall(60, code)` → `sys_exit(code)` — main.cyr × 2.
+    - `syscall(83, …)` → `sys_mkdir(…)` — network.cyr,
+      storage.cyr (uses `SYS_MKDIRAT(AT_FDCWD, …)` on
+      aarch64).
+    - `syscall(84, …)` → `sys_rmdir(…)` — storage.cyr (uses
+      `SYS_UNLINKAT(AT_FDCWD, AT_REMOVEDIR)` on aarch64).
+    - `syscall(165, …)` → `sys_mount(…)` — network.cyr,
+      storage.cyr × 2.
+    - `syscall(166, …)` → `sys_umount2(…)` — storage.cyr.
+
+  - **To stdlib `SYS_*` constants** (arch-correct values
+    resolve at compile time):
+    - `syscall(8, …)` → `syscall(SYS_LSEEK, …)` —
+      partition.cyr × 2 (LSEEK has no wrapper in stdlib;
+      arch-divergent number — x86=8, aarch64=62 — but the
+      stdlib's enum resolves correctly per arch).
+
+- **Arch-conditional `SYS_*` constants for stdlib-uncovered
+  syscalls** — new file `src/syscalls.cyr` (added to
+  `[lib] modules` and `src/lib.cyr` include chain just before
+  `src/error.cyr`). Defines a single `enum YkSyscalls` block
+  per arch under `#ifdef CYRIUS_ARCH_{X86,AARCH64}`,
+  centralising what's currently a stdlib gap:
+  - `SYS_SOCKET` (41 / 198), `SYS_CONNECT` (42 / 203),
+    `SYS_BIND` (49 / 200), `SYS_RECVFROM` (45 / 207),
+    `SYS_SETSOCKOPT` (54 / 208) — for udev netlink monitor +
+    network probe.
+  - `SYS_PPOLL` (271 / 73 — aarch64 has it in stdlib;
+    x86 doesn't, so we add it x86-side only).
+  - `SYS_STATFS` (137 / 43), `SYS_NEWFSTATAT` (262 / 79 —
+    aarch64 has it in stdlib; x86 only), `SYS_CLOCK_GETTIME`
+    (228 / 113) — for filesystem usage, mount-symlink TOCTOU
+    guard, and event timestamping.
+  - Plus the x86-side `sys_stat` shim noted above.
+
+  Centralisation prevents the 2.1.3-era pattern where each
+  src/ file had its own local `enum` shadow with hardcoded
+  x86 numbers (silently wrong on aarch64). Will fold into
+  the upstream cyrius stdlib whenever those constants get
+  promoted; tracked alongside the held-aarch64 issue.
+
+- **udev netlink monitor: `poll(2)` → `ppoll(2)`** in
+  `udev_monitor_poll` (`src/udev.cyr:647-660`). Linux
+  aarch64's syscall table has no `SYS_POLL` — the kernel
+  exposes only `ppoll`. ppoll takes a `timespec*` (not int
+  ms) and an extra `(sigmask, sigsetsize)` pair, so the call
+  site now constructs a stack-allocated 16-byte timespec
+  from `timeout_ms` (`tv_sec = ms / 1000; tv_nsec = (ms %
+  1000) * 1_000_000`) and passes `sigmask = NULL,
+  sigsetsize = 8` for "no signal mask change". x86_64 also
+  has `ppoll` (271), so we drive both arches uniformly
+  through it — no arch-conditional dispatch in the call site.
+
+- **Local arch-divergent `enum NlConst` cleanup**
+  (`src/udev.cyr:589-601`) — dropped `SYS_SOCKET = 41`,
+  `SYS_BIND = 49`, `SYS_SETSOCKOPT = 54`, `SYS_POLL = 7`,
+  `SYS_RECVFROM = 45` from the netlink constants enum. The
+  socket-family numbers now resolve through
+  `src/syscalls.cyr`; `SYS_POLL` is gone entirely (replaced
+  by `SYS_PPOLL`). The enum keeps the truly-arch-stable
+  socket constants (`AF_NETLINK`, `SOCK_DGRAM`,
+  `SOCK_CLOEXEC`, `NETLINK_KOBJECT_UEVENT`, `SOL_SOCKET`,
+  `SO_RCVBUF`, `RECV_BUF_SIZE`).
+
+### Verified
+
+- Build clean on 5.7.48: `OK`, only the expected `dead:
+  sakshi_error` import-unused report.
+- `cyrius lint` 0 warnings, `cyrfmt --check` 0 drift across
+  every `src/*.cyr`, `programs/*.cyr`, `tests/tcyr/*.tcyr`,
+  `tests/bcyr/*.bcyr`, `fuzz/*.fcyr`.
+- 594/594 unit tests, 3/3 fuzz harnesses (uevent, mount
+  table, partition table), bench suite running cleanly,
+  `core_smoke` PASS, kernel-safe invariant holds (zero
+  `alloc`/`sys_*`/`syscall` references in
+  `dist/yukti-core.cyr`).
+- aarch64 cross-build: all 5 CI targets emit valid ARM ELFs
+  (`yukti`, `core_smoke`, three fuzz harnesses). Remaining
+  `syscall arity mismatch` warnings are entirely inside
+  stdlib `lib/syscalls_*.cyr` wrappers and patra dep —
+  yukti src/ is now clean of direct-syscall arity issues.
+- Both dist profiles regenerate clean (`yukti.cyr` 5417
+  lines, `yukti-core.cyr` 451 lines, both v2.1.4). Lockfile
+  unchanged (sakshi 2.0.0, patra 1.9.2).
+
+### Held
+
+- **Runtime SIGILL retest on real Cortex-A72** (the original
+  5.4.6 codegen bug, still untested against any of
+  5.5.x → 5.7.x's aarch64 backend fixes). Unchanged from
+  2.1.3 — hardware-bound, not a code change. Tracked in
+  `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`.
+
 ## [2.1.3] — 2026-04-30
 
 Modernization sweep + aarch64 portability + roadmap docs.

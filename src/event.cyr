@@ -60,7 +60,7 @@ pub fn device_event_new(device_id, device_class, kind, dev_path) {
     store64(e + DE_DEV_PATH, dev_path);
     # Timestamp: clock_gettime(CLOCK_REALTIME=0)
     var ts[16];
-    syscall(228, 0, &ts);
+    syscall(SYS_CLOCK_GETTIME, 0, &ts);
     store64(e + DE_TIMESTAMP, load64(&ts));
     store64(e + DE_EXTRA, 0);
     store64(e + DE_DEVICE_INFO, 0);

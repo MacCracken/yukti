@@ -144,8 +144,8 @@ pub fn write_rule(rule, rules_dir_cstr) {
     }
 
     var data = str_cstr(rendered);
-    syscall(1, fd, data, strlen(data));
-    syscall(1, fd, "\n", 1);
+    sys_write(fd, data, strlen(data));
+    sys_write(fd, "\n", 1);
     sys_close(fd);
 
     return Ok(path);

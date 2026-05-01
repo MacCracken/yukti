@@ -24,6 +24,7 @@ include "lib/freelist.cyr"
 include "lib/patra.cyr"
 
 # --- Yukti domain modules (dependency order) ---
+include "src/syscalls.cyr"
 include "src/error.cyr"
 include "src/core.cyr"
 include "src/pci.cyr"

@@ -26,6 +26,7 @@ output = "build/yukti"
 # invariant check.
 [lib]
 modules = [
+    "src/syscalls.cyr",
     "src/error.cyr",
     "src/core.cyr",
     "src/pci.cyr",

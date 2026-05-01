@@ -42,18 +42,21 @@ fit for `programs/core_smoke.cyr`; `cyrius api-surface`
 `lib/security.cyr` Landlock + `lib/random.cyr` getrandom
 (v5.7.35) — useful for path-traversal hardening.
 
-aarch64 portability — 2.1.3 migrated 30 raw
-`SYS_OPEN`/`SYS_CLOSE`/`SYS_UNLINK` callers in yukti src/ to the
-stdlib's arch-translating `sys_open` / `sys_close` / `sys_unlink`
-wrappers, paired with the same migration in patra 1.9.2 (yukti's
-device-history dep, bumped from 1.1.1). aarch64 cross-build is
-clean and CI-gated. The remaining direct-syscall callers in
-yukti src/ — `clock_gettime` (228 x86 / 113 aarch64), `mount`
-(165 / 40), `socket` / `connect`, `write`, `exit_group`, `stat`,
-`mkdir` — still hardcode x86_64 numbers and would call the
-*wrong* syscalls at runtime on aarch64; their migration is
-tracked in `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`
-alongside the runtime SIGILL retest.
+aarch64 portability — 2.1.3 migrated 30
+`SYS_OPEN`/`SYS_CLOSE`/`SYS_UNLINK` callers to stdlib wrappers;
+2.1.4 finished the job with another 33 sites covering the
+arch-divergent `read`/`write`/`stat`/`exit`/`mkdir`/`rmdir`/
+`mount`/`umount2`/`lseek`/`socket`/`connect`/`statfs`/`newfstatat`/
+`clock_gettime`/`ppoll` syscalls, and switched
+`udev_monitor_poll` from poll(2) to ppoll(2) (aarch64 has no
+SYS_POLL). Constants the stdlib doesn't expose live in
+`src/syscalls.cyr` under arch-conditional `enum YkSyscalls`
+blocks, plus a yukti-local `sys_stat` shim that fills the x86
+gap (stdlib only ships `sys_stat` on aarch64). aarch64
+cross-build is clean and runtime-correct; the only remaining
+held aarch64 thread is the hardware-bound 5.4.6 SIGILL retest
+on real Cortex-A72 (see
+`docs/development/issues/2026-04-19-cc5-aarch64-repro.md`).
 
 ## Dependencies
 

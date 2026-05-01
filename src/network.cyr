@@ -174,7 +174,7 @@ pub fn network_mount(share, mount_point_cstr) {
     }
 
     # Create mount point directory
-    syscall(83, mount_point_cstr, 493);
+    sys_mkdir(mount_point_cstr, 493);
 
     # Build options
     var options = 0;
@@ -188,7 +188,7 @@ pub fn network_mount(share, mount_point_cstr) {
     # Mount syscall: mount(source, target, fstype, flags, data)
     # MS_NOSUID=2 | MS_NODEV=4 = 6
     var flags = 6;
-    var r = syscall(165, source_cstr, mount_point_cstr, kernel_type, flags, options_cstr);
+    var r = sys_mount(source_cstr, mount_point_cstr, kernel_type, flags, options_cstr);
 
     if (r < 0) {
         var errno = 0 - r;
@@ -297,7 +297,7 @@ pub fn network_list_mounted() {
 
 pub fn network_probe_host(host_cstr, port) {
     # Create TCP socket
-    var fd = syscall(41, 2, 1, 0);
+    var fd = syscall(SYS_SOCKET, 2, 1, 0);
     if (fd < 0) { return 0; }
 
     # Build sockaddr_in
@@ -328,7 +328,7 @@ pub fn network_probe_host(host_cstr, port) {
     store32(&addr + 4, ip);
 
     # Non-blocking connect would be better, but simple blocking test works
-    var r = syscall(42, fd, &addr, 16);
+    var r = syscall(SYS_CONNECT, fd, &addr, 16);
     sys_close(fd);
 
     if (r == 0) { return 1; }

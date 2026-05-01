@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-04-30
+
+Audio device discovery — unblocks vani 0.3.x. New `src/audio.cyr`
+enumerates ALSA PCM devices (playback + capture) and surfaces the
+typed descriptor adapter API that vani's `vani_open_yukti(desc,
+direction)` consumes. After this lands, vani's roadmap items #8
+(typed yukti audio descriptor adapter) and #9 (multi-device
+routing — onboard / USB / HDMI) can fill in and ship 1.0.0.
+
+Domain split: yukti reports presence + identity; vani opens the
+kernel handle and asks via `SNDRV_PCM_IOCTL_HW_REFINE` what the
+device actually supports. Capability queries deliberately stay
+out of yukti — see vani's `audio_query_caps` (v0.2.0).
+
+### Added
+
+- **`src/audio.cyr`** — new ~430-line module mirroring
+  `src/gpu.cyr`'s shape (sysfs/procfs enumeration, named offset
+  constants, named struct accessors). Surfaces:
+  - **Direction constants**: `YUKTI_AUDIO_PLAYBACK = 0`,
+    `YUKTI_AUDIO_CAPTURE = 1` — bit-for-bit match with vani's
+    `VaniDirection` so the adapter is a copy, not a translation.
+  - **`AudioDeviceInfo` struct** (72 bytes): `card`, `device`,
+    `subdevice`, `direction`, `name`, `driver`, `hw_id`,
+    `dev_path`, `sys_path`. All fields i64 or Str — matches
+    yukti's flat-pointer convention.
+  - **Top-level enumerator**: `yukti_audio_devices()` walks
+    `/dev/snd/pcmC{N}D{M}{p|c}`, cross-references
+    `/proc/asound/cards` for driver name and
+    `/proc/asound/card{N}/pcm{D}{p|c}/info` for friendly name.
+  - **Filters**: `yukti_audio_devices_for_direction(dir)`,
+    `yukti_audio_devices_for_card(card)`,
+    `yukti_audio_count()`.
+  - **Vani descriptor adapter API** — typed accessors that
+    vani 0.3.x reads against an `AudioDeviceInfo*`:
+    `yukti_audio_card(d)`, `_device`, `_subdevice`, `_direction`,
+    `_name`, `_driver`, `_hw_id`, `_dev_path`, `_sys_path`.
+
+  **`hw_id` construction** (anchors NEVER on the ALSA card index
+  — adding a PCIe sound card reorders cards and would break
+  device_db history):
+  - **PCI** (built-in HDA, discrete sound, GPU HDMI): PCI BDF
+    from card{N}/device/uevent's `PCI_SLOT_NAME` —
+    `pci:0000:04:00.1:dev3:p`. Stable across reboots and ALSA
+    reorderings.
+  - **USB** (USB DAC, USB headset): `usb:VID:PID:SERIAL:dev{M}:{p|c}`
+    using card{N}/device/uevent's PRODUCT triple plus
+    card{N}/device/../serial when available.
+  - **Fallback**: `card{N}_dev{M}_{p|c}` for loopback /
+    bluetooth / virtual sources where neither PCI nor USB
+    metadata exposes a stable identifier. Documented as
+    "transient" in the module header — consumers should treat
+    these as non-persistent.
+
+- **`DC_AUDIO = 9`** appended to `DeviceClass` enum
+  (`src/core.cyr:25`) for the udev classifier path. Placed
+  AFTER `DC_UNKNOWN = 8` to preserve the AGNOS-pinned numeric
+  value of the unknown sentinel — new variants always go at
+  the tail; never inserted in the middle.
+
+- **45 new test assertions** in `tests/tcyr/yukti.tcyr`
+  covering `_audio_parse_pcm_name` (valid / multi-digit /
+  capture / 7 invalid-input cases), bit-pack/unpack roundtrip,
+  and AudioDeviceInfo accessor contracts. Total: 594 → 639.
+
+### Fixed
+
+- **`_parse_uevent_key` in `src/gpu.cyr`** silently returned
+  the entire uevent text from the matched key onward instead
+  of just the value. The inner line-end loop set
+  `line_end = text_len` as a "break" sentinel and the
+  post-loop fixup never fired (`line_end == text_len`, not
+  `>`), so `vlen = line_end - vstart` captured everything
+  through end-of-buffer. `gpu_info_driver` returning
+  `"amdgpu\nPCI_CLASS=...\nPCI_ID=...\nPCI_SLOT_NAME=..."`
+  instead of `"amdgpu"` was the symptom. Bug pre-dated
+  2.1.x — surfaced when 2.2.0's audio module re-used the
+  helper and got the same garbage. Replaced the negative-index
+  break sentinel with the standard `done`-flag pattern
+  (CLAUDE.md: "`break` in `var`-heavy loops unreliable —
+  use flag + `continue`"). gpu.cyr's `gpu_info_driver` /
+  `gpu_info_pci_slot` now return clean values
+  (`amdgpu` / `0000:04:00.0`).
+
+### Verified — live hardware (this build host)
+
+- **3 ALSA cards × 8 PCM endpoints** detected end-to-end:
+  card 0 HDMI 0/1/2/3 (playback × 4), card 1 ALC897 Analog
+  (playback + 2 × capture), card 2 acp (capture × 1). All
+  PCI hw_ids resolved correctly to BDF identifiers; acp falls
+  back to `card2_dev0_c` because its uevent doesn't expose
+  PCI_SLOT_NAME (expected — it's an AMD audio coprocessor
+  with a different probe path).
+- All gates green: build clean, lint 0 warnings, fmt 0 drift,
+  639/639 tests, 3/3 fuzz, bench, core_smoke, dist regen
+  (yukti.cyr 5925 lines, yukti-core.cyr 458 lines), kernel-safe
+  invariant holds, aarch64 cross-build emits valid ARM ELFs
+  for all 5 CI targets.
+
+### Held — for 2.2.1+
+
+The roadmap's audio-domain section listed two stretch items
+that aren't blocking the vani consumer contract — vani 0.3.x
+calls `yukti_audio_devices()` on demand, so it doesn't need
+either before shipping:
+
+- **udev hotplug subscription for `SUBSYSTEM=sound`** with a
+  `pcmC*D*[pc]` DEVPATH filter (the control / sequencer /
+  timer event noise has to be filtered out). Will land in
+  2.2.1 alongside the file-manager / aethersafha consumer
+  flow.
+- **`device_db` persistence keyed by `hw_id`** — first-seen /
+  last-seen / friendly-name table mirroring the existing
+  `devices` table shape. Same 2.2.1 timing.
+
+Both threads tracked in `docs/development/roadmap.md`.
+
 ## [2.1.4] — 2026-04-30
 
 aarch64 runtime correctness — closes the second held-aarch64

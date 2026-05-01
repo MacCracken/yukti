@@ -1546,6 +1546,15 @@ fn main() {
     test_pci_storage_predicates();
     test_pci_display_network_predicates();
 
+    # === audio tests ===
+    test_audio_direction_constants();
+    test_audio_parse_pcm_valid();
+    test_audio_parse_pcm_multi_digit();
+    test_audio_parse_pcm_capture();
+    test_audio_parse_pcm_rejects_invalid();
+    test_audio_unpack_helpers();
+    test_audio_info_accessors();
+
     var r = assert_summary();
     syscall(60, r);
 }
@@ -1965,6 +1974,117 @@ fn test_pci_display_network_predicates() {
     assert(pci_is_gpu(PCI_CLASS_STORAGE) == 0, "is_gpu false for storage");
     assert(pci_is_network(PCI_CLASS_NETWORK), "is_network true for network");
     assert(pci_is_network(PCI_CLASS_DISPLAY) == 0, "is_network false for display");
+    return 0;
+}
+
+# ===================================================================
+# Audio tests (2.2.0 vani consumer)
+# ===================================================================
+
+fn test_audio_direction_constants() {
+    test_group("audio direction constants");
+    # Bit-for-bit match with vani's VaniDirection — the contract that
+    # makes the descriptor adapter a copy, not a translation.
+    assert(YUKTI_AUDIO_PLAYBACK == 0, "playback = 0");
+    assert(YUKTI_AUDIO_CAPTURE == 1, "capture = 1");
+    # DC_AUDIO landed at the tail of DeviceClass to preserve the
+    # AGNOS-pinned DC_UNKNOWN = 8 invariant.
+    assert(DC_AUDIO == 9, "DC_AUDIO = 9 (after DC_UNKNOWN)");
+    return 0;
+}
+
+fn test_audio_parse_pcm_valid() {
+    test_group("audio parse pcmC0D3p (basic playback)");
+    var packed = _audio_parse_pcm_name("pcmC0D3p");
+    assert(packed >= 0, "parses successfully");
+    assert(_audio_parsed_card(packed) == 0, "card 0");
+    assert(_audio_parsed_device(packed) == 3, "device 3");
+    assert(_audio_parsed_direction(packed) == 0, "direction playback");
+    return 0;
+}
+
+fn test_audio_parse_pcm_multi_digit() {
+    test_group("audio parse pcmC10D5p (multi-digit card)");
+    var packed = _audio_parse_pcm_name("pcmC10D5p");
+    assert(packed >= 0, "10D5p parses");
+    assert(_audio_parsed_card(packed) == 10, "card 10");
+    assert(_audio_parsed_device(packed) == 5, "device 5");
+
+    var p2 = _audio_parse_pcm_name("pcmC0D99c");
+    assert(p2 >= 0, "0D99c parses");
+    assert(_audio_parsed_card(p2) == 0, "card 0");
+    assert(_audio_parsed_device(p2) == 99, "device 99");
+    assert(_audio_parsed_direction(p2) == 1, "direction capture");
+    return 0;
+}
+
+fn test_audio_parse_pcm_capture() {
+    test_group("audio parse pcmC1D0c (capture suffix)");
+    var packed = _audio_parse_pcm_name("pcmC1D0c");
+    assert(packed >= 0, "parses");
+    assert(_audio_parsed_card(packed) == 1, "card 1");
+    assert(_audio_parsed_device(packed) == 0, "device 0");
+    assert(_audio_parsed_direction(packed) == 1, "direction capture");
+    return 0;
+}
+
+fn test_audio_parse_pcm_rejects_invalid() {
+    test_group("audio parse rejects non-pcm names");
+    # Real /dev/snd entries that are NOT PCM endpoints.
+    assert(_audio_parse_pcm_name("controlC0") < 0, "controlC0 rejected");
+    assert(_audio_parse_pcm_name("hwC0D0") < 0, "hwC0D0 rejected");
+    assert(_audio_parse_pcm_name("seq") < 0, "seq rejected");
+    assert(_audio_parse_pcm_name("timer") < 0, "timer rejected");
+    assert(_audio_parse_pcm_name("by-path") < 0, "by-path rejected");
+    # Malformed PCM names.
+    assert(_audio_parse_pcm_name("pcmX0D0p") < 0, "wrong prefix C→X");
+    assert(_audio_parse_pcm_name("pcmCXD0p") < 0, "non-digit card");
+    assert(_audio_parse_pcm_name("pcmC0X0p") < 0, "missing D");
+    assert(_audio_parse_pcm_name("pcmC0D0x") < 0, "wrong direction suffix");
+    assert(_audio_parse_pcm_name("pcmC0D0pX") < 0, "extra trailing chars");
+    assert(_audio_parse_pcm_name("pcmC0Dp") < 0, "missing device digits");
+    assert(_audio_parse_pcm_name("pcmCD0p") < 0, "missing card digits");
+    return 0;
+}
+
+fn test_audio_unpack_helpers() {
+    test_group("audio bit-pack/unpack roundtrip");
+    # Manually pack a known value and verify each unpacker.
+    var packed = (7 * 65536) + (12 * 256) + 1;  # card 7, device 12, capture
+    assert(_audio_parsed_card(packed) == 7, "card extract");
+    assert(_audio_parsed_device(packed) == 12, "device extract");
+    assert(_audio_parsed_direction(packed) == 1, "direction extract");
+
+    # Edge: card 99, device 99, playback
+    var p2 = (99 * 65536) + (99 * 256) + 0;
+    assert(_audio_parsed_card(p2) == 99, "max card extract");
+    assert(_audio_parsed_device(p2) == 99, "max device extract");
+    assert(_audio_parsed_direction(p2) == 0, "playback extract");
+    return 0;
+}
+
+fn test_audio_info_accessors() {
+    test_group("audio AudioDeviceInfo accessors");
+    # Construct a synthetic AudioDeviceInfo and verify every typed
+    # accessor reads back the right field. This is the contract
+    # vani 0.3.x's vani_open_yukti(desc, direction) consumes.
+    var name = str_from("HDMI 0");
+    var driver = str_from("HDA-Intel");
+    var hw_id = str_from("pci:0000:04:00.1:dev3:p");
+    var dev_path = str_from("/dev/snd/pcmC0D3p");
+    var sys_path = str_from("/sys/class/sound/card0");
+
+    var d = _audio_info_new(0, 3, 0, YUKTI_AUDIO_PLAYBACK,
+    name, driver, hw_id, dev_path, sys_path);
+    assert(yukti_audio_card(d) == 0, "card");
+    assert(yukti_audio_device(d) == 3, "device");
+    assert(yukti_audio_subdevice(d) == 0, "subdevice");
+    assert(yukti_audio_direction(d) == YUKTI_AUDIO_PLAYBACK, "direction");
+    assert(str_eq_cstr(yukti_audio_name(d), "HDMI 0") == 1, "name");
+    assert(str_eq_cstr(yukti_audio_driver(d), "HDA-Intel") == 1, "driver");
+    assert(str_eq_cstr(yukti_audio_hw_id(d), "pci:0000:04:00.1:dev3:p") == 1, "hw_id");
+    assert(str_eq_cstr(yukti_audio_dev_path(d), "/dev/snd/pcmC0D3p") == 1, "dev_path");
+    assert(str_eq_cstr(yukti_audio_sys_path(d), "/sys/class/sound/card0") == 1, "sys_path");
     return 0;
 }
 

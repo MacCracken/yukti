@@ -9,7 +9,12 @@
 # because they pull in alloc / str_builder / SYS_STAT — userland only.
 
 # ---------------------------------------------------------------------------
-# DeviceClass enum — 9 variants
+# DeviceClass enum — 10 variants
+#
+# DC_AUDIO is appended after DC_UNKNOWN (= 8) so kernel-safe consumers
+# (AGNOS) that hardcoded DC_UNKNOWN's numeric value at the previous
+# tail keep working without recompile. New classes go at the end, never
+# inserted in the middle.
 # ---------------------------------------------------------------------------
 
 enum DeviceClass {
@@ -22,6 +27,7 @@ enum DeviceClass {
     DC_DEVICE_MAPPER = 6;
     DC_GPU = 7;
     DC_UNKNOWN = 8;
+    DC_AUDIO = 9;
 }
 
 pub fn device_class_to_str(class) {
@@ -33,6 +39,7 @@ pub fn device_class_to_str(class) {
     if (class == DC_LOOP) { return "loop"; }
     if (class == DC_DEVICE_MAPPER) { return "device-mapper"; }
     if (class == DC_GPU) { return "gpu"; }
+    if (class == DC_AUDIO) { return "audio"; }
     return "unknown";
 }
 

@@ -41,6 +41,7 @@ modules = [
     "src/device_db.cyr",
     "src/network.cyr",
     "src/gpu.cyr",
+    "src/audio.cyr",
 ]
 
 [lib.core]

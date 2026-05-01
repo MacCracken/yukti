@@ -89,16 +89,24 @@ fn _parse_uevent_key(uevent_str, key_cstr) {
     var text = str_cstr(uevent_str);
     var text_len = str_len(uevent_str);
     var key_len = strlen(key_cstr);
-    # Walk each line
+    # Walk each line. Pre-2.1.4 the inner line-end loop set
+    # `line_end = text_len` as a "break" sentinel and the post-loop
+    # fixup never fired (line_end == text_len, not >), so line_end
+    # ended up past the newline and `vlen = line_end - vstart`
+    # captured the entire remaining buffer rather than just the
+    # value. gpu_info_driver / gpu_info_pci_slot consumers got the
+    # whole uevent stream from DRIVER= onward — silently broken.
+    # Fixed loop uses a done flag and stops AT the newline.
     var i = 0;
     while (i < text_len) {
         # Find end of current line
         var line_end = i;
-        while (line_end < text_len) {
-            if (load8(text + line_end) == 10) { line_end = text_len; }
+        var le_done = 0;
+        while (le_done == 0) {
+            if (line_end >= text_len) { le_done = 1; }
+            elif (load8(text + line_end) == 10) { le_done = 1; }
             else { line_end = line_end + 1; }
         }
-        if (line_end > text_len) { line_end = line_end - 1; }
         var line_len = line_end - i;
         # Check if line starts with key=
         if (line_len > key_len) {

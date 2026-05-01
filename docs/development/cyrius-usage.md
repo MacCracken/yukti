@@ -101,7 +101,7 @@ install, so current workflows pass.
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 594 assertions, must be 0 failures
+cyrius test  tests/tcyr/yukti.tcyr        # 639 assertions, must be 0 failures
 cyrius bench tests/bcyr/yukti.bcyr        # 45+ benchmarks (batch timing)
 cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent

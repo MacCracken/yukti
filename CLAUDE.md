@@ -33,10 +33,10 @@ re-learning the layout.
 
 ## Current State
 
-- **Source**: ~5490 lines across 16 domain modules (`src/*.cyr`)
-- **Tests**: 594 assertions, 3 fuzz harnesses, 45+ benchmarks
+- **Source**: ~5920 lines across 17 domain modules (`src/*.cyr`)
+- **Tests**: 639 assertions, 3 fuzz harnesses, 45+ benchmarks
 - **Binary**: ~384 KB x86_64 static ELF, zero external dependencies
-- **Stable**: 2.1.4 — aarch64 *runtime* correct (33 raw-number `syscall(N, …)` sites migrated to stdlib wrappers / `SYS_*` constants; new `src/syscalls.cyr` adds arch-conditional definitions for socket-family + statfs / newfstatat / clock_gettime / ppoll where stdlib has gaps; `udev_monitor_poll` switched poll→ppoll for arch portability). 2.1.3 — aarch64 cross-build clean (30 SYS_OPEN/SYS_CLOSE/SYS_UNLINK sites migrated to stdlib wrappers; patra dep bumped 1.1.1 → 1.9.2 with the matching migration). Kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table).
+- **Stable**: 2.2.0 — audio device discovery via new `src/audio.cyr` (enumerates ALSA PCM devices over `/dev/snd/` + `/proc/asound/` with PCI-BDF / USB-VID:PID anchored hw_ids; surfaces the typed descriptor adapter API for vani 0.3.x's `vani_open_yukti(desc, direction)`). `DC_AUDIO = 9` appended to DeviceClass. Fixed long-standing `_parse_uevent_key` bug in gpu.cyr (was returning whole uevent text instead of value). 2.1.4 — aarch64 *runtime* correct (33 raw-number `syscall(N, …)` sites migrated to stdlib wrappers / `SYS_*` constants; new `src/syscalls.cyr` adds arch-conditional definitions for socket-family + statfs / newfstatat / clock_gettime / ppoll where stdlib has gaps; `udev_monitor_poll` switched poll→ppoll for arch portability). 2.1.3 — aarch64 cross-build clean (30 SYS_OPEN/SYS_CLOSE/SYS_UNLINK sites migrated to stdlib wrappers; patra dep bumped 1.1.1 → 1.9.2 with the matching migration). Kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table).
 - **Toolchain**: Cyrius 5.7.48 (`cyrius.cyml: cyrius = "5.7.48"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel
@@ -73,7 +73,7 @@ At a glance:
 ```bash
 cyrius deps                              # resolve deps into lib/
 cyrius build src/main.cyr build/yukti    # build CLI
-cyrius test tests/tcyr/yukti.tcyr        # 594 assertions
+cyrius test tests/tcyr/yukti.tcyr        # 639 assertions
 cyrius distlib                           # → dist/yukti.cyr (full)
 cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 ```
@@ -98,12 +98,13 @@ src/
   device_db.cyr    — persistent device history via patra
   network.cyr      — SMB/NFS mount helpers
   gpu.cyr          — GPU probe via sysfs
+  audio.cyr        — ALSA PCM enumeration + vani descriptor adapter
 programs/
   core_smoke.cyr   — kernel-safe invariant check (core + pci only)
 dist/
   yukti.cyr        — full userland bundle (`cyrius distlib`)
   yukti-core.cyr   — kernel-safe bundle (`cyrius distlib core`)
-tests/tcyr/        — 594 assertions across all modules
+tests/tcyr/        — 639 assertions across all modules
 tests/bcyr/        — benchmarks with batch timing
 fuzz/              — 2 fuzz targets (uevent parser, mount table parser)
 docs/benchmarks/   — auto-generated results.md + history.csv

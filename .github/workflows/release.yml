@@ -59,17 +59,17 @@ jobs:
           CYRIUS_DCE=1 cyrius build src/main.cyr build/yukti
           echo "yukti: $(wc -c < build/yukti) bytes"
 
-      - name: Cross-build aarch64 (best-effort)
-        # Produces build/yukti-aarch64 when the toolchain bundle
-        # includes cc5_aarch64. Archive step ships both x86 + aarch64
-        # binaries when present. See CHANGELOG 2.1.1.
+      - name: Cross-build aarch64
+        # 2.1.3 made aarch64 cross-build a hard requirement (see CI
+        # workflow comment for context). Release archives both x86 +
+        # aarch64 binaries.
         run: |
-          if [ -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
-            CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/yukti-aarch64
-            echo "yukti-aarch64: $(wc -c < build/yukti-aarch64) bytes"
-          else
-            echo "::warning::cc5_aarch64 not in toolchain — aarch64 binary skipped in release"
+          if [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            echo "::error::cc5_aarch64 missing from Cyrius $CYRIUS_VERSION — aarch64 cross-build is required since 2.1.3"
+            exit 1
           fi
+          CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/yukti-aarch64
+          echo "yukti-aarch64: $(wc -c < build/yukti-aarch64) bytes"
 
       - name: Test
         run: cyrius test tests/tcyr/yukti.tcyr

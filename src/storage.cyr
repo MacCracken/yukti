@@ -382,7 +382,7 @@ pub fn find_mount_point(dev_path_cstr) {
             }
         }
     }
-    syscall(3, fd);
+    sys_close(fd);
     if (total == 0) { return 0; }
     return find_mount_in(dev_path_cstr, str_builder_build(sb));
 }
@@ -667,9 +667,6 @@ enum EjectConst {
     CDROMEJECT_IOCTL = 0x5309;
     O_RDONLY = 0;
     O_NONBLOCK = 2048;
-    SYS_IOCTL = 16;
-    SYS_OPEN = 2;
-    SYS_CLOSE = 3;
 }
 
 pub fn storage_eject(dev_path_cstr) {
@@ -693,12 +690,12 @@ pub fn storage_eject(dev_path_cstr) {
     # Check if optical drive (starts with "sr")
     if (str_starts_with(dev_name, "sr")) {
         # Optical: open device and CDROMEJECT ioctl
-        var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
+        var fd = sys_open(dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
         if (fd < 0) {
             return err_eject_failed(dev_s, str_from("failed to open device"));
         }
         var r = syscall(SYS_IOCTL, fd, CDROMEJECT_IOCTL, 0);
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         if (r < 0) {
             return err_eject_failed(dev_s, str_from("CDROMEJECT ioctl failed"));
         }
@@ -767,12 +764,12 @@ pub fn storage_eject(dev_path_cstr) {
         str_builder_add_cstr(sb, "/device/delete");
         var delete_path = str_builder_build(sb);
 
-        var fd = syscall(SYS_OPEN, str_cstr(delete_path), 1, 0);
+        var fd = sys_open(str_cstr(delete_path), 1, 0);
         if (fd < 0) {
             return err_eject_failed(dev_s, str_from("failed to open sysfs delete"));
         }
         syscall(1, fd, "1", 1);
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
     }
 
     sakshi_span_exit();

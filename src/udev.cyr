@@ -626,7 +626,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
 
     var rc = syscall(SYS_BIND, fd, &addr, 12);
     if (rc < 0) {
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         return err_udev_socket(str_from("bind() failed"));
     }
 
@@ -689,7 +689,7 @@ pub fn udev_monitor_stop(mon) {
 pub fn udev_monitor_close(mon) {
     udev_monitor_stop(mon);
     var fd = load64(mon);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
     return 0;
 }
 

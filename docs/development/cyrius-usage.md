@@ -4,10 +4,10 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 5.7.43 (`cyrius = "5.7.43"` in `cyrius.cyml`).
+**Toolchain pin**: 5.7.48 (`cyrius = "5.7.48"` in `cyrius.cyml`).
 `cyrius` provides `cc5` internally — never shell out to `cc5` directly.
 
-Upgrade notes (5.5.11 → 5.7.43): the arc is mostly stdlib expansion
+Upgrade notes (5.5.11 → 5.7.48): the arc is mostly stdlib expansion
 (json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
 HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
 wrappers in 5.7.35) and aarch64 backend hardening (f64 basic ops
@@ -42,25 +42,30 @@ fit for `programs/core_smoke.cyr`; `cyrius api-surface`
 `lib/security.cyr` Landlock + `lib/random.cyr` getrandom
 (v5.7.35) — useful for path-traversal hardening.
 
-One known upstream warning, benign: `lib/patra.cyr:2097: duplicate
-fn 'json_build'`. Stdlib `json.cyr` grew its own `json_build(pairs)`
-in 5.7.40-5.7.42; patra still vendors a different-arity
-`json_build(buf, max, keys, vals, types, n)` from before. Yukti's
-src/ calls neither directly. Cleanup tracked for 2.1.3 (drop
-`"json"` from `[deps] stdlib`).
+aarch64 portability — 2.1.3 migrated 30 raw
+`SYS_OPEN`/`SYS_CLOSE`/`SYS_UNLINK` callers in yukti src/ to the
+stdlib's arch-translating `sys_open` / `sys_close` / `sys_unlink`
+wrappers, paired with the same migration in patra 1.9.2 (yukti's
+device-history dep, bumped from 1.1.1). aarch64 cross-build is
+clean and CI-gated. The remaining direct-syscall callers in
+yukti src/ — `clock_gettime` (228 x86 / 113 aarch64), `mount`
+(165 / 40), `socket` / `connect`, `write`, `exit_group`, `stat`,
+`mkdir` — still hardcode x86_64 numbers and would call the
+*wrong* syscalls at runtime on aarch64; their migration is
+tracked in `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`
+alongside the runtime SIGILL retest.
 
 ## Dependencies
 
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 5.7.43):
+- **Stdlib modules** (ship with Cyrius 5.7.48):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
-  `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`, `args`,
-  `freelist`
+  `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`
 - **First-party deps** (pinned in `[deps.*]`):
   - `sakshi` 2.0.0 — structured logging
-  - `patra` 1.1.1 — persistent device history
+  - `patra` 1.9.2 — persistent device history
 
 ```sh
 cyrius deps              # resolve [deps] into lib/
@@ -71,7 +76,7 @@ cyrius deps --verify     # CI gate: fail on hash mismatch
 ## Build
 
 ```sh
-cyrius build src/main.cyr build/yukti     # userland CLI (~380 KB static ELF)
+cyrius build src/main.cyr build/yukti     # userland CLI (~384 KB static ELF)
 ```
 
 Zero warnings is the gate. `dead:` lines from DCE are informational —
@@ -80,7 +85,7 @@ they confirm the reachable set is smaller than the linked set.
 **aarch64 cross-build** (`cyrius build --aarch64 …`) compiles
 cleanly to an aarch64 ELF, but binaries produced by Cyrius 5.4.6's
 `cc5_aarch64` crashed with `SIGILL` on real hardware due to a
-compiler codegen bug. Held pending retest on 5.7.43's `cc5_aarch64`
+compiler codegen bug. Held pending retest on 5.7.48's `cc5_aarch64`
 — the 5.5.x → 5.7.x arc lands real aarch64 fixes (EW alignment
 assert v5.4.19, Apple Silicon Mach-O probe v5.5.11, f64 basic
 ops v5.7.30, EB() codebuf cap raised v5.7.34); the original
@@ -93,7 +98,7 @@ install, so current workflows pass.
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 592 assertions, must be 0 failures
+cyrius test  tests/tcyr/yukti.tcyr        # 594 assertions, must be 0 failures
 cyrius bench tests/bcyr/yukti.bcyr        # 45+ benchmarks (batch timing)
 cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent
@@ -104,7 +109,7 @@ cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 5.7.43)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 5.7.48)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so

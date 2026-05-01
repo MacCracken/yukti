@@ -34,10 +34,10 @@ re-learning the layout.
 ## Current State
 
 - **Source**: ~5490 lines across 16 domain modules (`src/*.cyr`)
-- **Tests**: 592 assertions, 3 fuzz harnesses, 45+ benchmarks
-- **Binary**: ~380 KB x86_64 static ELF, zero external dependencies
-- **Stable**: 2.1.2 — kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
-- **Toolchain**: Cyrius 5.7.43 (`cyrius.cyml: cyrius = "5.7.43"`)
+- **Tests**: 594 assertions, 3 fuzz harnesses, 45+ benchmarks
+- **Binary**: ~384 KB x86_64 static ELF, zero external dependencies
+- **Stable**: 2.1.3 — aarch64 cross-build clean (30 SYS_OPEN/SYS_CLOSE/SYS_UNLINK sites migrated to stdlib wrappers; patra dep bumped 1.1.1 → 1.9.2 with the matching migration), kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table)
+- **Toolchain**: Cyrius 5.7.48 (`cyrius.cyml: cyrius = "5.7.48"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel
 
@@ -54,10 +54,10 @@ re-learning the layout.
 ## Dependencies
 
 - **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`,
-  `hashmap`, `io`, `fs`, `tagged`, `json`, `process`, `fnptr`, `chrono`,
-  `args`, `freelist` (ships with Cyrius >= 5.7.43)
+  `hashmap`, `io`, `fs`, `tagged`, `process`, `fnptr`, `chrono`,
+  `args`, `freelist` (ships with Cyrius >= 5.7.48)
 - **sakshi** 2.0.0 — structured logging (first-party)
-- **patra** 1.1.1 — persistent device history (first-party)
+- **patra** 1.9.2 — persistent device history (first-party)
 
 No external deps. No FFI. No libc. All first-party, pinned in
 `cyrius.cyml` and SHA-locked in `cyrius.lock`.
@@ -73,7 +73,7 @@ At a glance:
 ```bash
 cyrius deps                              # resolve deps into lib/
 cyrius build src/main.cyr build/yukti    # build CLI
-cyrius test tests/tcyr/yukti.tcyr        # 592 assertions
+cyrius test tests/tcyr/yukti.tcyr        # 594 assertions
 cyrius distlib                           # → dist/yukti.cyr (full)
 cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 ```
@@ -103,7 +103,7 @@ programs/
 dist/
   yukti.cyr        — full userland bundle (`cyrius distlib`)
   yukti-core.cyr   — kernel-safe bundle (`cyrius distlib core`)
-tests/tcyr/        — 592 assertions across all modules
+tests/tcyr/        — 594 assertions across all modules
 tests/bcyr/        — benchmarks with batch timing
 fuzz/              — 2 fuzz targets (uevent parser, mount table parser)
 docs/benchmarks/   — auto-generated results.md + history.csv
@@ -256,7 +256,7 @@ unreliable) saves a lot of debug time.
 
 ## CI / Release
 
-- **Toolchain pin**: `cyrius = "5.7.43"` in `cyrius.cyml`. Release and CI
+- **Toolchain pin**: `cyrius = "5.7.48"` in `cyrius.cyml`. Release and CI
   both read from the manifest; no hardcoded versions in YAML
 - **Dead code elimination**: `cyrius build` already strips unreachable
   functions; the `dead:` report is informational

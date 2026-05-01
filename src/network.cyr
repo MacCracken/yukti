@@ -329,7 +329,7 @@ pub fn network_probe_host(host_cstr, port) {
 
     # Non-blocking connect would be better, but simple blocking test works
     var r = syscall(42, fd, &addr, 16);
-    syscall(3, fd);
+    sys_close(fd);
 
     if (r == 0) { return 1; }
     return 0;

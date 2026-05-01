@@ -135,7 +135,7 @@ pub fn write_rule(rule, rules_dir_cstr) {
     var path_cstr = str_cstr(path);
 
     # Write file: open + write + close
-    var fd = syscall(SYS_OPEN, path_cstr, 577, 420);
+    var fd = sys_open(path_cstr, 577, 420);
     if (fd < 0) {
         var esb = str_builder_new();
         str_builder_add_cstr(esb, "failed to write rule: ");
@@ -146,7 +146,7 @@ pub fn write_rule(rule, rules_dir_cstr) {
     var data = str_cstr(rendered);
     syscall(1, fd, data, strlen(data));
     syscall(1, fd, "\n", 1);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
 
     return Ok(path);
 }
@@ -164,7 +164,7 @@ pub fn remove_rule(name, rules_dir_cstr) {
     var path = str_builder_build(sb);
 
     # SYS_UNLINK = 87
-    var r = syscall(87, str_cstr(path));
+    var r = sys_unlink(str_cstr(path));
     if (r < 0) {
         var esb = str_builder_new();
         str_builder_add_cstr(esb, "failed to remove rule: ");

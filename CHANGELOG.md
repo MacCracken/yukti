@@ -7,26 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.2] — 2026-04-30
+## [2.1.3] — 2026-04-30
 
-Modernization sweep + roadmap docs. Toolchain pin steps from
-Cyrius 5.5.11 to 5.7.43 with the project's standard closeout-pass
-discipline (audit, gates, dist regen). Adds the 2.2.0 audio-domain
-roadmap so the requirements blocking vani 0.3.x live here rather
-than only in a sibling repo's notes. No yukti API changes. No
-behavioural shift. Downstream consumers (jalwa / file manager /
-aethersafha / argonaut / AGNOS kernel) build and link unchanged.
+Modernization sweep + aarch64 portability + roadmap docs.
+Toolchain pin steps from Cyrius 5.5.11 to 5.7.48 with the
+project's standard closeout-pass discipline. Replaces the
+intended-but-skipped 2.1.2 (CI gated on aarch64 cross-build,
+which surfaced 30 raw `SYS_OPEN`/`SYS_CLOSE`/`SYS_UNLINK`
+callers in yukti src/ + the patra 1.1.1 dep that hadn't done
+the same migration; addressing both was scoped beyond a
+docs-only patch, so the in-flight 2.1.2 work rolls forward to
+2.1.3 with the aarch64 fix included). Adds the 2.2.0
+audio-domain roadmap so the requirements blocking vani 0.3.x
+live here rather than only in a sibling repo's notes. No
+yukti public-API changes. No behavioural shift on x86_64.
+Downstream consumers (jalwa / file manager / aethersafha /
+argonaut / AGNOS kernel) build and link unchanged.
 
 ### Changed
 
-- **Toolchain pin bumped 5.5.11 → 5.7.43** (`cyrius.cyml`). The
+- **Toolchain pin bumped 5.5.11 → 5.7.48** (`cyrius.cyml`). The
   5.5.x → 5.7.x arc is mostly stdlib expansion (json
   pretty-print/streaming/pointer in v5.7.40-5.7.42, sandhi
-  HTTP/TLS folded into the toolchain at v5.7.0, Landlock +
+  HTTP/TLS folded into the toolchain at v5.7.0, regex engine
+  v5.7.18, JSON tagged-tree engine v5.7.20, Landlock +
   getrandom syscall wrappers in v5.7.35) and aarch64 backend
   hardening (f64 basic ops v5.7.30, EB() codebuf cap raised
-  v5.7.34). Two latent language gotchas surface during the
-  bump — both audited, neither requires a yukti code change:
+  v5.7.34). v5.7.48 is the closeout-backstop release for the
+  longest minor in cyrius history (49 patches across 35 days).
+  Two latent language gotchas surface during the bump — both
+  audited, neither requires a yukti code change:
   - `var buf[N]` inside a function is **static data**, not
     stack — consecutive calls share backing memory, so any
     `Str` or pointer aliasing into `buf` dangles on the next
@@ -51,26 +61,18 @@ aethersafha / argonaut / AGNOS kernel) build and link unchanged.
   via `lib/sandhi.cyr`; not pulled into yukti's `[deps] stdlib`
   because yukti has no HTTP surface.
 
-  Full gate verified on 5.7.43: build 0 warnings in yukti code,
-  `cyrius lint` 0 warnings across every `src/*.cyr`, `cyrius vet`
-  clean (1 dep, 0 untrusted, 0 missing), 592/592 tests pass,
+  Full gate verified on 5.7.48: build 0 warnings in yukti code,
+  `cyrius lint` 0 warnings across every `src/*.cyr`,
+  `programs/*.cyr`, `tests/tcyr/*.tcyr`, `tests/bcyr/*.bcyr`,
+  `fuzz/*.fcyr`, `cyrfmt --check` 0 drift across the same
+  surface, `cyrius vet` clean (2 deps, 0 untrusted, 0 missing),
+  594/594 tests pass (+2 from the patra 1.9.2 bump),
   3/3 fuzz targets pass (uevent / mount table / partition table),
   `core_smoke` PASS, kernel-safe invariant holds (zero
   `alloc`/`sys_*`/`syscall` references in `dist/yukti-core.cyr`),
-  both dist profiles regenerate clean. Binary 341 KB → 380 KB
-  (~11% growth from the json/freelist/chrono stdlib expansion).
-  Lockfile (sakshi 2.0.0, patra 1.1.1) unchanged — neither tag
-  moved.
-
-  One known upstream warning, benign:
-  `lib/patra.cyr:2097: duplicate fn 'json_build' (last definition
-  wins)`. Stdlib `json.cyr` grew its own `json_build(pairs)` in
-  v5.7.40-5.7.42; patra still vendors a different-arity
-  `json_build(buf, max, keys, vals, types, n)` from before. Yukti
-  src/ calls neither directly. Cleanup tracked for 2.1.3 — drop
-  `"json"` from `[deps] stdlib` since yukti only uses str_builder
-  for its own JSON serialization (`device_info_to_json`); patra's
-  vendored copy stays internal to patra.
+  both dist profiles regenerate clean. Binary 341 KB → 384 KB
+  (~13% growth from the json/freelist/chrono stdlib expansion
+  net of the json drop and patra dep refresh).
 
   Notable additions yukti doesn't currently exercise but worth
   flagging for follow-on work:
@@ -85,7 +87,90 @@ aethersafha / argonaut / AGNOS kernel) build and link unchanged.
     points (currently defense-in-depth at MED-2 in the
     2026-04-19 audit).
   - `lib/test.cyr` v1 with `test_each` table-driven dispatch
-    (v5.7.43) — could compress the 592-assertion suite.
+    (v5.7.43) — could compress the 594-assertion suite.
+
+- **`[deps.patra]` bumped 1.1.1 → 1.9.2** (`cyrius.cyml`). Eight
+  intervening minor releases since yukti's previous pin
+  (`1.5.x` slab + perf, `1.6.x` `COL_BYTES`, `1.7.x` `INSERT
+  OR IGNORE` + STR-keyed B+ tree, `1.8.x` group commit +
+  prepared statements + page-slab allocator, `1.9.x`
+  `json_build → patra_json_build` rename + the matching
+  aarch64 syscall-wrapper migration that 2.1.3 needs from
+  yukti's side). Yukti consumes patra exclusively through
+  `src/device_db.cyr`, which calls only the stable
+  `patra_open` / `patra_exec` / `patra_query` /
+  `patra_result_*` / `patra_close` surface — none of those
+  changed signatures across the 1.x line, so no yukti
+  call-site edits required. Lockfile refreshed (sakshi 2.0.0
+  unchanged).
+
+- **Syscall wrapper migration — 30 sites across 6 modules**
+  (the aarch64 unblock; pairs with patra 1.9.2's matching
+  migration on its side). aarch64's syscall table omits
+  `SYS_OPEN` (legacy x86 number 2) and `SYS_UNLINK` (87) —
+  the kernel exposes only the AT-variants on arm64
+  (`SYS_OPENAT = 56`, `SYS_UNLINKAT = 35`). Yukti's previous
+  raw `syscall(SYS_OPEN, …)` / `syscall(SYS_UNLINK, …)` /
+  `syscall(87, …)` callers were undefined-symbol or wrong-
+  number on aarch64. Migrated:
+  - `src/optical.cyr` — 1 `sys_open` + 8 `sys_close`
+    (eject / close / status / TOC read / audio rip).
+  - `src/partition.cyr` — 1 `sys_open` + 9 `sys_close`
+    (MBR + GPT readers).
+  - `src/udev_rules.cyr` — 1 `sys_open` + 1 `sys_close` +
+    1 `sys_unlink` (the latter was a raw `syscall(87, …)`
+    with no symbol — most fragile of the lot).
+  - `src/storage.cyr` — 2 `sys_open` + 2 `sys_close` (eject
+    + delete-partition paths).
+  - `src/udev.cyr` — 2 `sys_close` (sysfs walk).
+  - `src/network.cyr` — 1 `sys_close` (was raw
+    `syscall(3, fd)` after a connect probe).
+
+  Plus dropped the local `enum EjectConst` shadowing of
+  `SYS_OPEN = 2` / `SYS_CLOSE = 3` / `SYS_IOCTL = 16` in
+  `src/storage.cyr:670` — the stdlib provides arch-correct
+  values for all three (notably `SYS_IOCTL = 16` on x86_64
+  vs `29` on aarch64 — the local hardcoded 16 was silently
+  wrong on aarch64). Verified: `cyrius build --aarch64
+  src/main.cyr` produces `ELF 64-bit LSB executable, ARM
+  aarch64, version 1 (SYSV), statically linked`, as do
+  `programs/core_smoke.cyr` and all three fuzz harnesses.
+
+  **Held for follow-on**: yukti still has direct raw-number
+  `syscall(N, …)` calls for syscalls that don't have stdlib
+  wrappers — `clock_gettime` (228 x86 / 113 aarch64),
+  `mount` (165 / 40), `socket` (41 / 198), `connect`
+  (42 / 203), `write` (1 / 64), `exit_group` (60 / 94),
+  `stat` (4 / no-aarch64), `mkdir` (83 / no-aarch64). These
+  use arch-divergent numbers hardcoded for x86_64; the
+  aarch64 binary builds and links but would call the
+  *wrong* syscall at runtime. Tracked under the existing
+  held-aarch64 issue
+  (`docs/development/issues/2026-04-19-cc5-aarch64-repro.md`)
+  alongside the original 5.4.6 SIGILL retest — both block
+  the same downstream goal (real-hardware aarch64 yukti).
+  Not 2.1.3 scope.
+
+- **`"json"` dropped from `[deps] stdlib`** (`cyrius.cyml`)
+  + matching `include "lib/json.cyr"` removed from
+  `src/lib.cyr`. Cleanup deferred from the 2.1.2 work
+  (where it was deferred because patra 1.1.1 still vendored
+  its own `json_build` and a no-stdlib-json bundle would
+  have changed the dist resolution order). With patra 1.9.2
+  now using `patra_json_build` and shipping the stdlib
+  helpers it actually needs through its own deps, yukti
+  cleanly drops the unused stdlib include.
+  `device_info_to_json` continues to use `str_builder`
+  directly — no stdlib `json_*` helper consumers in yukti
+  src/.
+
+- **CI workflows hardened on aarch64**
+  (`.github/workflows/{ci,release}.yml`). The pre-2.1.3
+  skip-on-missing-cc5_aarch64 logic is replaced with a
+  hard requirement: cyrius 5.7.43+ ships `cc5_aarch64` in
+  the x86_64 release bundle, and yukti+patra are now
+  cross-build-clean, so the gate enforces real verification
+  on every push instead of silently passing.
 
 - `docs/development/roadmap.md` gains a new "Next minor — 2.2.0"
   section detailing the audio device discovery work needed to
@@ -108,14 +193,18 @@ aethersafha / argonaut / AGNOS kernel) build and link unchanged.
   module.
 - `src/device.cyr` re-formatted (lines 222-263, `device_info_to_json`
   body): pre-existing 8-space indentation dedented to the canonical
-  4-space. The 5.5.11 `cyrfmt` was tolerant; 5.7.43 catches it. Pure
+  4-space. The 5.5.11 `cyrfmt` was tolerant; 5.7.x catches it. Pure
   whitespace, no semantic change.
 - aarch64 retest note (CHANGELOG 2.1.0 "Investigated, held",
   `docs/development/cyrius-usage.md`, `roadmap.md`) rolls
   forward from "pending retest on 5.5.11" to "pending retest
-  on 5.7.43" — the 5.7.30 f64 fixes and 5.7.34 codebuf cap
-  raise are the meaningful aarch64 deltas since the original
-  5.4.6 SIGILL repro.
+  on 5.7.48" — the 5.7.30 f64 fixes, 5.7.34 codebuf cap raise,
+  and 2.1.3's syscall-wrapper migration are the meaningful
+  aarch64 deltas since the original 5.4.6 SIGILL repro. Cross-
+  builds now succeed on every CI run; the runtime SIGILL
+  retest on real Cortex-A72 is the remaining held work, gated
+  also on the raw-number-syscall portability follow-on
+  flagged above.
 
 ## [2.1.1] — 2026-04-20
 

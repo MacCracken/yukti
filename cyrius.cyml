@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "5.7.43"
+cyrius = "5.7.48"
 
 [build]
 entry = "src/main.cyr"
@@ -60,7 +60,6 @@ stdlib = [
     "io",
     "fs",
     "tagged",
-    "json",
     "process",
     "fnptr",
     "chrono",
@@ -75,5 +74,5 @@ modules = ["dist/sakshi.cyr"]
 
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.1.1"
+tag = "1.9.2"
 modules = ["dist/patra.cyr"]

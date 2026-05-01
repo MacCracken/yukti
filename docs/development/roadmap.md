@@ -81,16 +81,29 @@ v0.2.0 #6/#7 hardware coverage roadmap).
       above)
 
 ### Platform
-- [ ] aarch64 native build — cross-compile path is wired, but
-      Cyrius 5.4.6's `cc5_aarch64` emitted an unallocated ARMv8-A
-      opcode (`0x800000d6`) that `SIGILL`ed on real hardware.
-      Needs retest on the 5.7.43 toolchain — the 5.5.x → 5.7.x
-      arc lands real aarch64 fixes (EW alignment assert v5.4.19,
-      Apple Silicon Mach-O probe v5.5.11, f64 basic ops v5.7.30,
-      EB() codebuf cap raised v5.7.34). Cortex-A72 Linux repro
-      has not yet been re-run. See
-      `docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
-      `scripts/retest-aarch64.sh`.
+- [ ] aarch64 native build — cross-compile is clean as of 2.1.3
+      (30 SYS_OPEN/SYS_CLOSE/SYS_UNLINK sites migrated to stdlib
+      wrappers + patra 1.9.2 with the matching migration). CI
+      gates aarch64 ELF emission on every push. Two threads
+      block real-hardware aarch64:
+      1. **Runtime SIGILL retest** on the 5.7.48 toolchain. Cyrius
+         5.4.6's `cc5_aarch64` emitted an unallocated ARMv8-A
+         opcode (`0x800000d6`) that `SIGILL`ed on Cortex-A72.
+         The 5.5.x → 5.7.x arc landed real aarch64 fixes (EW
+         alignment assert v5.4.19, Apple Silicon Mach-O probe
+         v5.5.11, f64 basic ops v5.7.30, EB() codebuf cap raised
+         v5.7.34). Cortex-A72 Linux repro has not yet been re-run.
+         See `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`
+         and `scripts/retest-aarch64.sh`.
+      2. **Raw-number syscall portability** — yukti src/ still has
+         direct `syscall(N, …)` calls for `clock_gettime`,
+         `mount`, `socket`, `connect`, `write`, `exit_group`,
+         `stat`, `mkdir` with x86_64-hardcoded numbers. These
+         build clean on aarch64 but call the wrong syscalls at
+         runtime. Migration target: stdlib `sys_*` wrappers when
+         available, otherwise switch to the stdlib's arch-correct
+         `SYS_*` constants. Same shape as the SYS_OPEN/SYS_CLOSE
+         migration done in 2.1.3.
 - [ ] Container-aware enumeration (detect host vs container devices)
 
 ## Future

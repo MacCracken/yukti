@@ -238,7 +238,7 @@ pub fn toc_total_audio_duration_x100(toc) {
 # ---------------------------------------------------------------------------
 
 fn _open_optical_device(dev_path_cstr) {
-    var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
+    var fd = sys_open(dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
     if (fd < 0) {
         var errno = 0 - fd;
         if (errno == 13) {
@@ -264,7 +264,7 @@ pub fn open_tray(dev_path_cstr) {
     var fd = payload(fd_r);
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMEJECT, 0);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
 
     if (ret < 0) {
         sakshi_span_exit();
@@ -286,7 +286,7 @@ pub fn close_tray(dev_path_cstr) {
     var fd = payload(fd_r);
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMCLOSETRAY, 0);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
 
     if (ret < 0) {
         sakshi_span_exit();
@@ -307,7 +307,7 @@ pub fn drive_status(dev_path_cstr) {
     var fd = payload(fd_r);
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROM_DRIVE_STATUS, 0);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
 
     if (ret < 0) {
         return err_tray_failed(str_from("drive status ioctl failed"));
@@ -336,7 +336,7 @@ pub fn read_toc(dev_path_cstr) {
     store8(&hdr + 1, 0);
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCHDR, &hdr);
     if (ret < 0) {
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         return err_tray_failed(str_from("read TOC header failed"));
     }
 
@@ -369,7 +369,7 @@ pub fn read_toc(dev_path_cstr) {
 
         ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &entry);
         if (ret < 0) {
-            syscall(SYS_CLOSE, fd);
+            sys_close(fd);
             return err_tray_failed(str_from("read TOC entry failed"));
         }
 
@@ -390,13 +390,13 @@ pub fn read_toc(dev_path_cstr) {
     store8(&leadout + 8, 0);
     ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &leadout);
     if (ret < 0) {
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         return err_tray_failed(str_from("read lead-out failed"));
     }
     var leadout_lba = load32(&leadout + 4);
     vec_push(lba_vec, leadout_lba);
 
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
 
     # Build track entries
     var tracks = vec_new();
@@ -498,7 +498,7 @@ pub fn read_audio_sectors(dev_path_cstr, start_lba, nframes, buf, buflen) {
     store64(&req + 16, buf);
 
     var rc = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADAUDIO, &req);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
     if (rc < 0) {
         sakshi_span_exit();
         return err_tray_failed(str_from("CDROMREADAUDIO ioctl failed"));

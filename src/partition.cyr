@@ -416,7 +416,7 @@ fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
 pub fn read_partition_table(dev_path_cstr) {
     sakshi_span_enter("read_pt", 7);
 
-    var fd = syscall(SYS_OPEN, dev_path_cstr, O_RDONLY, 0);
+    var fd = sys_open(dev_path_cstr, O_RDONLY, 0);
     if (fd < 0) {
         sakshi_span_exit();
         return err_io(str_from(dev_path_cstr));
@@ -426,19 +426,19 @@ pub fn read_partition_table(dev_path_cstr) {
     var sector0[512];
     var n = _read_sector(fd, 0, &sector0);
     if (n < SECTOR_SIZE) {
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         sakshi_span_exit();
         return err_io(str_from("failed to read sector 0"));
     }
 
     # Validate MBR signature
     if (load8(&sector0 + MBR_SIG_OFFSET) != MBR_SIG_LO) {
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         sakshi_span_exit();
         return Ok(partition_table_new(PT_NONE, vec_new(), 0));
     }
     if (load8(&sector0 + MBR_SIG_OFFSET + 1) != MBR_SIG_HI) {
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         sakshi_span_exit();
         return Ok(partition_table_new(PT_NONE, vec_new(), 0));
     }
@@ -450,7 +450,7 @@ pub fn read_partition_table(dev_path_cstr) {
         var gpt_hdr[512];
         n = _read_sector(fd, GPT_HEADER_LBA, &gpt_hdr);
         if (n < SECTOR_SIZE) {
-            syscall(SYS_CLOSE, fd);
+            sys_close(fd);
             sakshi_span_exit();
             return err_io(str_from("failed to read GPT header"));
         }
@@ -473,12 +473,12 @@ pub fn read_partition_table(dev_path_cstr) {
 
         # Validate signature: "EFI PART"
         if (load8(&gpt_hdr) != 0x45) {
-            syscall(SYS_CLOSE, fd);
+            sys_close(fd);
             sakshi_span_exit();
             return err_parse(str_from("invalid GPT signature"));
         }
         if (load8(&gpt_hdr + 1) != 0x46) {
-            syscall(SYS_CLOSE, fd);
+            sys_close(fd);
             sakshi_span_exit();
             return err_parse(str_from("invalid GPT signature"));
         }
@@ -492,7 +492,7 @@ pub fn read_partition_table(dev_path_cstr) {
         # entry_size > 128 would overflow that buffer (see
         # docs/audit/2026-04-19-audit.md finding HIGH-2) — reject instead.
         if (entry_size != GPT_ENTRY_SIZE) {
-            syscall(SYS_CLOSE, fd);
+            sys_close(fd);
             sakshi_span_exit();
             return err_parse(str_from("GPT entry_size must be 128"));
         }
@@ -503,14 +503,14 @@ pub fn read_partition_table(dev_path_cstr) {
 
         var entries = _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size);
 
-        syscall(SYS_CLOSE, fd);
+        sys_close(fd);
         sakshi_span_exit();
         return Ok(partition_table_new(PT_GPT, entries, disk_guid));
     }
 
     # Plain MBR
     var entries = _parse_mbr_entries(&sector0);
-    syscall(SYS_CLOSE, fd);
+    sys_close(fd);
     sakshi_span_exit();
     return Ok(partition_table_new(PT_MBR, entries, 0));
 }

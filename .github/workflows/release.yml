@@ -43,6 +43,11 @@ jobs:
           mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
           cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
+          # cc5_aarch64 packaging changed across the 5.7.x line: pre-5.7.48
+          # tarballs ship it under bin/ (picked up by the bin/* copy above),
+          # 5.7.48+ moved it to the tarball top-level. Cover both. See
+          # docs/development/issues/2026-04-30-cyrius-cc5-aarch64-packaging.md.
+          [ -f "$CYRIUS_DIR/cc5_aarch64" ] && cp "$CYRIUS_DIR/cc5_aarch64" "$HOME/.cyrius/bin/"
           chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV

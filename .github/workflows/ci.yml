@@ -58,12 +58,15 @@ jobs:
           [ $fail -eq 0 ] || { echo "lint: warnings present"; exit 1; }
 
       - name: Format check
-        # cyrius fmt --check emits the formatted source; diff against the
-        # committed file to enforce no drift.
+        # `cyrius fmt <file>` (no flag) prints the formatted source to
+        # stdout; diff against the committed file to enforce no drift.
+        # Pre-2.2.2 this used `--check` but cyrius's `--check` mode is
+        # exit-code-only and emits no stdout, so the diff always fired
+        # spuriously — bumped to canonical invocation at 2.2.2 ship.
         run: |
           fail=0
           for f in src/*.cyr programs/*.cyr tests/tcyr/*.tcyr tests/bcyr/*.bcyr fuzz/*.fcyr; do
-            if ! diff -q <(cyrius fmt "$f" --check 2>/dev/null) "$f" > /dev/null; then
+            if ! diff -q <(cyrius fmt "$f" 2>/dev/null) "$f" > /dev/null; then
               echo "needs fmt: $f"
               fail=1
             fi

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2] — 2026-05-05
+
+### Changed
+
+- `cyrius` pin bumped 5.7.48 → 5.8.64 ahead of the cyrius v5.8.65
+  stdlib foldin. Yukti is on the foldin manifest; this patch is
+  the prerequisite for cyrius's `[deps].yukti.tag` to point at
+  2.2.2 in the foldin slot.
+- `[deps.sakshi].tag` bumped 2.0.0 → 2.2.3 (latest);
+  `[deps.patra].tag` bumped 1.9.2 → 1.9.3 (latest). Aligns yukti
+  with the cyrius-side pin set heading into the foldin.
+- `cyrius fmt` pass applied across `src/`, `programs/`, `tests/`,
+  `fuzz/` to clear pre-existing fmt drift carried since the prior
+  cyrius-fmt-update.
+
+### Verified
+
+- `cyrius test`: **653 / 653** asserts pass against cyrius 5.8.64
+  with sakshi 2.2.3 + patra 1.9.3 resolved.
+- `cyrius fmt --check`: clean across all source.
+- `dist/yukti.cyr` rebuilt at 6098 lines.
+
 ## [2.2.1] — 2026-04-30
 
 Audio domain follow-on. Wires the 2.2.0 audio enumerator into

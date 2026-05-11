@@ -155,7 +155,7 @@ pub fn mbr_type_to_str(type_id) {
 # Read 512 bytes from a block device at a given LBA
 # ---------------------------------------------------------------------------
 
-fn _read_sector(fd, lba, buf) {
+fn _read_sector(fd, lba, buf): i64 {
     # lseek to lba * 512: SYS_LSEEK = 8, SEEK_SET = 0
     var offset = lba * SECTOR_SIZE;
     var r = syscall(SYS_LSEEK, fd, offset, 0);
@@ -165,7 +165,7 @@ fn _read_sector(fd, lba, buf) {
 }
 
 # Read N bytes at an exact byte offset
-fn _read_at(fd, byte_offset, buf, count) {
+fn _read_at(fd, byte_offset, buf, count): i64 {
     var r = syscall(SYS_LSEEK, fd, byte_offset, 0);
     if (r < 0) { return r; }
     return sys_read(fd, buf, count);
@@ -175,7 +175,7 @@ fn _read_at(fd, byte_offset, buf, count) {
 # Parse MBR partition table from sector 0 buffer
 # ---------------------------------------------------------------------------
 
-fn _parse_mbr_entries(buf) {
+fn _parse_mbr_entries(buf): i64 {
     var entries = vec_new();
 
     for (var i = 0; i < MBR_MAX_PARTS; i = i + 1) {
@@ -223,7 +223,7 @@ fn _parse_mbr_entries(buf) {
 # ---------------------------------------------------------------------------
 
 # Format a 16-byte GUID buffer as string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-fn _format_guid(buf) {
+fn _format_guid(buf): i64 {
     var sb = str_builder_new();
     # GUID is stored in mixed-endian: first 3 fields are little-endian
     # Bytes: 0-3 (LE u32), 4-5 (LE u16), 6-7 (LE u16), 8-9 (BE), 10-15 (BE)
@@ -249,7 +249,7 @@ fn _format_guid(buf) {
     return str_builder_build(sb);
 }
 
-fn _hex2(sb, byte) {
+fn _hex2(sb, byte): i64 {
     var hi = (byte >> 4) & 0x0F;
     var lo = byte & 0x0F;
     if (hi < 10) { str_builder_add_byte(sb, 48 + hi); }
@@ -265,7 +265,7 @@ fn _hex2(sb, byte) {
 # Linux swap: 0657FD6D-A4AB-43C4-84E5-0933C84B4F4F
 # Microsoft Basic Data: EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
 
-fn _is_efi_type_guid(guid_buf) {
+fn _is_efi_type_guid(guid_buf): i64 {
     # Check first 4 bytes (LE): C12A7328 -> bytes: 28 73 2A C1
     if (load8(guid_buf) == 0x28) {
         if (load8(guid_buf + 1) == 0x73) {
@@ -279,7 +279,7 @@ fn _is_efi_type_guid(guid_buf) {
     return 0;
 }
 
-fn _is_linux_type_guid(guid_buf) {
+fn _is_linux_type_guid(guid_buf): i64 {
     # 0FC63DAF -> bytes: AF 3D C6 0F
     if (load8(guid_buf) == 0xAF) {
         if (load8(guid_buf + 1) == 0x3D) {
@@ -291,7 +291,7 @@ fn _is_linux_type_guid(guid_buf) {
     return 0;
 }
 
-fn _is_linux_swap_guid(guid_buf) {
+fn _is_linux_swap_guid(guid_buf): i64 {
     # 0657FD6D -> bytes: 6D FD 57 06
     if (load8(guid_buf) == 0x6D) {
         if (load8(guid_buf + 1) == 0xFD) {
@@ -303,7 +303,7 @@ fn _is_linux_swap_guid(guid_buf) {
     return 0;
 }
 
-fn _is_msdata_type_guid(guid_buf) {
+fn _is_msdata_type_guid(guid_buf): i64 {
     # EBD0A0A2 -> bytes: A2 A0 D0 EB
     if (load8(guid_buf) == 0xA2) {
         if (load8(guid_buf + 1) == 0xA0) {
@@ -315,7 +315,7 @@ fn _is_msdata_type_guid(guid_buf) {
     return 0;
 }
 
-fn _gpt_type_guid_to_str(guid_buf) {
+fn _gpt_type_guid_to_str(guid_buf): i64 {
     if (_is_efi_type_guid(guid_buf)) { return "EFI System"; }
     if (_is_linux_type_guid(guid_buf)) { return "Linux filesystem"; }
     if (_is_linux_swap_guid(guid_buf)) { return "Linux swap"; }
@@ -324,7 +324,7 @@ fn _gpt_type_guid_to_str(guid_buf) {
 }
 
 # Check if GUID is all zeros (unused entry)
-fn _is_zero_guid(buf) {
+fn _is_zero_guid(buf): i64 {
     for (var i = 0; i < 16; i = i + 1) {
         if (load8(buf + i) != 0) { return 0; }
     }
@@ -335,7 +335,7 @@ fn _is_zero_guid(buf) {
 # Parse GPT name field — 72 bytes of UTF-16LE, extract ASCII
 # ---------------------------------------------------------------------------
 
-fn _parse_gpt_name(buf) {
+fn _parse_gpt_name(buf): i64 {
     var sb = str_builder_new();
     for (var i = 0; i < 36; i = i + 1) {
         var lo = load8(buf + i * 2);
@@ -353,7 +353,7 @@ fn _parse_gpt_name(buf) {
 # Parse GPT partition entries
 # ---------------------------------------------------------------------------
 
-fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size) {
+fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size): i64 {
     var entries = vec_new();
     var buf[128];
     var byte_offset = entry_start_lba * SECTOR_SIZE;

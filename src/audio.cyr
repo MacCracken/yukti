@@ -95,7 +95,7 @@ pub fn yukti_audio_sys_path(d)    { return load64(d + AI_SYS_PATH); }
 # ---------------------------------------------------------------------------
 
 fn _audio_info_new(card, device, subdevice, direction, name, driver,
-hw_id, dev_path, sys_path) {
+hw_id, dev_path, sys_path): i64 {
     var d = alloc(AI_SIZE);
     store64(d + AI_CARD, card);
     store64(d + AI_DEVICE, device);
@@ -117,7 +117,7 @@ hw_id, dev_path, sys_path) {
 # allocation in the hot enumeration loop; callers unpack inline.
 # ---------------------------------------------------------------------------
 
-fn _audio_parse_pcm_name(name_cstr) {
+fn _audio_parse_pcm_name(name_cstr): i64 {
     # Must start with "pcmC"
     if (load8(name_cstr) != 0x70) { return 0 - 1; }       # 'p'
     if (load8(name_cstr + 1) != 0x63) { return 0 - 1; }   # 'c'
@@ -178,9 +178,9 @@ fn _audio_parse_pcm_name(name_cstr) {
 }
 
 # Bit-unpack helpers for _audio_parse_pcm_name's return value.
-fn _audio_parsed_card(packed)      { return (packed / 65536) % 256; }
-fn _audio_parsed_device(packed)    { return (packed / 256) % 256; }
-fn _audio_parsed_direction(packed) { return packed % 256; }
+fn _audio_parsed_card(packed): i64 { return (packed / 65536) % 256; }
+fn _audio_parsed_device(packed): i64 { return (packed / 256) % 256; }
+fn _audio_parsed_direction(packed): i64 { return packed % 256; }
 
 # ---------------------------------------------------------------------------
 # Driver lookup from /proc/asound/cards
@@ -193,7 +193,7 @@ fn _audio_parsed_direction(packed) { return packed % 256; }
 # name (e.g. "HDA-Intel"). Indices for missing cards have value 0.
 # ---------------------------------------------------------------------------
 
-fn _audio_load_drivers() {
+fn _audio_load_drivers(): i64 {
     var drivers = vec_new();
     var buf = alloc(8192);
     var fd = sys_open("/proc/asound/cards", 0, 0);
@@ -268,7 +268,7 @@ fn _audio_load_drivers() {
 # Helper: find substring in a Str starting from `start`.
 # Stdlib provides `str_index_of_cstr(s, needle)` (lib/str.cyr:358) but
 # not a from-offset variant — define one privately here.
-fn _audio_str_index_from(s, needle_cstr, start) {
+fn _audio_str_index_from(s, needle_cstr, start): i64 {
     var slen = str_len(s);
     var nlen = strlen(needle_cstr);
     if (nlen > slen - start) { return 0 - 1; }
@@ -290,7 +290,7 @@ fn _audio_str_index_from(s, needle_cstr, start) {
 # can't be read.
 # ---------------------------------------------------------------------------
 
-fn _audio_read_pcm_name(card, device, direction) {
+fn _audio_read_pcm_name(card, device, direction): i64 {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "/proc/asound/card");
     str_builder_add_int(sb, card);
@@ -321,7 +321,7 @@ fn _audio_read_pcm_name(card, device, direction) {
 }
 
 # Helper: test if Str starts with cstr.
-fn str_starts_with_cstr(s, prefix_cstr) {
+fn str_starts_with_cstr(s, prefix_cstr): i64 {
     var nlen = strlen(prefix_cstr);
     if (nlen > str_len(s)) { return 0; }
     var sd = str_data(s);
@@ -338,7 +338,7 @@ fn str_starts_with_cstr(s, prefix_cstr) {
 # to produce a stable identifier. See module header for the strategy.
 # ---------------------------------------------------------------------------
 
-fn _audio_compute_hw_id(card, device, direction) {
+fn _audio_compute_hw_id(card, device, direction): i64 {
     # Build sys_path
     var sysb = str_builder_new();
     str_builder_add_cstr(sysb, "/sys/class/sound/card");

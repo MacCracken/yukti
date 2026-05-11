@@ -184,12 +184,12 @@ pub fn remove_rule(name, rules_dir_cstr) {
 # historical /sbin location for busybox-ish distros.
 # ---------------------------------------------------------------------------
 
-fn _udevadm_path() { return "/usr/bin/udevadm"; }
+fn _udevadm_path(): i64 { return "/usr/bin/udevadm"; }
 
 # Reject sysfs paths that aren't under /sys/ — defense-in-depth
 # against argv shenanigans if a caller ever hands us something
 # attacker-controlled.
-fn _is_sysfs_path(p) {
+fn _is_sysfs_path(p): i64 {
     if (p == 0) { return 0; }
     if (load8(p + 0) != 47) { return 0; }      # '/'
     if (load8(p + 1) != 115) { return 0; }     # 's'

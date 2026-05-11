@@ -50,7 +50,7 @@ pub fn gpu_info_render_node(g) { return load64(g + 56); }
 # Parse hex value from sysfs file content (e.g. "0x1002\n" → 0x1002)
 # ---------------------------------------------------------------------------
 
-fn _parse_hex_attr(s) {
+fn _parse_hex_attr(s): i64 {
     if (s == 0) { return 0; }
     var cstr = str_cstr(s);
     var i = 0;
@@ -84,7 +84,7 @@ fn _parse_hex_attr(s) {
 # Parse uevent key=value for a specific key
 # ---------------------------------------------------------------------------
 
-fn _parse_uevent_key(uevent_str, key_cstr) {
+fn _parse_uevent_key(uevent_str, key_cstr): i64 {
     if (uevent_str == 0) { return 0; }
     var text = str_cstr(uevent_str);
     var text_len = str_len(uevent_str);

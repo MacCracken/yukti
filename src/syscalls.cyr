@@ -29,7 +29,7 @@ enum YkSyscalls {
 
 # Stdlib provides sys_stat on aarch64 only; fill the x86 gap so
 # yukti src/ can call sys_stat(path, buf) portably.
-fn sys_stat(path, buf) {
+fn sys_stat(path, buf): i64 {
     return syscall(SYS_STAT, path, buf);
 }
 #endif

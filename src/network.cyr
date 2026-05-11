@@ -112,7 +112,7 @@ pub fn network_mount_source(share) {
 # Build mount data options string for SMB/NFS
 # ---------------------------------------------------------------------------
 
-fn _build_smb_options(share) {
+fn _build_smb_options(share): i64 {
     var sb = str_builder_new();
 
     var user = ns_username(share);
@@ -139,7 +139,7 @@ fn _build_smb_options(share) {
     return str_builder_build(sb);
 }
 
-fn _build_nfs_options(share) {
+fn _build_nfs_options(share): i64 {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "nolock");
 

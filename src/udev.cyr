@@ -271,7 +271,7 @@ pub fn device_info_from_udev(event) {
 # read_sysfs_attr — read a single sysfs attribute file, trimmed
 # ---------------------------------------------------------------------------
 
-fn _read_sysfs_attr(base_path, attr_cstr) {
+fn _read_sysfs_attr(base_path, attr_cstr): i64 {
     var sb = str_builder_new();
     str_builder_add_str(sb, base_path);
     str_builder_add_cstr(sb, "/");
@@ -303,7 +303,7 @@ pub fn enumerate_block_devices(sysfs_root) {
 # build_device_info_from_sysfs — construct DeviceInfo from sysfs attributes
 # ---------------------------------------------------------------------------
 
-fn _build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr) {
+fn _build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr): i64 {
     var props = map_new();
 
     # Read standard sysfs attributes

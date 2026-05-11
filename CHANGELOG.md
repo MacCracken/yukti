@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.3] — 2026-05-11
+
+### Changed
+
+- **Stdlib annotation pass**: every public fn in `src/*.cyr`
+  carries a `: i64` return-type annotation. One multi-line fn
+  (`_audio_info_new`) hand-fixed. Mechanical pass matching
+  cyrius's v5.11.x annotation arc; parse-only, zero runtime
+  / codegen change.
+- `cyrius` pin bumped 5.8.64 → 5.11.4 — required for `: i64`
+  return-type syntax (v5.10.x REAL TYPE SYSTEM).
+- `dist/yukti.cyr` regenerated via `cyrius distlib` at v2.2.3
+  (6098 lines). Ready for next cyrius-side fold-in slot.
+
 ## [2.2.2] — 2026-05-05
 
 ### Changed

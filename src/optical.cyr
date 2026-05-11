@@ -237,7 +237,7 @@ pub fn toc_total_audio_duration_x100(toc) {
 # Helper: open optical device with O_RDONLY | O_NONBLOCK
 # ---------------------------------------------------------------------------
 
-fn _open_optical_device(dev_path_cstr) {
+fn _open_optical_device(dev_path_cstr): i64 {
     var fd = sys_open(dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
     if (fd < 0) {
         var errno = 0 - fd;

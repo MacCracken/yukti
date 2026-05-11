@@ -48,7 +48,7 @@ pub fn filesystem_to_str(fs) {
 }
 
 # Case-insensitive string comparison helper
-fn _str_eq_ci(a, b) {
+fn _str_eq_ci(a, b): i64 {
     var a_len = strlen(a);
     var b_len = strlen(b);
     if (a_len != b_len) { return 0; }
@@ -217,7 +217,7 @@ pub fn mr_read_only(r) { return load64(r + 32); }
 # Check that path starts with prefix + ('/' or '\0').
 # Examples: _starts_with_dir("/etc/foo", "/etc") == 1
 #           _starts_with_dir("/etcetera", "/etc") == 0
-fn _starts_with_dir(path_cstr, prefix) {
+fn _starts_with_dir(path_cstr, prefix): i64 {
     var plen = strlen(prefix);
     var i = 0;
     while (i < plen) {
@@ -233,7 +233,7 @@ fn _starts_with_dir(path_cstr, prefix) {
 # Reject paths that contain `..` as a path component, or `//` (double
 # slash — our string compare below treats these as distinct from the
 # canonical form, so tighten the input requirement).
-fn _path_has_traversal(path_cstr) {
+fn _path_has_traversal(path_cstr): i64 {
     var len = strlen(path_cstr);
     if (len == 0) { return 1; }
     var i = 0;
@@ -262,7 +262,7 @@ fn _path_has_traversal(path_cstr) {
     return 0;
 }
 
-fn _is_forbidden_mount(path_cstr) {
+fn _is_forbidden_mount(path_cstr): i64 {
     # Root is a literal match only — no prefix rule can apply to "/".
     if (streq(path_cstr, "/")) { return 1; }
     # Protected system directories — block the dir itself AND anything
@@ -475,7 +475,7 @@ enum MountFlag {
     MS_NOEXEC = 8;
 }
 
-fn _parse_mount_flags(options_str, read_only) {
+fn _parse_mount_flags(options_str, read_only): i64 {
     var flags = 0;
     if (read_only) { flags = flags | MS_RDONLY; }
 
@@ -497,7 +497,7 @@ fn _parse_mount_flags(options_str, read_only) {
 # Filesystem types to try when auto-detecting
 # ---------------------------------------------------------------------------
 
-fn _get_auto_fs_type(idx) {
+fn _get_auto_fs_type(idx): i64 {
     if (idx == 0) { return "ext4"; }
     if (idx == 1) { return "vfat"; }
     if (idx == 2) { return "ntfs"; }

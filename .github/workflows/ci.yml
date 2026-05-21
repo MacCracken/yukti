@@ -41,7 +41,15 @@ jobs:
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Resolve dependencies
-        run: cyrius deps
+        # `--no-lock` preserves the committed cyrius.lock. Cyrius 6.0.1's
+        # default `cyrius deps` truncates cyrius.lock to 0 bytes (logs
+        # `cyrius.lock: 0 deps locked` despite resolving 2 deps), which
+        # then makes the next `--verify` step fail with
+        # `error: no cyrius.lock found`. `--no-lock` skips the lockfile
+        # write entirely so the in-tree committed hashes survive into
+        # the verify step. Drop the flag once upstream restores the
+        # lockfile writer.
+        run: cyrius deps --no-lock
 
       - name: Verify dep hashes
         run: cyrius deps --verify

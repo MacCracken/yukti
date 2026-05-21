@@ -41,8 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cyrius 6.0.1's `cyrius deps` writes an empty `cyrius.lock` (regression
   vs. 5.11.4 — resolves correctly but logs `0 deps locked`). `cyrius.lock`
   for this release was hand-written with `sha256sum lib/{sakshi,patra}.cyr`
-  and `cyrius deps --verify` confirms `2 verified, 0 failed`. Track for
-  removal once upstream restores auto-lock writes.
+  and `cyrius deps --verify` confirms `2 verified, 0 failed`. CI's
+  `Resolve dependencies` step now uses `cyrius deps --no-lock` to skip
+  the broken writer and preserve the committed lockfile into the verify
+  step. Drop the flag once upstream restores auto-lock writes.
 
 ## [2.2.3] — 2026-05-11
 

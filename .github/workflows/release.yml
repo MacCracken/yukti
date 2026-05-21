@@ -56,7 +56,10 @@ jobs:
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Resolve deps
-        run: cyrius deps
+        # `--no-lock` preserves the committed cyrius.lock — see the same
+        # note in ci.yml for context (cyrius 6.0.1 lockfile-writer
+        # regression truncates the file to 0 bytes).
+        run: cyrius deps --no-lock
 
       - name: Verify dep hashes
         run: cyrius deps --verify

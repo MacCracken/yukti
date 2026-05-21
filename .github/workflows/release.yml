@@ -43,11 +43,15 @@ jobs:
           mkdir -p "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin" "$HOME/.cyrius/versions/$CYRIUS_VERSION/lib"
           cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/" 2>/dev/null || true
           cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/versions/$CYRIUS_VERSION/lib/" 2>/dev/null || true
-          # cc5_aarch64 packaging changed across the 5.7.x line: pre-5.7.48
-          # tarballs ship it under bin/ (picked up by the bin/* copy above),
-          # 5.7.48+ moved it to the tarball top-level. Cover both. See
+          # Aarch64 backend binary packaging history:
+          #   - pre-5.7.48: `cc5_aarch64` under bin/ (picked up by bin/* above)
+          #   - 5.7.48 → 5.11.x: `cc5_aarch64` at the tarball top-level
+          #   - 6.0+: renamed to `cycc_aarch64`, location may be either
+          #     bin/ or top-level depending on the release.
+          # Cover every layout. See
           # docs/development/issues/2026-04-30-cyrius-cc5-aarch64-packaging.md.
           [ -f "$CYRIUS_DIR/cc5_aarch64" ] && cp "$CYRIUS_DIR/cc5_aarch64" "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/"
+          [ -f "$CYRIUS_DIR/cycc_aarch64" ] && cp "$CYRIUS_DIR/cycc_aarch64" "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/"
           chmod +x "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/"* 2>/dev/null || true
           ln -sfn "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin" "$HOME/.cyrius/bin"
           ln -sfn "$HOME/.cyrius/versions/$CYRIUS_VERSION/lib" "$HOME/.cyrius/lib"
@@ -75,8 +79,8 @@ jobs:
         # workflow comment for context). Release archives both x86 +
         # aarch64 binaries.
         run: |
-          if [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
-            echo "::error::cc5_aarch64 missing from Cyrius $CYRIUS_VERSION — aarch64 cross-build is required since 2.1.3"
+          if [ ! -x "$HOME/.cyrius/bin/cycc_aarch64" ] && [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            echo "::error::aarch64 backend missing from Cyrius $CYRIUS_VERSION (looked for cycc_aarch64 and cc5_aarch64) — aarch64 cross-build is required since 2.1.3"
             exit 1
           fi
           CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/yukti-aarch64

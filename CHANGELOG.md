@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.4] — 2026-05-21
+
+### Changed
+
+- `cyrius` pin bumped 5.11.4 → 6.0.1.
+- `[deps.sakshi].tag` bumped 2.2.3 → 2.2.5 (latest);
+  `[deps.patra].tag` bumped 1.9.3 → 1.9.5 (latest).
+
+### Removed
+
+- **`sys_stat` shim in `src/syscalls.cyr`**. Cyrius 6.0.1's stdlib now
+  exposes `sys_stat(path, buf)` on x86_64 as well as aarch64, so the
+  yukti-side x86 fill-in is redundant and was triggering a duplicate-fn
+  warning. Comment block and `#ifdef CYRIUS_ARCH_X86` shim removed; arch
+  enum blocks retained.
+
+### Verified
+
+- `cyrius test`: **653 / 653** asserts pass against cyrius 6.0.1 with
+  sakshi 2.2.5 + patra 1.9.5 resolved.
+- `cyrius lint src/main.cyr` + `programs/core_smoke.cyr`: 0 warnings.
+- `cyrius fmt --check`: clean across `src/`, `programs/`, `tests/`,
+  `fuzz/` (per-file invocation; 6.0.1 fmt is positional-file-then-flag).
+- `cyrius vet src/main.cyr`: 1 dep, 0 untrusted, 0 missing.
+- `programs/core_smoke.cyr`: kernel-safe subset linked clean (exit 0).
+- `dist/yukti.cyr` regenerated at 6089 lines; `dist/yukti-core.cyr` at
+  458 lines. Both tagged v2.2.4; kernel-safe bundle has zero `alloc` /
+  `sys_*` / `syscall` references.
+
+### Notes
+
+- Cyrius 6.0.1's `cyrius deps` writes an empty `cyrius.lock` (regression
+  vs. 5.11.4 — resolves correctly but logs `0 deps locked`). `cyrius.lock`
+  for this release was hand-written with `sha256sum lib/{sakshi,patra}.cyr`
+  and `cyrius deps --verify` confirms `2 verified, 0 failed`. Track for
+  removal once upstream restores auto-lock writes.
+
 ## [2.2.3] — 2026-05-11
 
 ### Changed

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.5] — 2026-06-12
+
+### Changed
+
+- **cyrius pin `6.0.1` → `6.2.1`** (ecosystem-wide stdlib pin sweep onto the
+  current toolchain). No source changes — yukti's `[deps]` carries no carved-out
+  modules and its external deps (sakshi, patra) are unaffected. Verified green on
+  6.2.1: `cyrius deps` resolves cleanly, full `.tcyr` suite 653/653, bench 1/1,
+  `dist/yukti.cyr` + `dist/yukti-core.cyr` regenerated via `cyrius distlib`.
+
 ## [2.2.4] — 2026-05-21
 
 ### Changed

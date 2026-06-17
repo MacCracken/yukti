@@ -4636,7 +4636,7 @@ pub fn device_db_record_seen(info) {
     var class = di_class(info);
 
     # Get current timestamp
-    var now = clock_epoch_secs();   # epoch secs via chrono (cross-platform; was var syscall(228), see cyrius 2026-06-16)
+    var now = clock_epoch_secs();   # epoch secs (chrono; cross-platform — see src/syscalls.cyr)
 
     # Check if device exists
     var key_esc = _sql_escape_str(key);
@@ -4703,7 +4703,7 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     var key = _device_key(info);
     var dev_path = di_dev_path(info);
 
-    var now = clock_epoch_secs();   # epoch secs via chrono (cross-platform; was var syscall(228), see cyrius 2026-06-16)
+    var now = clock_epoch_secs();   # epoch secs (chrono; cross-platform — see src/syscalls.cyr)
 
     var key_esc = _sql_escape_str(key);
     var dev_path_esc = _sql_escape_str(dev_path);
@@ -4918,7 +4918,7 @@ pub fn device_db_record_audio_seen(audio_info) {
     var card = yukti_audio_card(audio_info);
     var device = yukti_audio_device(audio_info);
 
-    var now = clock_epoch_secs();   # epoch secs via chrono (cross-platform; was var syscall(228), see cyrius 2026-06-16)
+    var now = clock_epoch_secs();   # epoch secs (chrono; cross-platform — see src/syscalls.cyr)
 
     # Lookup
     var qsb = str_builder_new();

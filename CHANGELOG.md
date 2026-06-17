@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.6] — 2026-06-17
+
+### Fixed
+
+- **Cross-platform wall-clock timestamps.** The CLOCK_REALTIME timestamps in
+  `src/event.cyr` and `src/device_db.cyr` (3 sites) called
+  `syscall(SYS_CLOCK_GETTIME, 0, &ts)` with a **`var`** syscall number. A `var`
+  does not const-fold, so on macOS/Windows the toolchain's `syscall(228)` reroute
+  (to `_clock_gettime_nsec_np` / `GetSystemTimeAsFileTime`) never fired and a raw
+  bad syscall resulted (returned garbage/-9); the sites also read `&ts`, which the
+  Darwin/Windows clock paths don't fill. Both now delegate to stdlib
+  `chrono.clock_epoch_secs()`, which is correct on every target. Linux was
+  unaffected (svc 228 there genuinely is `clock_gettime`). Surfaced by cyrius
+  issue `2026-06-16-var-syscall-number-defeats-macho-pe-reroute`.
+- Removed the now-dead `SYS_CLOCK_GETTIME` from `src/syscalls.cyr` (both arches) —
+  timestamps no longer hand-roll the clock syscall, so no `var` clock number
+  remains to misuse. Socket/statfs shims unchanged.
+
 ## [2.2.5] — 2026-06-12
 
 ### Changed

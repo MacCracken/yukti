@@ -58,10 +58,10 @@ pub fn device_event_new(device_id, device_class, kind, dev_path) {
     store64(e + DE_DEVICE_CLASS, device_class);
     store64(e + DE_KIND, kind);
     store64(e + DE_DEV_PATH, dev_path);
-    # Timestamp: clock_gettime(CLOCK_REALTIME=0)
-    var ts[16];
-    syscall(SYS_CLOCK_GETTIME, 0, &ts);
-    store64(e + DE_TIMESTAMP, load64(&ts));
+    # Timestamp: epoch seconds via stdlib chrono (cross-platform). Was a `var`
+    # syscall(228,0,&ts) that did NOT route on macOS/Windows (the reroute needs a
+    # literal number) — cyrius issue 2026-06-16-var-syscall-number-defeats-macho-pe-reroute.
+    store64(e + DE_TIMESTAMP, clock_epoch_secs());
     store64(e + DE_EXTRA, 0);
     store64(e + DE_DEVICE_INFO, 0);
     return e;

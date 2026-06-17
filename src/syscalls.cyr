@@ -7,10 +7,14 @@
 # `lib/syscalls.cyr` dispatch pattern.
 #
 # Scope: socket family (socket / bind / connect / setsockopt /
-# recvfrom / ppoll) and filesystem (statfs / newfstatat /
-# clock_gettime). Items live here and not in the upstream stdlib
-# because they haven't been promoted yet — track in
+# recvfrom / ppoll) and filesystem (statfs / newfstatat). Items live
+# here and not in the upstream stdlib because they haven't been
+# promoted yet — track in
 # `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`.
+# clock_gettime was removed here at 2.2.6 — timestamps now go through
+# stdlib `chrono.clock_epoch_secs()`, which routes correctly on
+# macOS/Windows (a `var` syscall NUMBER does not trigger the macho/PE
+# reroute — cyrius issue 2026-06-16-var-syscall-number-defeats-macho-pe-reroute).
 
 #ifdef CYRIUS_ARCH_X86
 enum YkSyscalls {
@@ -22,7 +26,6 @@ enum YkSyscalls {
     SYS_PPOLL = 271;
     SYS_STATFS = 137;
     SYS_NEWFSTATAT = 262;
-    SYS_CLOCK_GETTIME = 228;
 }
 #endif
 
@@ -34,7 +37,6 @@ enum YkSyscalls {
     SYS_RECVFROM = 207;
     SYS_SETSOCKOPT = 208;
     SYS_STATFS = 43;
-    SYS_CLOCK_GETTIME = 113;
 }
 # Stdlib aarch64 already defines: SYS_NEWFSTATAT = 79, SYS_PPOLL = 73.
 #endif

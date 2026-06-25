@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.7] — 2026-06-25
+
+**Namespace all error codes `ERR_*` → `YUKTI_ERR_*` (BREAKING).** yukti's
+`YuktiErrorKind` enum (`src/error.cyr`) defined bare `ERR_*` names — notably
+`ERR_IO = 14` and `ERR_PERMISSION_DENIED = 6` — that collide with other
+stdlibs' error enums under cyrius's flat symbol namespace (e.g. sigil
+`ERR_IO = 6` / `ERR_PERMISSION_DENIED`; the cyrius `CHKDUPVAL` guardrail warns
+on the conflicting-value duplicate). All 16 yukti error constants are renamed
+to the `YUKTI_ERR_*` prefix so yukti owns its namespace. No compat aliases —
+the bare names are dropped (an alias would re-introduce the colliding name).
+Enum **values are unchanged**; only the identifiers move. Resolves cyrius
+issue `2026-06-14-stdlib-constant-value-collisions` (yukti half). All tests
+pass (653/653).
+
+### Changed (BREAKING)
+- `YuktiErrorKind`: all 16 `ERR_*` (`ERR_DEVICE_NOT_FOUND` … `ERR_IO` …
+  `ERR_PARSE`) → `YUKTI_ERR_*`. Consumers referencing yukti's bare `ERR_*`
+  must update to `YUKTI_ERR_*`.
+
 ## [2.2.6] — 2026-06-17
 
 ### Fixed

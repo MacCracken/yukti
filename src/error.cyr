@@ -8,22 +8,22 @@
 # ---------------------------------------------------------------------------
 
 enum YuktiErrorKind {
-    ERR_DEVICE_NOT_FOUND = 0;
-    ERR_DEVICE_BUSY = 1;
-    ERR_MOUNT_FAILED = 2;
-    ERR_UNMOUNT_FAILED = 3;
-    ERR_EJECT_FAILED = 4;
-    ERR_TRAY_FAILED = 5;
-    ERR_PERMISSION_DENIED = 6;
-    ERR_UDEV = 7;
-    ERR_ALREADY_MOUNTED = 8;
-    ERR_TIMEOUT = 9;
-    ERR_UDEV_SOCKET = 10;
-    ERR_UDEV_PARSE = 11;
-    ERR_NO_MEDIA = 12;
-    ERR_UNSUPPORTED_FS = 13;
-    ERR_IO = 14;
-    ERR_PARSE = 15;
+    YUKTI_ERR_DEVICE_NOT_FOUND = 0;
+    YUKTI_ERR_DEVICE_BUSY = 1;
+    YUKTI_ERR_MOUNT_FAILED = 2;
+    YUKTI_ERR_UNMOUNT_FAILED = 3;
+    YUKTI_ERR_EJECT_FAILED = 4;
+    YUKTI_ERR_TRAY_FAILED = 5;
+    YUKTI_ERR_PERMISSION_DENIED = 6;
+    YUKTI_ERR_UDEV = 7;
+    YUKTI_ERR_ALREADY_MOUNTED = 8;
+    YUKTI_ERR_TIMEOUT = 9;
+    YUKTI_ERR_UDEV_SOCKET = 10;
+    YUKTI_ERR_UDEV_PARSE = 11;
+    YUKTI_ERR_NO_MEDIA = 12;
+    YUKTI_ERR_UNSUPPORTED_FS = 13;
+    YUKTI_ERR_IO = 14;
+    YUKTI_ERR_PARSE = 15;
 }
 
 # ---------------------------------------------------------------------------
@@ -109,67 +109,67 @@ pub fn yukti_err_to_str(e, sb) {
 # ---------------------------------------------------------------------------
 
 pub fn err_device_not_found(id) {
-    return Err(yukti_err_new(ERR_DEVICE_NOT_FOUND, id));
+    return Err(yukti_err_new(YUKTI_ERR_DEVICE_NOT_FOUND, id));
 }
 
 pub fn err_device_busy(path) {
-    return Err(yukti_err_new(ERR_DEVICE_BUSY, path));
+    return Err(yukti_err_new(YUKTI_ERR_DEVICE_BUSY, path));
 }
 
 pub fn err_mount_failed(device, reason) {
-    return Err(yukti_err_new_ctx(ERR_MOUNT_FAILED, reason, device));
+    return Err(yukti_err_new_ctx(YUKTI_ERR_MOUNT_FAILED, reason, device));
 }
 
 pub fn err_unmount_failed(mount_point, reason) {
-    return Err(yukti_err_new_ctx(ERR_UNMOUNT_FAILED, reason, mount_point));
+    return Err(yukti_err_new_ctx(YUKTI_ERR_UNMOUNT_FAILED, reason, mount_point));
 }
 
 pub fn err_eject_failed(device, reason) {
-    return Err(yukti_err_new_ctx(ERR_EJECT_FAILED, reason, device));
+    return Err(yukti_err_new_ctx(YUKTI_ERR_EJECT_FAILED, reason, device));
 }
 
 pub fn err_tray_failed(reason) {
-    return Err(yukti_err_new(ERR_TRAY_FAILED, reason));
+    return Err(yukti_err_new(YUKTI_ERR_TRAY_FAILED, reason));
 }
 
 pub fn err_permission_denied(operation, path) {
-    return Err(yukti_err_new_ctx(ERR_PERMISSION_DENIED, operation, path));
+    return Err(yukti_err_new_ctx(YUKTI_ERR_PERMISSION_DENIED, operation, path));
 }
 
 pub fn err_udev(msg) {
-    return Err(yukti_err_new(ERR_UDEV, msg));
+    return Err(yukti_err_new(YUKTI_ERR_UDEV, msg));
 }
 
 pub fn err_already_mounted(device, mount_point) {
-    return Err(yukti_err_new_ctx(ERR_ALREADY_MOUNTED, device, mount_point));
+    return Err(yukti_err_new_ctx(YUKTI_ERR_ALREADY_MOUNTED, device, mount_point));
 }
 
 pub fn err_timeout(operation) {
-    return Err(yukti_err_new(ERR_TIMEOUT, operation));
+    return Err(yukti_err_new(YUKTI_ERR_TIMEOUT, operation));
 }
 
 pub fn err_udev_socket(msg) {
-    return Err(yukti_err_new(ERR_UDEV_SOCKET, msg));
+    return Err(yukti_err_new(YUKTI_ERR_UDEV_SOCKET, msg));
 }
 
 pub fn err_udev_parse(msg) {
-    return Err(yukti_err_new(ERR_UDEV_PARSE, msg));
+    return Err(yukti_err_new(YUKTI_ERR_UDEV_PARSE, msg));
 }
 
 pub fn err_no_media(device) {
-    return Err(yukti_err_new(ERR_NO_MEDIA, device));
+    return Err(yukti_err_new(YUKTI_ERR_NO_MEDIA, device));
 }
 
 pub fn err_unsupported_fs(fs_type) {
-    return Err(yukti_err_new(ERR_UNSUPPORTED_FS, fs_type));
+    return Err(yukti_err_new(YUKTI_ERR_UNSUPPORTED_FS, fs_type));
 }
 
 pub fn err_io(msg) {
-    return Err(yukti_err_new(ERR_IO, msg));
+    return Err(yukti_err_new(YUKTI_ERR_IO, msg));
 }
 
 pub fn err_parse(msg) {
-    return Err(yukti_err_new(ERR_PARSE, msg));
+    return Err(yukti_err_new(YUKTI_ERR_PARSE, msg));
 }
 
 # ---------------------------------------------------------------------------

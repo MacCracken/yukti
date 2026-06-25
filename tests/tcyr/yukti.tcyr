@@ -11,50 +11,50 @@ include "lib/assert.cyr"
 
 fn test_error_device_not_found() {
     test_group("error");
-    var e = yukti_err_new(ERR_DEVICE_NOT_FOUND, str_from("usb-001"));
-    assert_eq(yukti_err_kind(e), ERR_DEVICE_NOT_FOUND, "err kind");
+    var e = yukti_err_new(YUKTI_ERR_DEVICE_NOT_FOUND, str_from("usb-001"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_DEVICE_NOT_FOUND, "err kind");
     assert(str_eq_cstr(yukti_err_detail(e), "usb-001"), "err detail");
     assert_eq(yukti_err_context(e), 0, "err no context");
     return 0;
 }
 
 fn test_error_device_busy() {
-    var e = yukti_err_new(ERR_DEVICE_BUSY, str_from("/dev/sdb1"));
-    assert_eq(yukti_err_kind(e), ERR_DEVICE_BUSY, "busy kind");
+    var e = yukti_err_new(YUKTI_ERR_DEVICE_BUSY, str_from("/dev/sdb1"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_DEVICE_BUSY, "busy kind");
     assert(str_contains_cstr(yukti_err_detail(e), "/dev/sdb1"), "busy detail");
     return 0;
 }
 
 fn test_error_mount_failed() {
-    var e = yukti_err_new_ctx(ERR_MOUNT_FAILED, str_from("bad superblock"), str_from("/dev/sdb1"));
-    assert_eq(yukti_err_kind(e), ERR_MOUNT_FAILED, "mount kind");
+    var e = yukti_err_new_ctx(YUKTI_ERR_MOUNT_FAILED, str_from("bad superblock"), str_from("/dev/sdb1"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_MOUNT_FAILED, "mount kind");
     assert(str_eq_cstr(yukti_err_detail(e), "bad superblock"), "mount detail");
     assert(str_eq_cstr(yukti_err_context(e), "/dev/sdb1"), "mount context");
     return 0;
 }
 
 fn test_error_unmount_failed() {
-    var e = yukti_err_new_ctx(ERR_UNMOUNT_FAILED, str_from("device busy"), str_from("/mnt/usb"));
-    assert_eq(yukti_err_kind(e), ERR_UNMOUNT_FAILED, "unmount kind");
+    var e = yukti_err_new_ctx(YUKTI_ERR_UNMOUNT_FAILED, str_from("device busy"), str_from("/mnt/usb"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_UNMOUNT_FAILED, "unmount kind");
     assert(str_contains_cstr(yukti_err_detail(e), "device busy"), "unmount detail");
     return 0;
 }
 
 fn test_error_eject_failed() {
-    var e = yukti_err_new_ctx(ERR_EJECT_FAILED, str_from("tray locked"), str_from("/dev/sr0"));
-    assert_eq(yukti_err_kind(e), ERR_EJECT_FAILED, "eject kind");
+    var e = yukti_err_new_ctx(YUKTI_ERR_EJECT_FAILED, str_from("tray locked"), str_from("/dev/sr0"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_EJECT_FAILED, "eject kind");
     assert(str_contains_cstr(yukti_err_detail(e), "tray locked"), "eject detail");
     return 0;
 }
 
 fn test_error_tray_failed() {
-    var e = yukti_err_new(ERR_TRAY_FAILED, str_from("mechanical error"));
+    var e = yukti_err_new(YUKTI_ERR_TRAY_FAILED, str_from("mechanical error"));
     assert(str_contains_cstr(yukti_err_detail(e), "mechanical error"), "tray detail");
     return 0;
 }
 
 fn test_error_permission_denied() {
-    var e = yukti_err_new_ctx(ERR_PERMISSION_DENIED, str_from("mount"), str_from("/dev/sda"));
+    var e = yukti_err_new_ctx(YUKTI_ERR_PERMISSION_DENIED, str_from("mount"), str_from("/dev/sda"));
     var sb = str_builder_new();
     yukti_err_to_str(e, sb);
     var s = str_builder_build(sb);
@@ -65,76 +65,76 @@ fn test_error_permission_denied() {
 }
 
 fn test_error_udev() {
-    var e = yukti_err_new(ERR_UDEV, str_from("netlink failed"));
+    var e = yukti_err_new(YUKTI_ERR_UDEV, str_from("netlink failed"));
     assert(str_contains_cstr(yukti_err_detail(e), "netlink failed"), "udev detail");
     return 0;
 }
 
 fn test_error_no_media() {
-    var e = yukti_err_new(ERR_NO_MEDIA, str_from("/dev/sr0"));
-    assert_eq(yukti_err_kind(e), ERR_NO_MEDIA, "no media kind");
+    var e = yukti_err_new(YUKTI_ERR_NO_MEDIA, str_from("/dev/sr0"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_NO_MEDIA, "no media kind");
     return 0;
 }
 
 fn test_error_unsupported_fs() {
-    var e = yukti_err_new(ERR_UNSUPPORTED_FS, str_from("hammerfs"));
+    var e = yukti_err_new(YUKTI_ERR_UNSUPPORTED_FS, str_from("hammerfs"));
     assert(str_contains_cstr(yukti_err_detail(e), "hammerfs"), "unsupported fs");
     return 0;
 }
 
 fn test_error_io() {
-    var e = yukti_err_new(ERR_IO, str_from("file not found"));
+    var e = yukti_err_new(YUKTI_ERR_IO, str_from("file not found"));
     assert(str_contains_cstr(yukti_err_detail(e), "file not found"), "io detail");
     return 0;
 }
 
 fn test_error_parse() {
-    var e = yukti_err_new(ERR_PARSE, str_from("invalid integer"));
+    var e = yukti_err_new(YUKTI_ERR_PARSE, str_from("invalid integer"));
     assert(str_contains_cstr(yukti_err_detail(e), "invalid integer"), "parse detail");
     return 0;
 }
 
 fn test_error_already_mounted() {
-    var e = yukti_err_new_ctx(ERR_ALREADY_MOUNTED, str_from("/dev/sdb1"), str_from("/mnt/usb"));
-    assert_eq(yukti_err_kind(e), ERR_ALREADY_MOUNTED, "already mounted kind");
+    var e = yukti_err_new_ctx(YUKTI_ERR_ALREADY_MOUNTED, str_from("/dev/sdb1"), str_from("/mnt/usb"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_ALREADY_MOUNTED, "already mounted kind");
     return 0;
 }
 
 fn test_error_timeout() {
-    var e = yukti_err_new(ERR_TIMEOUT, str_from("mount /dev/sdb1"));
+    var e = yukti_err_new(YUKTI_ERR_TIMEOUT, str_from("mount /dev/sdb1"));
     assert(str_contains_cstr(yukti_err_detail(e), "mount /dev/sdb1"), "timeout detail");
     return 0;
 }
 
 fn test_error_udev_socket() {
-    var e = yukti_err_new(ERR_UDEV_SOCKET, str_from("bind() failed"));
+    var e = yukti_err_new(YUKTI_ERR_UDEV_SOCKET, str_from("bind() failed"));
     assert(str_contains_cstr(yukti_err_detail(e), "bind() failed"), "socket detail");
     return 0;
 }
 
 fn test_error_udev_parse() {
-    var e = yukti_err_new(ERR_UDEV_PARSE, str_from("invalid uevent format"));
+    var e = yukti_err_new(YUKTI_ERR_UDEV_PARSE, str_from("invalid uevent format"));
     assert(str_contains_cstr(yukti_err_detail(e), "invalid uevent"), "udev parse detail");
     return 0;
 }
 
 fn test_error_kind_str_all() {
-    assert(streq(yukti_err_kind_str(ERR_DEVICE_NOT_FOUND), "device not found"), "kind 0");
-    assert(streq(yukti_err_kind_str(ERR_DEVICE_BUSY), "device busy"), "kind 1");
-    assert(streq(yukti_err_kind_str(ERR_MOUNT_FAILED), "mount failed"), "kind 2");
-    assert(streq(yukti_err_kind_str(ERR_UNMOUNT_FAILED), "unmount failed"), "kind 3");
-    assert(streq(yukti_err_kind_str(ERR_EJECT_FAILED), "eject failed"), "kind 4");
-    assert(streq(yukti_err_kind_str(ERR_TRAY_FAILED), "tray operation failed"), "kind 5");
-    assert(streq(yukti_err_kind_str(ERR_PERMISSION_DENIED), "permission denied"), "kind 6");
-    assert(streq(yukti_err_kind_str(ERR_UDEV), "udev error"), "kind 7");
-    assert(streq(yukti_err_kind_str(ERR_ALREADY_MOUNTED), "device already mounted"), "kind 8");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_DEVICE_NOT_FOUND), "device not found"), "kind 0");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_DEVICE_BUSY), "device busy"), "kind 1");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_MOUNT_FAILED), "mount failed"), "kind 2");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_UNMOUNT_FAILED), "unmount failed"), "kind 3");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_EJECT_FAILED), "eject failed"), "kind 4");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_TRAY_FAILED), "tray operation failed"), "kind 5");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_PERMISSION_DENIED), "permission denied"), "kind 6");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_UDEV), "udev error"), "kind 7");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_ALREADY_MOUNTED), "device already mounted"), "kind 8");
     assert(streq(yukti_err_kind_str(9), "operation timed out"), "kind 9");
-    assert(streq(yukti_err_kind_str(ERR_UDEV_SOCKET), "udev socket error"), "kind 10");
-    assert(streq(yukti_err_kind_str(ERR_UDEV_PARSE), "udev parse error"), "kind 11");
-    assert(streq(yukti_err_kind_str(ERR_NO_MEDIA), "no media in device"), "kind 12");
-    assert(streq(yukti_err_kind_str(ERR_UNSUPPORTED_FS), "unsupported filesystem"), "kind 13");
-    assert(streq(yukti_err_kind_str(ERR_IO), "io error"), "kind 14");
-    assert(streq(yukti_err_kind_str(ERR_PARSE), "parse error"), "kind 15");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_UDEV_SOCKET), "udev socket error"), "kind 10");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_UDEV_PARSE), "udev parse error"), "kind 11");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_NO_MEDIA), "no media in device"), "kind 12");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_UNSUPPORTED_FS), "unsupported filesystem"), "kind 13");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_IO), "io error"), "kind 14");
+    assert(streq(yukti_err_kind_str(YUKTI_ERR_PARSE), "parse error"), "kind 15");
     return 0;
 }
 

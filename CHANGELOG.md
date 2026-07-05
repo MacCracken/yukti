@@ -35,14 +35,20 @@ HDA output, QEMU-validated via play_tone, RMS/PEAK non-silent).
 
 ### Changed
 
-- **cyrius pin `6.2.1` → `6.4.2`**; **`[deps.patra]` `1.9.5` → `1.12.7`** and marked
-  **`optional = true` + `target = "linux"`**. patra (the SQLite-analog backing
-  `device_db`) pulls stdlib `sync`/`thread_local` (host threading) which the agnos
-  target lacks — and agnos has no persistent device-history store. So patra is now
-  Linux-only.
+- **cyrius pin `6.2.1` → `6.4.2`** — for the `target =` conditional-dep feature
+  (cyrius v6.3.1+). The 6.4.x toolchain also enforces a **strict transitive-dep
+  check**, so patra's stdlib requirements must now be named explicitly (below).
+- **Added `atomic` / `sync` / `thread_local` to `[deps].stdlib`** — these are
+  patra 1.12.7's transitive stdlib requirements (previously tolerated implicitly
+  under the older pin). All three have agnos branches, so they are target-safe.
+- **`[deps.patra]` marked `target = "linux"`** (tag stays `1.12.7` — no downgrade).
+  patra — the SQLite-analog backing `device_db` — is Linux-only: agnos has no
+  persistent device-history store. `target = "linux"` drops patra from the agnos
+  build entirely.
 - **`device_db.cyr` gated `#ifndef CYRIUS_TARGET_AGNOS`** (whole module) and the
   `lib/patra.cyr` include in `lib.cyr` likewise. device_db is a pure leaf (nothing
-  else in yukti calls it), so excluding it on agnos is free.
+  else in yukti calls it), so excluding it on agnos is free; it still builds
+  normally on Linux (patra materializes there).
 
 ### Notes
 

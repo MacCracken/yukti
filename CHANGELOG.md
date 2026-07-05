@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.8] — 2026-07-04
+
+**AGNOS target support — yukti's audio path now builds + runs on agnos.** The
+motivation: vani's full `vani_*` API (multi-device routing) bottoms out in
+`yukti_audio_*`, so vani couldn't build `--agnos` until yukti did. Now it does
+— proven end-to-end (`vani_open_playback` → `yukti_audio_devices` → the sovereign
+HDA output, QEMU-validated via play_tone, RMS/PEAK non-silent).
+
+### Added
+
+- **`#ifdef CYRIUS_TARGET_AGNOS` branch in `yukti_audio_devices()`** (`src/audio.cyr`).
+  agnos has no `/dev/snd`, `/proc/asound`, or `/sys/class/sound` to walk, so the
+  agnos branch reports a single fixed playback endpoint (card 0, device 0) — the
+  one sovereign HDA output the kernel driver routes by jack-detect. Self-contained:
+  it does NOT call the Linux `/proc`+sysfs helpers (`_audio_load_drivers` /
+  `_audio_compute_hw_id`), so it pulls in no `udev`/`gpu` module code on agnos.
+- **agnos stub constants for the Linux-only syscalls** (`src/syscalls.cyr`, gated
+  `#ifdef CYRIUS_TARGET_AGNOS`): `SYS_IOCTL` / `SYS_SOCKET` / `SYS_CONNECT` /
+  `SYS_BIND` / `SYS_RECVFROM` / `SYS_SETSOCKOPT` / `SYS_PPOLL` / `SYS_POLL` /
+  `SYS_STATFS` / `SYS_NEWFSTATAT` — none of which agnos defines. They exist ONLY
+  so the Linux-only enumerator modules (optical/storage/network/device) COMPILE
+  on agnos; those code paths are never reached (vani drives only the audio path).
+  High, deliberately-invalid stub numbers so an accidental call fails closed
+  rather than aliasing a real low-numbered agnos syscall (Linux `ioctl`=16 ==
+  agnos `kill`).
+
+### Changed
+
+- **cyrius pin `6.2.1` → `6.4.2`**; **`[deps.patra]` `1.9.5` → `1.12.7`** and marked
+  **`optional = true` + `target = "linux"`**. patra (the SQLite-analog backing
+  `device_db`) pulls stdlib `sync`/`thread_local` (host threading) which the agnos
+  target lacks — and agnos has no persistent device-history store. So patra is now
+  Linux-only.
+- **`device_db.cyr` gated `#ifndef CYRIUS_TARGET_AGNOS`** (whole module) and the
+  `lib/patra.cyr` include in `lib.cyr` likewise. device_db is a pure leaf (nothing
+  else in yukti calls it), so excluding it on agnos is free.
+
+### Notes
+
+- Only the `yukti_audio_*` path is exercised on agnos; the Linux device
+  enumerators (PCI/storage/optical/network/udev) compile (via the stub constants)
+  but are never invoked there. A residual `sys_umount2` arity warning remains in a
+  dead storage path — harmless (agnos never mounts).
+
 ## [2.2.7] — 2026-06-25
 
 **Namespace all error codes `ERR_*` → `YUKTI_ERR_*` (BREAKING).** yukti's

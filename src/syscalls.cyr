@@ -40,3 +40,27 @@ enum YkSyscalls {
 }
 # Stdlib aarch64 already defines: SYS_NEWFSTATAT = 79, SYS_PPOLL = 73.
 #endif
+
+# AGNOS has no ioctl / BSD-socket / statfs / poll surface. These constants
+# exist ONLY so the Linux-only enumerator modules (optical / storage /
+# network / device) COMPILE on the agnos target — those code paths are never
+# reached at runtime, because the sole agnos consumer (vani) drives only the
+# `yukti_audio_*` path, which has its own agnos branch (audio.cyr). agnos also
+# already defines SYS_LSEEK/STAT/UNLINK/RMDIR/MOUNT/MKDIR/UMOUNT in its stdlib
+# (do NOT redefine those). The stub numbers sit in a high, deliberately-invalid
+# band so an accidental call fails closed (unknown syscall → error) rather than
+# aliasing a real low-numbered agnos syscall (e.g. Linux ioctl=16 == agnos kill).
+#ifdef CYRIUS_TARGET_AGNOS
+enum YkSyscallsAgnos {
+    SYS_IOCTL = 9001;
+    SYS_SOCKET = 9002;
+    SYS_CONNECT = 9003;
+    SYS_BIND = 9004;
+    SYS_RECVFROM = 9005;
+    SYS_SETSOCKOPT = 9006;
+    SYS_PPOLL = 9007;
+    SYS_POLL = 9008;
+    SYS_STATFS = 9009;
+    SYS_NEWFSTATAT = 9010;
+}
+#endif

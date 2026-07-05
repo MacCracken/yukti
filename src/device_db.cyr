@@ -7,6 +7,14 @@
 #   devices       — known devices (by serial/vendor+model)
 #   mount_history — mount/unmount events with timestamps
 #   preferences   — per-device mount preferences (mount point, read-only, fs type)
+#
+# AGNOS: this whole module is gated OFF. It is backed entirely by `patra`
+# (a Linux-only SQLite-analog that pulls stdlib `sync`/`thread_local`), and
+# agnos has no persistent device-history store. device_db is a pure LEAF —
+# nothing else in yukti calls it — so excluding it costs the agnos build
+# nothing. The `patra` dep is `target = "linux"` in cyrius.cyml, and the
+# `lib/patra.cyr` include in lib.cyr is likewise agnos-gated.
+#ifndef CYRIUS_TARGET_AGNOS
 
 # ---------------------------------------------------------------------------
 # SQL string-literal escape
@@ -537,3 +545,5 @@ pub fn device_db_audio_last_seen(hw_id) {
     patra_result_free(rs);
     return ts;
 }
+
+#endif

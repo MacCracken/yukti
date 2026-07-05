@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "6.2.1"
+cyrius = "6.4.2"
 
 [build]
 entry = "src/main.cyr"
@@ -74,7 +74,14 @@ git = "https://github.com/MacCracken/sakshi.git"
 tag = "2.2.5"
 modules = ["dist/sakshi.cyr"]
 
+# patra backs device_db (the persistent device-history store) ONLY. It pulls
+# stdlib `sync`/`thread_local` (host threading), which the agnos target lacks —
+# and agnos has no device-history DB anyway. So patra is Linux-only; device_db.cyr
+# is #ifndef-gated off on agnos to match. Drop this override once cyrius re-bundles
+# patra >= 1.12.7.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.9.5"
+tag = "1.12.7"
 modules = ["dist/patra.cyr"]
+optional = true
+target = "linux"

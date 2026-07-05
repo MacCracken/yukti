@@ -21,7 +21,9 @@ include "lib/sakshi.cyr"
 include "lib/chrono.cyr"
 include "lib/args.cyr"
 include "lib/freelist.cyr"
-include "lib/patra.cyr"
+#ifndef CYRIUS_TARGET_AGNOS
+include "lib/patra.cyr"          # Linux-only — backs device_db (gated off on agnos)
+#endif
 
 # --- Yukti domain modules (dependency order) ---
 include "src/syscalls.cyr"

@@ -407,6 +407,22 @@ fn _audio_compute_hw_id(card, device, direction): i64 {
 # ---------------------------------------------------------------------------
 
 pub fn yukti_audio_devices() {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos: one sovereign HDA output device — there is no /dev/snd,
+    # /proc/asound, or /sys/class/sound to enumerate. Report a single
+    # playback endpoint (card 0, device 0) so vani's multi-device scan
+    # (audio_open_best / vani_open_playback) resolves the HDA output. The
+    # kernel HDA driver fixes the route (jack-detect); vani opens it via the
+    # `snd_*` #64-69 band. Self-contained — does NOT call the Linux-only
+    # /proc + sysfs helpers (_audio_load_drivers / _audio_compute_hw_id).
+    var results = vec_new();
+    var info = _audio_info_new(0, 0, 0, YUKTI_AUDIO_PLAYBACK,
+    str_from("AGNOS HDA Output"), str_from("agnos-hda"),
+    str_from("pci:agnos:04:00.6:dev0:p"),
+    str_from("/dev/snd/pcmC0D0p"), str_from("/sys/class/sound/card0"));
+    vec_push(results, info);
+    return results;
+    #else
     var results = vec_new();
 
     var entries = dir_list(str_from("/dev/snd"));
@@ -454,6 +470,7 @@ pub fn yukti_audio_devices() {
     }
 
     return results;
+    #endif
 }
 
 # ---------------------------------------------------------------------------

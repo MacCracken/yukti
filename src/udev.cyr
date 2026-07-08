@@ -682,7 +682,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
     #   struct sockaddr_nl { u16 family, u16 pad, u32 pid, u32 groups }
     var buf[8192];
     var src_addr[12];
-    var src_len[1];
+    var src_len[4];   # socklen_t out-param (was [1]; both round to 8B so benign, but [4] states intent)
     store32(&src_len, 12);
     var n = syscall(SYS_RECVFROM, fd, &buf, 8192, 0, &src_addr, &src_len);
     if (n <= 0) { return Ok(0); }

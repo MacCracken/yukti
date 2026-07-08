@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] — 2026-07-08
+
+### Fixed
+
+- **`udev.cyr` `src_len[1]` → `src_len[4]`.** The `recvfrom` `socklen_t` out-param was
+  declared as a 1-element local (`var src_len[1]`). `var x[N]` reserves N bytes rounded to
+  8, so the 4-byte write fits — benign — but it is the under-declared-slot idiom the
+  repo-wide v6.3.18 sweep removed everywhere else. Now `src_len[4]`, stating the 4-byte
+  socklen intent. No behavior change.
+
 ## [2.2.8] — 2026-07-04
 
 **AGNOS target support — yukti's audio path now builds + runs on agnos.** The

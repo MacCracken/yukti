@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "6.4.2"
+cyrius = "6.4.26"
 
 [build]
 entry = "src/main.cyr"

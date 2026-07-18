@@ -37,7 +37,7 @@ re-learning the layout.
 - **Tests**: 653 assertions, 3 fuzz harnesses, 45+ benchmarks
 - **Binary**: ~384 KB x86_64 static ELF, zero external dependencies
 - **Stable**: 2.2.1 — audio domain follow-on: `SUBSYSTEM=sound` events with `pcmC*D*` DEVPATH filter classify as `DC_AUDIO`; new `audio_devices` table + `device_db_record_audio_seen`/`_audio_known`/`_audio_last_seen`/`_audio_count` API key persistence by `hw_id` so re-plugging carries history forward. 2.2.0 — audio device discovery via new `src/audio.cyr` (enumerates ALSA PCM devices over `/dev/snd/` + `/proc/asound/` with PCI-BDF / USB-VID:PID anchored hw_ids; surfaces the typed descriptor adapter API for vani 0.3.x's `vani_open_yukti(desc, direction)`). `DC_AUDIO = 9` appended to DeviceClass. Fixed long-standing `_parse_uevent_key` bug in gpu.cyr (was returning whole uevent text instead of value). 2.1.4 — aarch64 *runtime* correct (33 raw-number `syscall(N, …)` sites migrated to stdlib wrappers / `SYS_*` constants; new `src/syscalls.cyr` adds arch-conditional definitions for socket-family + statfs / newfstatat / clock_gettime / ppoll where stdlib has gaps; `udev_monitor_poll` switched poll→ppoll for arch portability). 2.1.3 — aarch64 cross-build clean (30 SYS_OPEN/SYS_CLOSE/SYS_UNLINK sites migrated to stdlib wrappers; patra dep bumped 1.1.1 → 1.9.2 with the matching migration). Kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table).
-- **Toolchain**: Cyrius 5.7.48 (`cyrius.cyml: cyrius = "5.7.48"`)
+- **Toolchain**: Cyrius 6.4.66 (`cyrius.cyml: cyrius = "6.4.66"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel
 
@@ -55,9 +55,9 @@ re-learning the layout.
 
 - **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`,
   `hashmap`, `io`, `fs`, `tagged`, `process`, `fnptr`, `chrono`,
-  `args`, `freelist` (ships with Cyrius >= 5.7.48)
-- **sakshi** 2.0.0 — structured logging (first-party)
-- **patra** 1.9.2 — persistent device history (first-party)
+  `args`, `freelist` (ships with Cyrius >= 6.4.66)
+- **sakshi** 2.4.6 — structured logging (first-party)
+- **patra** 1.12.12 — persistent device history (first-party)
 
 No external deps. No FFI. No libc. All first-party, pinned in
 `cyrius.cyml` and SHA-locked in `cyrius.lock`.
@@ -257,7 +257,7 @@ unreliable) saves a lot of debug time.
 
 ## CI / Release
 
-- **Toolchain pin**: `cyrius = "5.7.48"` in `cyrius.cyml`. Release and CI
+- **Toolchain pin**: `cyrius = "6.4.66"` in `cyrius.cyml`. Release and CI
   both read from the manifest; no hardcoded versions in YAML
 - **Dead code elimination**: `cyrius build` already strips unreachable
   functions; the `dead:` report is informational

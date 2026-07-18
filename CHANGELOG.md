@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.10] — 2026-07-17
+
+**Toolchain + dependency refresh — no yukti source change.** cyrius pin
+`6.4.26` → `6.4.66`, sakshi `2.2.5` → `2.4.6`, patra `1.12.7` → `1.12.12`. The
+device-abstraction surface is untouched; every gate (build, lint, fmt, vet, 653
+tests, 3 fuzz harnesses, both dist bundles, `core_smoke`) is green on the new
+stack.
+
+### Changed
+
+- **cyrius pin `6.4.26` → `6.4.66`.** The installed wrapper had already drifted
+  to 6.4.66 while the manifest still pinned 6.4.26 — every build printed a
+  `toolchain drift` warning. The pin now matches the toolchain and the warning
+  is cleared.
+- **sakshi `2.2.5` → `2.4.6`.** Additive for yukti's usage: yukti calls only the
+  stable `sakshi_info` / `sakshi_warn` / `sakshi_span_enter` / `sakshi_span_exit`
+  surface, none of which changed across the 2.3.x/2.4.x line. The span between
+  versions is new-target / agnos-portability / toolchain-pin work
+  (`SK_OUT_ATOMIC_RING` lock-free ring in 2.3.0, 128-bit W3C trace-id in 2.4.4,
+  agnos `_sk_open` / clock fixes, pin catch-up to 6.4.49 in 2.4.6) — yukti
+  exercises none of it.
+- **patra `1.12.7` → `1.12.12`.** yukti calls only the stable `patra_open` /
+  `patra_exec` / `patra_query` / `patra_result_*` surface (unchanged). The
+  headline change is 1.12.12's migration of patra's five thread-local slots off
+  hardcoded indices onto cyrius's slot allocator (`thread_local_alloc`), which
+  **requires cyrius ≥ 6.4.65** — satisfied by the 6.4.66 pin above. 1.12.10 also
+  added standard `''` SQL-string escaping + `patra_quote_str` (device_db builds
+  its SQL via prepared-statement binds, so it was never exposed to the escaping
+  bug, but the fix is inherited for free).
+- **`cyrius.lock` re-resolved** under the new pin (39 deps, 2 commit-pinned):
+  sakshi → `bfc127f` (2.4.6), patra → `f67aef0` (1.12.12), plus the stdlib
+  leaf hashes re-stamped from the 6.4.66 stdlib snapshot.
+- **`[deps.patra]` comment refreshed** in `cyrius.cyml` to record the new
+  `thread_local_alloc` / cyrius ≥ 6.4.65 requirement.
+
+### Notes
+
+- **A pin bump needs a clean stdlib re-resolve, not just `cyrius deps`.** Bumping
+  the pin and re-running `cyrius deps` refreshed only the two git deps — the
+  cached stdlib modules in `lib/` were left at their 6.4.26-era snapshot, so
+  `lib/thread_local.cyr` still lacked `thread_local_alloc` and the build warned
+  `undefined function 'thread_local_alloc'` (patra 1.12.12's new call site). A
+  clean re-resolve (`rm -rf lib build && cyrius deps`, closeout gate #9) pulled
+  the 6.4.66 stdlib and cleared it. Worth remembering for the next toolchain bump.
+
 ## [2.2.9] — 2026-07-08
 
 ### Fixed

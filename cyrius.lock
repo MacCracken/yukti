@@ -1,4 +1,5 @@
 commit	bfc127f87489a483a6153f5e91194aed25d6a714	sakshi	https://github.com/MacCracken/sakshi.git	2.4.6
+commit	f67aef0cc74c39e092d1d647e2f79d2756f196c2	patra	https://github.com/MacCracken/patra.git	1.12.12
 d9f3b17ddbbe1bba48917c3a679807b01c39c4a1ce776efdbdfbb7a1680e86e4  lib/tagged.cyr
 bffba3143adaa5628e8bc086881dcb2e672351948d8c2569a23d73a749e98afd  lib/syscalls_macos.cyr
 1f37b1a26c04b67b76191282bde9f4a2b3129286afaa9671f603e89f95be1006  lib/mmap.cyr

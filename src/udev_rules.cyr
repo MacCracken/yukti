@@ -164,7 +164,7 @@ pub fn remove_rule(name, rules_dir_cstr) {
     var path = str_builder_build(sb);
 
     # SYS_UNLINK = 87
-    var r = sys_unlink(str_cstr(path));
+    var r = xunlink(str_cstr(path));
     if (r < 0) {
         var esb = str_builder_new();
         str_builder_add_cstr(esb, "failed to remove rule: ");

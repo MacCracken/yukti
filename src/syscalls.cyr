@@ -64,3 +64,36 @@ enum YkSyscallsAgnos {
     SYS_NEWFSTATAT = 9010;
 }
 #endif
+
+# ── mount bridge (yukti 2.3.0) ─────────────────────────────────────────────
+# `sys_mount` is the one Linux-only syscall whose AGNOS wrapper is not merely a
+# different arity — it is a 0-parameter NO-OP STUB that returns 0:
+#
+#     lib/syscalls_x86_64_agnos.cyr:  fn sys_mount(): i64 { return syscall(SYS_MOUNT); }
+#
+# So `sys_mount(src, tgt, fs, flags, data)` on agnos discarded all five arguments
+# and returned success. yukti read that 0 as "mounted" and returned
+# `Ok(mount_result_new(...))` for a mount that never happened — at three sites
+# (storage.cyr x2, network.cyr x1). It went unnoticed because an arity mismatch was
+# only a WARNING until cyrius 6.5.1 made it an error.
+#
+# This bridge keeps the Linux-only modules COMPILING on agnos — the same reason the
+# 9001+ stub numbers above exist — while making the call FAIL CLOSED there, which is
+# the stated philosophy of that block. Fabricating success is the one outcome that is
+# never acceptable: every caller downstream then believes it has a mounted filesystem.
+#
+# NOT "fixed" by giving agnos a real 5-arg sys_mount: that is an agnos-side kernel ABI
+# commitment, not yukti's call to make. If agnos later gains real mount support, delete
+# the agnos branch here and nothing else changes.
+var YK_ENOSYS = 38;   # ENOSYS — "function not implemented"
+
+# Mount `source` at `target`. POSIX passes through to the kernel; agnos fails closed
+# with -ENOSYS (see above). Callers already treat a negative return as errno.
+fn _yk_mount(source, target, fstype, flags, data): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_mount(source, target, fstype, flags, data);
+    #endif
+}

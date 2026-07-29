@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-07-29
+
+**yukti has never worked on the agnos target — six syscall ABI mismatches, one of
+them fabricating success.** Every one of these predates this release; cyrius 6.5.1
+escalated an argument-count mismatch from a *warning* to an error, and the six fell
+out of the first agnos build after that. `include "lib/yukti.cyr"` under
+`CYRIUS_TARGET_AGNOS=1` previously emitted six errors and no binary.
+
+### Fixed — `sys_mount` reported success for a mount that never happened
+
+agnos's wrapper is a **0-parameter no-op stub** that returns 0:
+
+```cyrius
+# lib/syscalls_x86_64_agnos.cyr
+fn sys_mount(): i64 { return syscall(SYS_MOUNT); }
+```
+
+yukti called it with five arguments at three sites (`storage.cyr` ×2,
+`network.cyr` ×1). All five were discarded, 0 came back, and `storage.cyr` read that
+as success — returning `Ok(mount_result_new(...))` for a filesystem that was never
+mounted, so every caller downstream believed it had a mount. That is the worst
+available failure mode, and it was reachable on agnos with no diagnostic.
+
+All three sites now route through **`_yk_mount`** (`src/syscalls.cyr`), which passes
+through to the kernel on POSIX and **fails closed with `-ENOSYS` on agnos**. This
+matches the stated philosophy of the `9001+` stub-number block directly above it:
+the Linux-only enumerator modules (optical / storage / network / device) exist on
+agnos so they **compile**, never so they run, and an accidental call must fail rather
+than alias something real. Callers already treat a negative return as an errno, so
+`map_errno_to_err` surfaces a genuine failure with no call-site changes.
+
+**Deliberately NOT "fixed" by giving agnos a real 5-argument `sys_mount`** — that is
+an agnos-side kernel ABI commitment and not yukti's to make. If agnos gains real
+mount support, delete the one `#ifdef` branch in `_yk_mount`; nothing else changes.
+
+### Fixed — three length-carrying wrappers called with the Linux shape
+
+agnos's raw `sys_*` wrappers take explicit `(ptr, len)` pairs because its kernel does
+not walk NUL-terminated strings at the syscall boundary. These three were called with
+the bare-pointer POSIX shape, so the length argument bound to garbage:
+
+| site | was | now |
+|---|---|---|
+| `src/device.cyr` | `sys_stat(path, &buf)` | `xstat(path, &buf)` |
+| `src/udev_rules.cyr` | `sys_unlink(str_cstr(path))` | `xunlink(str_cstr(path))` |
+| `src/storage.cyr` | `sys_rmdir(mount_point_cstr)` | `xrmdir(mount_point_cstr)` |
+
+All three now use the portable `lib/io.cyr` bridges, which carry the agnos length
+branch. **`xrmdir` did not previously exist** — it was added to cyrius's `lib/io.cyr`
+for this release (cyrius 6.5.2), mirroring `xunlink`; a consumer should never
+hand-roll an ABI bridge the stdlib is supposed to own.
+
+### Verification
+
+`src/lib.cyr` builds clean on **both** Linux and `CYRIUS_TARGET_AGNOS=1` (was: OK /
+6 errors). `tests/tcyr/yukti.tcyr` **653 passed, 0 failed** — unchanged, as expected:
+every fix is either an agnos-only branch or a same-semantics swap to a portable
+wrapper on the Linux path.
+
+### Changed
+
+- **Minor, not patch.** No API is added or removed and no Linux behaviour changes,
+  but agnos behaviour does change: three mount entry points now return a real error
+  where they previously returned a fabricated `Ok`. A consumer on agnos that was
+  (incorrectly) relying on that success will now see the failure.
+- Toolchain pin → cyrius **6.5.2** (the release that ships `xrmdir`).
+
 ## [2.2.10] — 2026-07-17
 
 **Toolchain + dependency refresh — no yukti source change.** cyrius pin

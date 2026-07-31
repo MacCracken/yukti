@@ -43,6 +43,10 @@ jobs:
           echo "$CYRIUS_VERSION" > "$HOME/.cyrius/current"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+          # Export the resolved version too — each `run:` block is a separate
+          # shell, so without this $CYRIUS_VERSION is EMPTY in later steps and
+          # the aarch64-missing error below renders as "from Cyrius  (looked…)".
+          echo "CYRIUS_VERSION=$CYRIUS_VERSION" >> $GITHUB_ENV
 
       - name: Resolve dependencies
         # `--no-lock` is LOAD-BEARING — do not remove it.

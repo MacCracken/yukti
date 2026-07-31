@@ -59,8 +59,13 @@ echo "=== yukti aarch64 retest ==="
 echo "  target: $SSH_TARGET"
 
 # 1. Prerequisites
-if [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
-    echo "  FAIL: ~/.cyrius/bin/cc5_aarch64 not installed"
+# The aarch64 backend was renamed cc5_aarch64 -> cycc_aarch64 in Cyrius 6.0.
+# Accept either name, matching the same dual-name probe CI uses (see the
+# "Cross-build aarch64" step in .github/workflows/ci.yml). Checking only the
+# pre-6.0 name made this script exit 2 on every 6.x toolchain.
+if [ ! -x "$HOME/.cyrius/bin/cycc_aarch64" ] && [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+    echo "  FAIL: no aarch64 backend in ~/.cyrius/bin"
+    echo "         (looked for cycc_aarch64 (Cyrius 6.0+) and cc5_aarch64 (pre-6.0))"
     echo "  Install it (or copy from a cyrius source build) then retry."
     exit 2
 fi

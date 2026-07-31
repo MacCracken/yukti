@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-07-30
+
+Continues the 2.3.0 agnos ABI sweep with the two sites it missed, and repairs a
+toolchain-pin drift that had silently disarmed the dependency lock gate.
+
+### Fixed — `sys_mkdir` passed the POSIX *mode* where agnos expects *pathlen*
+
+The fourth instance of the bug class 2.3.0 swept up, and the one it could not see.
+The other three had **mismatched arity**, which cyrius 6.5.1 turned into a hard
+error. This one does not:
+
+```
+lib/syscalls_x86_64_agnos.cyr:   fn sys_mkdir(path, pathlen)
+lib/syscalls_x86_64_linux.cyr:   fn sys_mkdir(path, mode)
+lib/syscalls_aarch64_linux.cyr:  fn sys_mkdir(path, mode)    # via mkdirat
+```
+
+Both are 2-arity, so `sys_mkdir(path, 493)` (0755) compiled clean on every target
+while meaning something different on each. On agnos the `493` bound to `pathlen`,
+telling the kernel to read 493 bytes from a path string far shorter than that — an
+over-read past the NUL.
+
+Both sites (`storage.cyr`, `network.cyr`) now route through **`_yk_mkdir`**
+(`src/syscalls.cyr`). Unlike `_yk_mount`, this one does **not** fail closed: agnos's
+`sys_mkdir` is a real syscall rather than a no-op stub, so the bridge computes the
+length and calls through correctly. That mirrors the stdlib's own `xrmdir`
+(`lib/io.cyr`), which resolves the identical split for the sibling rmdir call and
+which `storage.cyr` already used. `mode` is necessarily dropped on agnos — its mkdir
+ABI carries no mode argument. **No behavior change on Linux or aarch64.**
+
+### Fixed — `sys_umount2` does not exist on agnos at all
+
+`_yk_mount`'s symmetric counterpart, missed by the same sweep. This is not an ABI
+mismatch but an outright absence: `sys_umount2` is defined only in
+`lib/syscalls_linux_common.cyr`, so an agnos build of `storage.cyr` emitted
+`warning: undefined function 'sys_umount2'` and produced a binary with an
+unresolved call in the unmount path. 2.3.0's claim that the agnos build was clean
+was therefore not quite true.
+
+Routed through **`_yk_umount2`**, which fails closed with `-ENOSYS` on agnos. Note
+what it deliberately does *not* do: agnos ships `fn sys_umount(): i64` — a 0-arity
+stub returning **0**. Routing there would have re-introduced the exact defect
+`_yk_mount` exists to prevent, with `storage_unmount` reading that 0 as success and
+returning `Ok(0)` for a filesystem still mounted.
+
+Verified: `CYRIUS_TARGET_AGNOS=1` compile of the full `src/lib.cyr` chain now
+reports **zero undefined functions** (was 1).
+
 ### Fixed — `cyrius.lock` was frozen three minor series behind the pin
 
 CI failed `cyrius deps --verify` with 5 hash mismatches
@@ -60,6 +108,20 @@ Comment rewritten in `.github/workflows/ci.yml` and `.github/workflows/release.y
 to record why the flag stays. No behavior change — both workflows already passed
 `--no-lock`.
 
+### Fixed — `scripts/retest-aarch64.sh` could not run on any 6.x toolchain
+
+The prerequisite check hard-required `~/.cyrius/bin/cc5_aarch64`. That binary was
+renamed **`cycc_aarch64` in Cyrius 6.0**, so the script hit `exit 2` before doing any
+work on every toolchain since. CI already probes both names; the script now uses the
+same dual-name check.
+
+### Fixed — `$CYRIUS_VERSION` was empty in CI's aarch64 error message
+
+`CYRIUS_VERSION` is assigned inside the install step's shell, but only `CYRIUS_HOME`
+was exported to `$GITHUB_ENV`. Each `run:` block is a separate shell, so the
+aarch64-backend-missing error rendered as `aarch64 backend missing from Cyrius
+(looked for …)` with no version. Now exported in both workflows.
+
 ### Changed
 
 - `CLAUDE.md`, `cyrius.cyml` comments, and `docs/development/cyrius-usage.md`
@@ -68,6 +130,13 @@ to record why the flag stays. No behavior change — both workflows already pass
   `thread_local` — declared in `[deps].stdlib` since 2.2.x as patra 1.12.12's
   transitive requirements, but never added to the prose. Now 18 entries in all
   three places.
+
+### Tests
+
+- **653 → 658 assertions.** New `test_yk_mkdir_creates_directory` pins the POSIX
+  side of the `_yk_mkdir` bridge: mode 0755 creates a real directory, and a repeat
+  call returns `-EEXIST` rather than succeeding. The agnos branch is not reachable
+  from a Linux test run.
 
 ## [2.3.0] — 2026-07-29
 

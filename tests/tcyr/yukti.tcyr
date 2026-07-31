@@ -630,6 +630,24 @@ fn test_validate_mount_point_trailing_slash() {
     return 0;
 }
 
+# 2.3.1 — _yk_mkdir bridges the agnos (path, pathlen) vs POSIX (path, mode)
+# split in sys_mkdir. Both are 2-arity, so the old direct `sys_mkdir(path, 493)`
+# call compiled clean on both targets while meaning something different on each.
+# This pins the POSIX side: mode 0755 must still create a real directory.
+# The agnos branch cannot be exercised from a Linux test run.
+fn test_yk_mkdir_creates_directory() {
+    var p = "/tmp/yukti_test_mkdir_bridge";
+    xrmdir(p);   # leftover from an aborted run; failure here is fine
+    assert_eq(is_dir(str_from(p)), 0, "mkdir precondition: absent");
+    assert_eq(_yk_mkdir(p, 493), 0, "_yk_mkdir returns 0");
+    assert_eq(is_dir(str_from(p)), 1, "_yk_mkdir created the directory");
+    # Second call on an existing path must report EEXIST (-17), not succeed.
+    assert_eq(_yk_mkdir(p, 493), 0 - 17, "_yk_mkdir on existing path = -EEXIST");
+    xrmdir(p);
+    assert_eq(is_dir(str_from(p)), 0, "cleanup removed the directory");
+    return 0;
+}
+
 # Audit 2026-04-19 HIGH-1 — SQL escape helper
 fn test_sql_escape() {
     assert(str_eq_cstr(_sql_escape_str_pub(str_from("abc")), "abc"), "no metachars");
@@ -1430,6 +1448,7 @@ fn main() {
     test_validate_mount_point_blacklist_extended();
     test_validate_mount_point_rejects_traversal();
     test_validate_mount_point_trailing_slash();
+    test_yk_mkdir_creates_directory();
     test_unescape_mount_path();
     test_sql_escape();
     test_udevadm_sysfs_path_gate();

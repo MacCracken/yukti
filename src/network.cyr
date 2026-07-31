@@ -173,8 +173,9 @@ pub fn network_mount(share, mount_point_cstr) {
         return val_r;
     }
 
-    # Create mount point directory
-    sys_mkdir(mount_point_cstr, 493);
+    # Create mount point directory, mode 0755. Routed through _yk_mkdir:
+    # agnos's sys_mkdir takes (path, pathlen), not (path, mode). See src/syscalls.cyr.
+    _yk_mkdir(mount_point_cstr, 493);
 
     # Build options
     var options = 0;

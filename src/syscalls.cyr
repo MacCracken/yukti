@@ -99,3 +99,63 @@ fn _yk_mount(source, target, fstype, flags, data): i64 {
     return sys_mount(source, target, fstype, flags, data);
     #endif
 }
+
+# ---------------------------------------------------------------------------
+# umount bridge (yukti 2.3.1)
+# ---------------------------------------------------------------------------
+# The symmetric counterpart to `_yk_mount`, missed by the 2.3.0 sweep. Unlike the
+# cases above this is not an ABI *mismatch* — `sys_umount2` does not exist on
+# agnos AT ALL. It is defined only in lib/syscalls_linux_common.cyr, so an agnos
+# build of storage.cyr emitted `warning: undefined function 'sys_umount2'` and
+# produced a binary with an unresolved call in the unmount path.
+#
+# Note what agnos DOES offer, and why this bridge does not use it:
+#
+#     lib/syscalls_x86_64_agnos.cyr:  fn sys_umount(): i64 { ... }   # 0-arity STUB, returns 0
+#
+# Routing to that would re-introduce the exact defect `_yk_mount` exists to
+# prevent — storage_unmount reads a 0 as "unmounted" and returns Ok(0) for a
+# filesystem that is still mounted. Fabricating success is never acceptable, so
+# agnos fails closed with -ENOSYS here, matching the mount side.
+fn _yk_umount2(target, flags): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_umount2(target, flags);
+    #endif
+}
+
+# ---------------------------------------------------------------------------
+# mkdir bridge (yukti 2.3.1)
+# ---------------------------------------------------------------------------
+# `sys_mkdir` is LENGTH-carrying on agnos and MODE-carrying on POSIX, at the
+# SAME 2-arity — so the mismatch produces no compiler diagnostic. That is how it
+# survived the 2.3.0 sweep of this exact bug class, which only caught the sites
+# where the arity also differed:
+#
+#     lib/syscalls_x86_64_agnos.cyr:   fn sys_mkdir(path, pathlen)
+#     lib/syscalls_x86_64_linux.cyr:   fn sys_mkdir(path, mode)
+#     lib/syscalls_aarch64_linux.cyr:  fn sys_mkdir(path, mode)   # via mkdirat
+#
+# yukti called `sys_mkdir(path, 493)` (0755) at two sites (storage.cyr and
+# network.cyr). On agnos the 493 bound to `pathlen`, so the kernel was told
+# to read 493 bytes from a path whose string is far shorter — an over-read past
+# the NUL into whatever trailing bytes followed the buffer.
+#
+# Unlike `sys_mount` above, agnos's `sys_mkdir` is a REAL syscall, not a no-op
+# stub, so this bridge calls THROUGH correctly instead of failing closed. That
+# mirrors the stdlib's own `xrmdir` (lib/io.cyr), which resolves the identical
+# length-vs-pointer split for the sibling rmdir call, and which storage.cyr
+# already uses.
+#
+# `mode` is necessarily dropped on agnos: its mkdir ABI carries no mode
+# argument. Callers wanting a specific mode there must chmod separately.
+fn _yk_mkdir(path, mode): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return sys_mkdir(path, strlen(path));
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_mkdir(path, mode);
+    #endif
+}

@@ -553,8 +553,9 @@ pub fn storage_mount(dev_path_cstr, options) {
 
     sakshi_span_enter("mount", 5);
 
-    # Create mount point directory: SYS_MKDIR = 83, mode 0755.
-    sys_mkdir(mount_cstr, 493);
+    # Create mount point directory, mode 0755. Routed through _yk_mkdir:
+    # agnos's sys_mkdir takes (path, pathlen), not (path, mode). See src/syscalls.cyr.
+    _yk_mkdir(mount_cstr, 493);
 
     # TOCTOU guard (audit finding MED-2, CVE-2026-27456 class):
     # between validate_mount_point and mount(2) an attacker with write
@@ -629,8 +630,9 @@ pub fn storage_mount(dev_path_cstr, options) {
 pub fn storage_unmount(mount_point_cstr) {
     sakshi_span_enter("unmount", 7);
 
-    # SYS_UMOUNT2 = 166, flags = 0
-    var r = sys_umount2(mount_point_cstr, 0);
+    # flags = 0. Routed through _yk_umount2: sys_umount2 does not exist on
+    # agnos, and its 0-arity sys_umount stub would fake success. See src/syscalls.cyr.
+    var r = _yk_umount2(mount_point_cstr, 0);
     if (r < 0) {
         var errno = 0 - r;
         sakshi_span_exit();
@@ -649,8 +651,8 @@ pub fn storage_unmount(mount_point_cstr) {
 
     sakshi_span_exit();
 
-    # Clean up mount directory if under /run/media/
-    # SYS_RMDIR = 84
+    # Clean up mount directory if under /run/media/. xrmdir (lib/io.cyr) handles
+    # the agnos length-carrying rmdir ABI; do not call sys_rmdir directly.
     var mp_s = str_from(mount_point_cstr);
     if (str_starts_with(mp_s, "/run/media/")) {
         xrmdir(mount_point_cstr);

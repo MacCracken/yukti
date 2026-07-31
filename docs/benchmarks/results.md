@@ -6,113 +6,107 @@
 
 | | Run 1 | Run 2 | Run 3 | 
 |---|---|---|---|
-| **Date** | `2026-03-23T00:52:26Z` | `2026-03-23T01:22:55Z` | `2026-03-23T01:54:22Z` | 
-| **Commit** | `bbc793a` | `bbc793a` | `0145265` | 
-| **Toolchain** | `rustc 1.93.0 (254b59607 2026-01-19)` | `rustc 1.93.0 (254b59607 2026-01-19)` | `rustc 1.93.0 (254b59607 2026-01-19)` | 
+| **Date** | `2026-07-31T02:40:27Z` | `2026-07-31T02:41:02Z` | `2026-07-31T02:41:31Z` | 
+| **Commit** | `830a5fe` | `830a5fe` | `830a5fe` | 
+| **Toolchain** | `cyrius` | `cyrius` | `cyrius` | 
 
 ## Results
 
 ### device_id
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 11.53 ns | 11.53 ns | 10.12 ns | -12.2% |
-| display | 18.25 ns | 18.25 ns | 17.23 ns | -5.6% |
-| from_str | — | — | 11.06 ns | — |
+| create | 63.00 ns | 63.00 ns | 63.00 ns | — |
+| eq | 146.00 ns | 146.00 ns | 146.00 ns | — |
 
 ### device_info
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 87.64 ns | 87.64 ns | 81.73 ns | -6.7% |
-| display_name_label | 2.07 ns | 2.07 ns | 1.96 ns | -5.1% |
-| display_name_fallback | 26.92 ns | 26.92 ns | 25.05 ns | -7.0% |
-| size_display_zero | 1.85 ns | 1.85 ns | 1.98 ns | +7.0% |
-| size_display_gb | 166.50 ns | 166.50 ns | 166.72 ns | +0.1% |
-| has_capability_hit | 551.00 ps | 551.00 ps | 534.70 ps | -3.0% |
-| has_capability_miss | 547.80 ps | 547.80 ps | 538.60 ps | -1.7% |
-| is_removable | 1.80 ns | 1.80 ns | 1.81 ns | +0.7% |
-| is_mounted | 1.04 ns | 1.04 ns | 1.01 ns | -2.1% |
+| create | 204.00 ns | 204.00 ns | 204.00 ns | — |
+| display_name_label | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| display_name_fallback | 198.00 ns | 198.00 ns | 198.00 ns | — |
+| size_display_zero | 298.00 ns | 298.00 ns | 298.00 ns | — |
+| size_display_gb | 181.00 ns | 181.00 ns | 181.00 ns | — |
+| has_cap_hit | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| has_cap_miss | 9.00 ns | 9.00 ns | 9.00 ns | — |
+| is_removable | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| is_mounted | 10.00 ns | 10.00 ns | 10.00 ns | — |
 
 ### capabilities
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| from_slice_5 | 2.07 ns | 2.07 ns | 1.94 ns | -6.4% |
-| to_vec_5 | 18.05 ns | 18.05 ns | 18.24 ns | +1.1% |
-| contains_check | 524.40 ps | 524.40 ps | 517.70 ps | -1.3% |
-| bitwise_or_all | 503.50 ps | 503.50 ps | 499.60 ps | -0.8% |
+| contains_check | 6.00 ns | 6.00 ns | 6.00 ns | — |
+| bitwise_or_all | 6.00 ns | 6.00 ns | 6.00 ns | — |
 
 ### device_event
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 84.12 ns | 84.12 ns | 85.39 ns | +1.5% |
-| is_attach | 532.60 ps | 532.60 ps | 535.90 ps | +0.6% |
-| is_removable | 557.40 ps | 557.40 ps | 554.70 ps | -0.5% |
+| create | 1.57 µs | 1.57 µs | 1.57 µs | — |
+| is_attach | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| is_removable | 8.00 ns | 8.00 ns | 8.00 ns | — |
 
 ### event_collector
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| push_100 | 8.38 µs | 8.38 µs | 7.78 µs | -7.1% |
-
-### serialization
-
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
-|-----------|------|------|------|------|
-| serialize_device_info | 711.83 ns | 711.83 ns | 693.42 ns | -2.6% |
-| deserialize_device_info | 981.70 ns | 981.70 ns | 973.15 ns | -0.9% |
-| serialize_event | 370.41 ns | 370.41 ns | 389.37 ns | +5.1% |
-| deserialize_event | 448.63 ns | 448.63 ns | 455.49 ns | +1.5% |
+| push_100 | 2.40 µs | 2.40 µs | 2.40 µs | — |
 
 ### storage
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| filesystem_parse | 2.75 ns | 2.75 ns | 3.43 ns | +24.8% |
-| filesystem_parse_case | 2.77 ns | 2.77 ns | 3.49 ns | +25.9% |
-| filesystem_parse_unknown | 15.55 ns | 15.55 ns | 15.74 ns | +1.2% |
-| validate_mount_point_ok | 365.06 ns | 365.06 ns | 379.71 ns | +4.0% |
-| validate_mount_point_forbidden | 143.86 ns | 143.86 ns | 149.98 ns | +4.3% |
-| validate_mount_point_deep | 387.77 ns | 387.77 ns | 399.65 ns | +3.1% |
-| default_mount_point | 53.14 ns | 53.14 ns | 51.22 ns | -3.6% |
-| mount_options_default | 26.11 ns | 26.11 ns | 29.08 ns | +11.4% |
-| mount_options_builder | — | — | 117.22 ns | — |
-| filesystem_parse_f2fs | — | — | 9.01 ns | — |
-| filesystem_parse_nfs | — | — | 4.43 ns | — |
+| filesystem_parse | 46.00 ns | 46.00 ns | 46.00 ns | — |
+| filesystem_parse_case | 42.00 ns | 42.00 ns | 42.00 ns | — |
+| filesystem_parse_unknown | 571.00 ns | 571.00 ns | 571.00 ns | — |
+| validate_mount_ok | 357.00 ns | 357.00 ns | 357.00 ns | — |
+| validate_mount_forbidden | 530.00 ns | 530.00 ns | 530.00 ns | — |
+| validate_mount_deep | 417.00 ns | 417.00 ns | 417.00 ns | — |
+| default_mount_point | 317.00 ns | 317.00 ns | 317.00 ns | — |
+| mount_options_create | 74.00 ns | 74.00 ns | 74.00 ns | — |
+| find_mount_in | 3.44 µs | 3.44 µs | 3.44 µs | — |
+| find_mount_in_miss | 5.96 µs | 5.96 µs | 5.96 µs | — |
+| unescape_mount_path | 387.00 ns | 387.00 ns | 387.00 ns | — |
 
 ### optical
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| detect_disc_type_cd | 2.34 ns | 2.34 ns | 2.01 ns | -14.1% |
-| detect_disc_type_dvd | 3.79 ns | 3.79 ns | 3.83 ns | +1.1% |
-| detect_disc_type_bluray | 3.07 ns | 3.07 ns | 2.75 ns | -10.2% |
-| detect_disc_type_unknown | 3.56 ns | 3.56 ns | 3.85 ns | +8.3% |
-| toc_audio_count | 2.28 ns | 2.28 ns | 2.25 ns | -1.1% |
-| toc_audio_duration | 2.98 ns | 2.98 ns | 3.18 ns | +6.7% |
-| is_dvd_video | — | — | 4.29 µs | — |
+| detect_disc_type_cd | 36.00 ns | 36.00 ns | 36.00 ns | — |
+| detect_disc_type_dvd | 165.00 ns | 165.00 ns | 165.00 ns | — |
+| detect_disc_type_bluray | 462.00 ns | 462.00 ns | 462.00 ns | — |
+| detect_disc_type_unknown | 938.00 ns | 938.00 ns | 938.00 ns | — |
+| toc_audio_count | 30.00 ns | 30.00 ns | 30.00 ns | — |
+| toc_audio_duration | 35.00 ns | 35.00 ns | 35.00 ns | — |
 
 ### device_queries
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| query_permissions | — | — | 1.23 µs | — |
-| query_device_health_miss | — | — | 6.73 µs | — |
+| query_permissions | 965.00 ns | 965.00 ns | 965.00 ns | — |
+| query_health_miss | 4.60 µs | 4.60 µs | 4.60 µs | — |
 
 ### udev
 
-| Benchmark | `bbc793a` | `bbc793a` | `0145265` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
 |-----------|------|------|------|------|
-| classify_usb | 15.94 ns | 15.94 ns | 17.49 ns | +9.7% |
-| classify_optical | 27.65 ns | 27.65 ns | 30.82 ns | +11.5% |
-| classify_dm | 12.32 ns | 12.32 ns | 13.15 ns | +6.8% |
-| extract_capabilities_usb | 50.28 ns | 50.28 ns | 53.87 ns | +7.1% |
-| extract_capabilities_optical | 94.20 ns | 94.20 ns | 103.67 ns | +10.1% |
-| classify_and_extract_usb | 66.58 ns | 66.58 ns | 69.94 ns | +5.0% |
-| device_info_from_udev | 746.20 ns | 746.20 ns | 828.28 ns | +11.0% |
-| device_info_from_udev_optical | 562.93 ns | 562.93 ns | 637.30 ns | +13.2% |
+| classify_usb | 176.00 ns | 176.00 ns | 176.00 ns | — |
+| classify_optical | 267.00 ns | 267.00 ns | 267.00 ns | — |
+| classify_dm | 436.00 ns | 436.00 ns | 436.00 ns | — |
+| extract_caps_usb | 597.00 ns | 597.00 ns | 597.00 ns | — |
+| extract_caps_optical | 471.00 ns | 471.00 ns | 471.00 ns | — |
+| classify_and_extract | 782.00 ns | 782.00 ns | 782.00 ns | — |
+| device_info_from_udev | 2.44 µs | 2.44 µs | 2.44 µs | — |
+| device_info_from_udev_opt | 1.81 µs | 1.81 µs | 1.81 µs | — |
+| parse_uevent | 1.54 µs | 1.54 µs | 1.54 µs | — |
+
+### serialization
+
+| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+|-----------|------|------|------|------|
+| device_info_json | 1.94 µs | 1.94 µs | 1.94 µs | — |
 
 ---
 

@@ -4,7 +4,7 @@
 # with kind, detail string, and optional context string.
 
 # ---------------------------------------------------------------------------
-# Error kind enum — 15 variants matching Rust YuktiError
+# Error kind enum — 16 variants
 # ---------------------------------------------------------------------------
 
 enum YuktiErrorKind {

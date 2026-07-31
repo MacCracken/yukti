@@ -1,4 +1,4 @@
-# Threat Model — Yukti (Cyrius era, 2.1.0)
+# Threat Model — Yukti (Cyrius era, 2.3.1)
 
 Yukti is a device-abstraction library. It reads kernel surfaces
 (sysfs, `/proc/mounts`, netlink uevents, CDROM ioctls, raw block
@@ -92,10 +92,25 @@ compiler-tracked widths. There is no pointer arithmetic that the
 compiler can't see. Yukti adds no FFI and no libc. The trust
 surfaces that matter:
 
-1. **Raw syscalls** — every `syscall(N, …)` has its return checked
-   at the call site; destructive syscalls (mount 165, umount2 166,
-   ioctl 16, socket 41, execve 59, write 1 to sysfs) are reviewed
-   individually. Arity warnings from the compiler are errors.
+1. **Raw syscalls** — every syscall whose result is *actionable* has its
+   return checked at the call site, and destructive syscalls (mount,
+   umount2, ioctl, socket, execve, write to sysfs) are reviewed
+   individually. Returns are deliberately discarded in four places, none
+   of which gate a security decision: `sys_close` on a descriptor about
+   to go out of scope (26 sites), `sys_write`/`sys_exit` on stdout and
+   stderr in `main.cyr`, `_yk_mkdir`/`xrmdir` on mount points where
+   `EEXIST`/`ENOENT` is the expected case, and the best-effort
+   `SO_RCVBUF` hint at `udev.cyr:646`. The three file-descriptor writes
+   that *do* discard a return (`udev_rules.cyr:147-148`,
+   `storage.cyr:773`) are a known gap, tracked for the 2.3.2 syscall
+   review — a short write there would be silent.
+
+   Syscall numbers are never inlined in `src/` — arch-conditional
+   `SYS_*` constants live in `src/syscalls.cyr`, and mount / umount2 /
+   mkdir route through the `_yk_*` bridges there. Arity warnings from
+   the compiler are errors. Note this holds for `src/` only: tests,
+   fuzz harnesses, benchmarks and `programs/` still carry 40 raw
+   numeric sites, which is what 2.3.2 addresses.
 2. **Struct layout** — `alloc(N)` + `store64` with named offset
    constants. Offsets are declared as enum values per-module,
    not reused across modules.
@@ -124,11 +139,11 @@ surfaces that matter:
   link surface.
 - `cyrius.lock` records SHA-256 hashes of every resolved
   `lib/*.cyr`. CI runs `cyrius deps --verify` on every build.
-- First-party deps only — `sakshi 2.0.0` (logging), `patra 1.1.1`
+- First-party deps only — `sakshi 2.4.6` (logging), `patra 1.12.12`
   (embedded store). Both share the Yukti threat model and are
   audited on the same cadence.
 - Cyrius stdlib (`alloc`, `str`, `vec`, `hashmap`, `io`, `fs`,
-  `process`, etc.) ships with the toolchain release (5.5.11) and
+  `process`, etc.) ships with the toolchain release (6.5.3) and
   is SHA-pinned by the toolchain installer, not by yukti.
 
 ## Audit Cadence

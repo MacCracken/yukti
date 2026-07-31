@@ -16,6 +16,17 @@
 # macOS/Windows (a `var` syscall NUMBER does not trigger the macho/PE
 # reroute — cyrius issue 2026-06-16-var-syscall-number-defeats-macho-pe-reroute).
 
+# The `#ifndef CYRIUS_TARGET_AGNOS` is load-bearing, not belt-and-braces:
+# agnos IS an x86_64 target, so cycc defines CYRIUS_ARCH_X86 *and*
+# CYRIUS_TARGET_AGNOS on an agnos build. Without this guard, this block and the
+# YkSyscallsAgnos block below both emit, redefining 8 names (SYS_SOCKET,
+# SYS_CONNECT, SYS_BIND, SYS_RECVFROM, SYS_SETSOCKOPT, SYS_PPOLL, SYS_STATFS,
+# SYS_NEWFSTATAT) with conflicting values. cyrius resolves that as "last
+# definition wins", so the fail-closed 9001+ stubs won only because they happen
+# to sit textually lower in this file — reordering the two blocks would have
+# silently substituted real Linux syscall numbers into agnos builds, which is
+# precisely what the stub band exists to prevent. Guard it; don't trust order.
+#ifndef CYRIUS_TARGET_AGNOS
 #ifdef CYRIUS_ARCH_X86
 enum YkSyscalls {
     SYS_SOCKET = 41;
@@ -28,6 +39,7 @@ enum YkSyscalls {
     SYS_NEWFSTATAT = 262;
 }
 #endif
+#endif
 
 #ifdef CYRIUS_ARCH_AARCH64
 enum YkSyscalls {
@@ -38,7 +50,9 @@ enum YkSyscalls {
     SYS_SETSOCKOPT = 208;
     SYS_STATFS = 43;
 }
-# Stdlib aarch64 already defines: SYS_NEWFSTATAT = 79, SYS_PPOLL = 73.
+# Stdlib aarch64 already defines SYS_PPOLL = 73 and SYS_NEWFSTATAT = 262 — the
+# latter is the x86 number on purpose: cyrius's ESYSXLAT renumbers 262 → 79 at
+# emit time (identical arg layouts, collision-free). Do not redefine either.
 #endif
 
 # AGNOS has no ioctl / BSD-socket / statfs / poll surface. These constants

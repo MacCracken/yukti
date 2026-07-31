@@ -4,20 +4,37 @@
 
 ```
 yukti (Cyrius)
+├── syscalls.cyr    — Arch-conditional SYS_* constants + shims for socket family
+│                     and statfs/newfstatat, agnos mount/umount2/mkdir bridges
 ├── error.cyr       — 16 error kinds, heap-allocated error structs, errno mapping
-├── device.cyr      — DeviceInfo (168 bytes, 21 fields), DeviceId, DeviceClass (8),
-│                     DeviceCapabilities (bitflags), DeviceHealth, query_permissions
+├── core.cyr        — Kernel-safe types: DeviceClass (10), DeviceState (6),
+│                     DeviceCapabilities (bitflags), DeviceInfo (168 bytes,
+│                     21 fields) and DeviceHealth layouts, accessors, predicates
+├── pci.cyr         — Kernel-safe PCI class/subclass + vendor/device lookup
+│                     tables, pure predicates (storage, nvme, sata, gpu, network)
+├── device.cyr      — Userland constructors and serializers, DeviceId,
+│                     query_permissions (stat), query_device_health (sysfs)
 ├── event.cyr       — DeviceEvent, DeviceEventKind (6), EventCollector,
 │                     function pointer listener dispatch
 ├── storage.cyr     — Filesystem (17 types), mount/unmount/eject via syscalls,
 │                     /proc/mounts parsing with octal unescape
-├── optical.cyr     — DiscType (10), TrayState, DiscToc, tray control via ioctl,
+├── optical.cyr     — DiscType (15), TrayState, DiscToc, tray control via ioctl,
 │                     TOC reading, disc type detection
 ├── udev.cyr        — UdevEvent, UdevMonitor (netlink socket), device classification,
 │                     sysfs enumeration, uevent parsing, partition discovery
 ├── linux.cyr       — LinuxDeviceManager (hashmap cache, listener dispatch,
 │                     monitor lifecycle, mount/unmount/eject delegation)
 ├── udev_rules.cyr  — Rule rendering/validation, udevadm integration
+├── partition.cyr   — MBR + GPT table reading, EFI System Partition detection,
+│                     boot flag queries
+├── device_db.cyr   — Persistent device history via patra (devices, mount_history,
+│                     preferences, audio_devices tables) — gated off on agnos
+├── network.cyr     — SMB/CIFS and NFS mount helpers, share detection via
+│                     /proc/mounts and probing
+├── gpu.cyr         — GPU discovery via /sys/class/drm/, GpuInfo (64 bytes),
+│                     vendor/device/driver identification
+├── audio.cyr       — ALSA PCM enumeration via /dev/snd/ + /proc/asound/,
+│                     AudioDeviceInfo (72 bytes), vani descriptor adapter
 ├── lib.cyr         — Include chain (library entry point)
 └── main.cyr        — CLI device enumeration demo
 ```
@@ -25,7 +42,8 @@ yukti (Cyrius)
 ## Design Principles
 
 1. **Zero dependencies** — all operations via direct Linux syscalls
-2. **Bump allocation** — `alloc()` for all heap data, no free list
+2. **Bump + freelist allocation** — `alloc()` for long-lived data,
+   `fl_alloc()`/`fl_free()` for DeviceEvent / UdevEvent lifetimes
 3. **Manual struct layout** — fixed offsets, `store64`/`load64` accessors
 4. **Enums as constants** — zero gvar_toks cost, compile-time values
 5. **Function pointers** — replace trait objects for polymorphic dispatch
@@ -45,7 +63,7 @@ yukti (Cyrius)
 
 ### Hotplug Monitoring
 ```
-AF_NETLINK socket → poll() → recv() → parse_uevent()
+AF_NETLINK socket → ppoll() → recv() → parse_uevent()
   → UdevEvent → udev_event_to_device_event() → DeviceEvent
   → dispatch to listener function pointers
 ```
@@ -59,7 +77,7 @@ validate_mount_point() → mkdir(83) → mount(165, source, target, fstype, flag
 
 ## Struct Layouts
 
-### DeviceInfo (168 bytes)
+### DeviceInfo (168 bytes) — `src/core.cyr`
 ```
  0: id              8: dev_path        16: sys_path
 24: class           32: state           40: label
@@ -70,14 +88,14 @@ validate_mount_point() → mkdir(83) → mount(165, source, target, fstype, flag
 144: usb_product_id 152: partition_table 160: properties
 ```
 
-### DeviceEvent (56 bytes)
+### DeviceEvent (56 bytes) — `src/event.cyr`
 ```
  0: device_id       8: device_class    16: kind
 24: dev_path        32: timestamp       40: extra
 48: device_info
 ```
 
-### UdevEvent (48 bytes)
+### UdevEvent (48 bytes) — `src/udev.cyr`
 ```
  0: action           8: sys_path        16: dev_path
 24: subsystem       32: dev_type        40: properties
@@ -92,7 +110,7 @@ validate_mount_point() → mkdir(83) → mount(165, source, target, fstype, flag
 | ioctl (optical) | SYS_IOCTL | 16 |
 | socket (netlink) | SYS_SOCKET | 41 |
 | bind | SYS_BIND | 49 |
-| poll | SYS_POLL | 7 |
+| ppoll | SYS_PPOLL | 271 |
 | recv | SYS_RECVFROM | 45 |
 | stat (permissions) | SYS_STAT | 4 |
 | statfs (usage) | SYS_STATFS | 137 |

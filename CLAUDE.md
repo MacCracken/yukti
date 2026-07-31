@@ -10,7 +10,7 @@ udev hotplug, mount/eject.
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (sovereign systems language, compiled by cc5)
 - **Version**: SemVer, version file at `VERSION`
-- **Status**: 2.1.0 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
+- **Status**: 2.3.1 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 - **Shared crates**: [shared-crates.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/shared-crates.md)
@@ -33,9 +33,11 @@ re-learning the layout.
 
 ## Current State
 
-- **Source**: ~5920 lines across 17 domain modules (`src/*.cyr`)
-- **Tests**: 658 assertions, 3 fuzz harnesses, 45+ benchmarks
-- **Binary**: ~384 KB x86_64 static ELF, zero external dependencies
+- **Source**: 6,380 lines across 18 files in `src/` — 16 domain modules
+  (6,246 lines, matching the `[lib]` module list in `cyrius.cyml`) plus
+  the `lib.cyr` include chain and the `main.cyr` CLI entry point
+- **Tests**: 658 assertions, 3 fuzz harnesses, 46 benchmarks
+- **Binary**: ~424 KB x86_64 static ELF, zero external dependencies
 - **Stable**: 2.3.1 — completes the 2.3.0 agnos ABI sweep: `_yk_mkdir` (agnos
   `sys_mkdir` is `(path, pathlen)`, POSIX is `(path, mode)` — same arity, so no
   compiler diagnostic) and `_yk_umount2` (`sys_umount2` does not exist on agnos;
@@ -83,7 +85,7 @@ At a glance:
 ```bash
 cyrius deps                              # resolve deps into lib/
 cyrius build src/main.cyr build/yukti    # build CLI
-cyrius test tests/tcyr/yukti.tcyr        # 653 assertions
+cyrius test tests/tcyr/yukti.tcyr        # 658 assertions
 cyrius distlib                           # → dist/yukti.cyr (full)
 cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 ```
@@ -94,6 +96,8 @@ cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 src/
   lib.cyr          — include chain (deps + domain modules, in order)
   main.cyr         — CLI entry point (device enumeration)
+  syscalls.cyr     — arch-conditional SYS_* constants + agnos ABI
+                     bridges (_yk_mount, _yk_umount2, _yk_mkdir)
   error.cyr        — 16 error kinds, heap-allocated error structs
   core.cyr         — kernel-safe enums, struct layouts, accessors
   pci.cyr          — kernel-safe PCI class/vendor tables + predicates
@@ -114,9 +118,9 @@ programs/
 dist/
   yukti.cyr        — full userland bundle (`cyrius distlib`)
   yukti-core.cyr   — kernel-safe bundle (`cyrius distlib core`)
-tests/tcyr/        — 653 assertions across all modules
+tests/tcyr/        — 658 assertions across all modules
 tests/bcyr/        — benchmarks with batch timing
-fuzz/              — 2 fuzz targets (uevent parser, mount table parser)
+fuzz/              — 3 fuzz targets (uevent, mount table, partition table)
 docs/benchmarks/   — auto-generated results.md + history.csv
 cyrius.cyml        — package manifest (toolchain pin, [deps], [lib.*] profiles)
 cyrius.lock        — SHA256 lockfile for every lib/*.cyr dep
@@ -144,8 +148,9 @@ produce a compile-clean bundle.
   individual lifetimes (e.g. event collectors).
 - **sakshi logging on all device operations** — structured observability
   across attach/detach/mount/eject.
-- **Direct syscalls** — `mount(165)`, `umount2(166)`, `ioctl(16)`,
-  `socket(41)`. No libc wrappers.
+- **Direct syscalls** — `mount` / `umount2` through the `_yk_*` bridges
+  in `src/syscalls.cyr`, `ioctl` / `socket` through arch-conditional
+  `SYS_*` constants. No raw syscall numbers, no libc wrappers.
 
 ## Development Process
 
@@ -154,7 +159,7 @@ produce a compile-clean bundle.
 0. Read roadmap, CHANGELOG, open issues — know what was intended
 1. Cleanliness: `cyrius build` (0 warnings), `cyrius lint` (0 warnings),
    `cyrius fmt --check` diff-clean, `cyrius vet src/main.cyr` clean
-2. Test sweep: 531+ assertions pass, fuzz harnesses pass
+2. Test sweep: 658+ assertions pass, fuzz harnesses pass
 3. Benchmark baseline: `cyrius bench tests/bcyr/yukti.bcyr`, save CSV
 4. Internal deep review — gaps, optimizations, correctness, docs
 5. External research — udev / sysfs / block-layer changes since last pass
@@ -205,7 +210,7 @@ Severity levels: **CRITICAL** (exploitable immediately) / **HIGH**
 
 Ship as the last patch of the current minor (e.g. 1.2.5 before 1.3.0):
 
-1. Full test suite — 531+ pass, 0 failures
+1. Full test suite — 658+ pass, 0 failures
 2. Benchmark baseline — `cyrius bench`, save CSV for comparison
 3. Dead code audit — review `dead:` list from `cyrius build`, remove
    unreferenced source

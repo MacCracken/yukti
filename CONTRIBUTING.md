@@ -4,7 +4,7 @@ Thanks for taking the time to dig in.
 
 ## Prerequisites
 
-- Cyrius toolchain 5.4.6+ (`cyrius` on `$PATH`) —
+- Cyrius toolchain 6.5.3+ (`cyrius` on `$PATH`) —
   <https://github.com/MacCracken/cyrius>
 - A Linux host for udev/mount behaviour to actually do anything useful
 
@@ -59,7 +59,7 @@ Never shell out to `cc5` directly; always go through `cyrius <subcommand>`.
 
 ## Testing
 
-- 531 assertions is the current floor — do not regress
+- 658 assertions is the current floor — do not regress
 - Hardware-dependent logic must be reachable from mock data (see
   `find_mount_in()` taking a string, not `/proc/mounts`)
 - Parsers get a fuzz target (`fuzz/*.fcyr`) before merge

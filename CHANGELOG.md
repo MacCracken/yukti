@@ -37,6 +37,39 @@ length and calls through correctly. That mirrors the stdlib's own `xrmdir`
 which `storage.cyr` already used. `mode` is necessarily dropped on agnos — its mkdir
 ABI carries no mode argument. **No behavior change on Linux or aarch64.**
 
+### Fixed — 8 `SYS_*` constants were double-defined on agnos, resolved by file order
+
+agnos **is** an x86_64 target, so cycc defines `CYRIUS_ARCH_X86` *and*
+`CYRIUS_TARGET_AGNOS` on an agnos build. `src/syscalls.cyr` gated its Linux-x86
+block on `CYRIUS_ARCH_X86` alone and its fail-closed 9001+ stub block on
+`CYRIUS_TARGET_AGNOS`, assuming the two were mutually exclusive. They are not, so
+both emitted and 8 names were defined twice with conflicting values:
+
+| constant | Linux-x86 | agnos stub |
+|---|---|---|
+| `SYS_SOCKET` | 41 | 9002 |
+| `SYS_CONNECT` | 42 | 9003 |
+| `SYS_BIND` | 49 | 9004 |
+| `SYS_RECVFROM` | 45 | 9005 |
+| `SYS_SETSOCKOPT` | 54 | 9006 |
+| `SYS_PPOLL` | 271 | 9007 |
+| `SYS_STATFS` | 137 | 9009 |
+| `SYS_NEWFSTATAT` | 262 | 9010 |
+
+cyrius resolves this as *last definition wins*. The stubs won — but only because
+they sit textually lower in the file. **Reordering the two blocks would have
+silently substituted real Linux syscall numbers into agnos builds**, which is
+exactly what the deliberately-invalid 9001+ band exists to prevent. Runtime
+behavior was correct; the invariant protecting it was accidental.
+
+The x86 block is now nested inside `#ifndef CYRIUS_TARGET_AGNOS`, so the two are
+genuinely exclusive and correctness no longer depends on ordering.
+
+Verified: the `CYRIUS_TARGET_AGNOS=1` compile of `src/lib.cyr` now emits **zero
+warnings of any kind** (was 8 duplicate-symbol + 1 undefined-function). Off agnos
+the guard is inert — both the x86_64 and aarch64 `build/yukti` binaries are
+**bit-identical** before and after the change.
+
 ### Fixed — `sys_umount2` does not exist on agnos at all
 
 `_yk_mount`'s symmetric counterpart, missed by the same sweep. This is not an ABI
@@ -137,6 +170,99 @@ aarch64-backend-missing error rendered as `aarch64 backend missing from Cyrius
   side of the `_yk_mkdir` bridge: mode 0755 creates a real directory, and a repeat
   call returns `-EEXIST` rather than succeeding. The agnos branch is not reachable
   from a Linux test run.
+
+### Fixed — the benchmark baseline measured software that no longer exists
+
+`docs/benchmarks/history.csv` held 382 rows, all recorded 2026-03-22/23 against
+the **Rust** implementation via criterion. That code was deleted in the April 2026
+port. `CLAUDE.md` pointed at the file as the regression baseline, so the project's
+"numbers don't lie" gate had nothing behind it — no Cyrius run had ever been
+recorded in the four months since the port.
+
+The Rust rows are preserved verbatim as `history-rust-preport.csv`; `history.csv`
+restarts from the Cyrius build with a 3-run baseline (138 rows, 46 benchmarks
+each). New `docs/benchmarks/README.md` explains the split and warns against
+charting the two together.
+
+Regenerating it surfaced a second defect in `scripts/bench-history.sh`. Its parser
+matched `([0-9]+)ns`, so it silently dropped every benchmark reporting 1µs or
+more — **the 11 slowest, which are exactly the ones worth tracking**. Two sitting
+near the 1µs boundary (`device_queries/query_permissions`,
+`optical/detect_disc_type_unknown`) crossed it run-to-run and so appeared and
+vanished from the history depending on noise. The name class also excluded digits.
+The parser now normalises ns/µs/ms/s to nanoseconds and captures all 46 (verified:
+`storage/find_mount_in_miss` at 5.993µs records as 5994 ns).
+
+### Fixed — `scripts/version-bump.sh` aborted on every run
+
+A Rust-era leftover: under `set -euo pipefail` it wrote VERSION, then ran `sed -i`
+against a `Cargo.toml` deleted at the port, aborting before its success message.
+`cyrius.cyml` resolves `version` from the VERSION file, so writing VERSION was
+always the entire job — the Cargo.toml step is removed rather than replaced.
+
+### Documentation — repo-wide staleness sweep
+
+Nine files still described the pre-port Rust implementation or 1.x-era counts. All
+now match the tree at 2.3.1 (658 assertions, 3 fuzz targets, 46 benchmarks,
+~424 KB binary, 10 DeviceClass variants, 16 domain modules, toolchain 6.5.3,
+sakshi 2.4.6 / patra 1.12.12):
+
+- **`SECURITY.md`** — the published security policy still listed `0.22.x` as the
+  only supported line, so under its own terms the shipping release was
+  unsupported. It also documented libc syscalls, `Arc<dyn EventListener>`,
+  `unsafe` blocks and `tracing` — none of which exist, and the libc claim was the
+  direct negation of `src/storage.cyr`. Rewritten for the Cyrius implementation.
+- **`README.md`** — advertised a 152 KB binary (the port-day figure), Cyrius
+  5.7.48, 485 assertions and 8 device classes; the features table and
+  architecture diagram both omitted five shipped modules. The Rust-vs-Cyrius
+  comparison is now explicitly labelled a frozen port-day snapshot rather than
+  left to read as current.
+- **`CONTRIBUTING.md`** — required "Cyrius 5.4.6+", on which this repo cannot
+  build, and set a 531-assertion floor that would have accepted a 120-assertion
+  regression.
+- **`docs/guides/testing.md`**, **`docs/architecture/overview.md`**,
+  **`docs/development/threat-model.md`**, **`docs/development/cyrius-usage.md`**,
+  **`CLAUDE.md`** — stale counts, missing modules, and `poll` where the code has
+  used `ppoll` since 2.1.4. `overview.md` also attributed `DeviceClass` and the
+  `DeviceInfo` layout to `device.cyr`; both live in `core.cyr`.
+
+Two further items found during the sweep:
+
+- **README's Quick Start would not compile.** It opened with
+  `include "yukti/lib.cyr"` — a path matching neither convention. The toolchain
+  ships the bundle as `lib/yukti.cyr` (same shape as `lib/sakshi.cyr`,
+  `lib/patra.cyr`), which is what a consumer actually writes. Anyone copying the
+  example hit an unresolved include.
+- **The threat model overstated its own mitigation.** It claimed "every
+  `syscall(SYS_*, …)` has its return checked at the call site". 41 statement-position
+  calls in `src/` discard theirs. Most are deliberate and harmless (`sys_close` ×26,
+  stdout/stderr writes, `_yk_mkdir` where `EEXIST` is the expected case), but three
+  file-descriptor writes — `udev_rules.cyr:147-148` and `storage.cyr:773` — silently
+  ignore a short write. Now documented accurately, with the three gaps tracked for
+  2.3.2 rather than papered over. A threat model that overstates coverage is worse
+  than one that admits a gap.
+
+Also corrected two source comments that had drifted: `error.cyr` described "15
+variants matching Rust YuktiError" (16 variants, and no Rust type to match), and
+`syscalls.cyr` claimed the aarch64 stdlib defines `SYS_NEWFSTATAT = 79` — it
+defines 262 deliberately, relying on cyrius's `ESYSXLAT` 262→79 renumber.
+
+### Changed — roadmap
+
+- **2.3.2 scheduled: raw syscall review and cleanup.** 2.1.4 migrated all 33
+  arch-divergent raw syscalls in `src/` and stopped at that boundary; 40 live
+  sites remain in tests, fuzz harnesses, benchmarks and `programs/`, all
+  hardcoding x86_64 numbers. Two of them falsify a gate: `core_smoke.cyr`'s abort
+  path is `syscall(60, 1)` and `fuzz_partition_table.fcyr` writes its fixture with
+  raw open/write/close, so on aarch64 neither can report failure — and
+  `scripts/retest-aarch64.sh` judges purely on exit code.
+- Security hardening renumbered **2.3.0 → 2.4.0** (the original 2.3.0 slot was
+  consumed by the agnos ABI work); device-shape extensions **2.4.0 → 2.5.0**.
+- The held aarch64 retest now names the 6.5.3 toolchain and records that it must
+  be sequenced *after* 2.3.2, since a retest today would pass regardless of what
+  the hardware did.
+- Toolchain-integration items re-verified present under 6.5.3 rather than left
+  described as pending a 5.7.x upgrade.
 
 ## [2.3.0] — 2026-07-29
 

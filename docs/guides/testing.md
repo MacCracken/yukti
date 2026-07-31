@@ -3,7 +3,7 @@
 ## Running Tests
 
 ```sh
-# Build and run (485 assertions)
+# Build and run (658 assertions)
 cyrius test tests/tcyr/yukti.tcyr
 ```
 
@@ -21,8 +21,12 @@ Expected output:
 === partition ===
 === network ===
 === gpu ===
+=== pci ===
+=== audio direction constants ===
+=== audio parse pcmC0D3p (basic playback) ===
+... (15 audio groups: PCM parsing, classification, audio history)
 
-485 passed, 0 failed (485 total)
+658 passed, 0 failed (658 total)
 ```
 
 ## Test Coverage by Module
@@ -30,13 +34,19 @@ Expected output:
 | Module | Test Functions | Key Coverage |
 |--------|---------------|--------------|
 | error (19) | All 16 error kinds, formatting, errno mapping, Result type |
-| device (22) | All types, 10 capabilities, display name priority, size display, USB IDs, permissions, JSON |
+| device (21) | All types, 10 capabilities, display name priority, size display, USB IDs, permissions, JSON |
 | event (9) | All 6 event kinds, collector bulk, listener dispatch display |
-| storage (18) | All 17 filesystem types, 9 forbidden mount points, octal unescape, mount table parsing |
-| optical (12) | All 10 disc types, TOC operations, ioctl constants, tray state |
-| udev (25) | All 8 device classes, capability extraction, uevent parsing, event conversion |
-| udev_rules (7) | Rule rendering, 3 validation failures, accessors |
+| storage (24) | All 17 filesystem types, 16 forbidden mount points, octal unescape, mount table parsing |
+| optical (17) | All 15 disc types, TOC operations, ioctl constants, tray state |
+| udev (25) | All 10 device classes, capability extraction, uevent parsing, event conversion |
+| udev_rules (6) | Rule rendering, 3 validation failures, accessors |
 | linux (5) | Manager lifecycle, cache lookup, refresh |
+| device_db (5) | Open/close lifecycle, record seen, preferences, mount count, known lookup |
+| partition (6) | MBR + GPT constants, type strings, entry accessors, GUID helpers, real table read |
+| network (5) | SMB/NFS types, share construction, mount source, mounted list, probe constants |
+| gpu (5) | Vendor names, sysfs enumeration, count, report, device class |
+| pci (9) | Kernel-safe class/vendor tables, class to device type, name fallback, predicates |
+| audio (17) | PCM name parsing, direction constants, bit-pack roundtrip, hotplug classification, audio history table |
 
 ## Running Benchmarks
 
@@ -44,7 +54,7 @@ Expected output:
 cyrius bench tests/bcyr/yukti.bcyr
 ```
 
-45 benchmarks using `bench_run_batch()` for nanosecond precision.
+46 benchmarks using `bench_run_batch()` for nanosecond precision.
 
 ## Running Fuzz Targets
 
@@ -54,6 +64,9 @@ cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent && ./build/fuzz
 
 # Mount table parser — 500 mutations + full truncation sweep
 cyrius build fuzz/fuzz_mount_table.fcyr build/fuzz_mount_table && ./build/fuzz_mount_table
+
+# Partition table parser (MBR + GPT) — 500 mutations + truncation sweep
+cyrius build fuzz/fuzz_partition_table.fcyr build/fuzz_partition_table && ./build/fuzz_partition_table
 ```
 
 ## Writing Tests

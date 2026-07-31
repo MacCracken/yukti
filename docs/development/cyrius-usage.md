@@ -5,21 +5,24 @@ This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
 **Toolchain pin**: 6.5.3 (`cyrius = "6.5.3"` in `cyrius.cyml`).
-`cyrius` provides `cc5` internally — never shell out to `cc5` directly.
+`cyrius` drives the compiler internally (`cycc`, named `cc5` before
+Cyrius 6.0) — never shell out to it directly.
 
-Upgrade notes (5.5.11 → 5.7.48): the arc is mostly stdlib expansion
+Upgrade notes — **historical record** (5.5.11 → 5.7.48, a full major
+behind the current 6.5.3 pin; retained for the two language gotchas,
+not as current guidance): that arc was mostly stdlib expansion
 (json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
 HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
 wrappers in 5.7.35) and aarch64 backend hardening (f64 basic ops
 in v5.7.30, EB() codebuf cap raised in v5.7.34). Two latent
-language gotchas surface during the bump — neither requires a
-yukti code change but both are worth knowing:
+language gotchas surfaced during the bump — neither required a
+yukti code change but both still hold:
 
 - `var buf[N]` inside a function body is **static data**, not
   stack. Consecutive calls share the backing memory, so any
   `Str` or pointer that aliases into the buffer dangles on the
   next call. Yukti's parsing-bound buffers
-  (`udev.cyr:666 parse_uevent`, `udev_rules.cyr:246 query_device`,
+  (`udev.cyr:683 udev_monitor_poll`, `udev_rules.cyr:246 query_device`,
   `udev_rules.cyr:293 list_devices`) are safe because they pass
   through `str_from_buf` (`alloc + memcpy`) before any `Str`
   escapes; the syscall-buffer sites (`device.cyr:153
@@ -51,12 +54,14 @@ arch-divergent `read`/`write`/`stat`/`exit`/`mkdir`/`rmdir`/
 `udev_monitor_poll` from poll(2) to ppoll(2) (aarch64 has no
 SYS_POLL). Constants the stdlib doesn't expose live in
 `src/syscalls.cyr` under arch-conditional `enum YkSyscalls`
-blocks, plus a yukti-local `sys_stat` shim that fills the x86
-gap (stdlib only ships `sys_stat` on aarch64). aarch64
-cross-build is clean and runtime-correct; the only remaining
-held aarch64 thread is the hardware-bound 5.4.6 SIGILL retest
-on real Cortex-A72 (see
-`docs/development/issues/2026-04-19-cc5-aarch64-repro.md`).
+blocks, alongside the `_yk_mount` / `_yk_umount2` / `_yk_mkdir`
+agnos bridges added in 2.3.0/2.3.1. (The yukti-local `sys_stat`
+shim was dropped at the 6.0.1 bump — the stdlib ships `sys_stat`
+on x86_64 too now.) aarch64 cross-build is clean and
+runtime-correct; the remaining held aarch64 thread is
+hardware-bound — the full-target retest on real Cortex-A72 has
+not been re-run since the 2.1.4 migration (see
+`docs/development/issues/2026-04-19-aarch64-syscall-portability.md`).
 
 ## Dependencies
 
@@ -80,34 +85,39 @@ cyrius deps --verify     # CI gate: fail on hash mismatch
 ## Build
 
 ```sh
-cyrius build src/main.cyr build/yukti     # userland CLI (~384 KB static ELF)
+cyrius build src/main.cyr build/yukti     # userland CLI (~424 KB static ELF)
 ```
 
 Zero warnings is the gate. `dead:` lines from DCE are informational —
 they confirm the reachable set is smaller than the linked set.
 
 **aarch64 cross-build** (`cyrius build --aarch64 …`) compiles
-cleanly to an aarch64 ELF, but binaries produced by Cyrius 5.4.6's
-`cc5_aarch64` crashed with `SIGILL` on real hardware due to a
-compiler codegen bug. Held pending retest on 5.7.48's `cc5_aarch64`
-— the 5.5.x → 5.7.x arc lands real aarch64 fixes (EW alignment
-assert v5.4.19, Apple Silicon Mach-O probe v5.5.11, f64 basic
-ops v5.7.30, EB() codebuf cap raised v5.7.34); the original
-Cortex-A72 repro has not yet been re-run.
-See `docs/development/issues/2026-04-19-cc5-aarch64-repro.md` and
-`scripts/retest-aarch64.sh`. The CI aarch64 gate is wired but
-skips when `cc5_aarch64` isn't bundled with the toolchain
-install, so current workflows pass.
+cleanly to an aarch64 ELF. The historical `SIGILL` codegen bug in
+Cyrius 5.4.6's `cc5_aarch64` was fixed upstream in 5.4.8 and
+verified on real Cortex-A72 for `core_smoke`, the three fuzz
+targets, and the main CLI — but the full-target retest, the tcyr
+suite in particular, has not been re-run on hardware since the
+2.1.4 syscall migration, so aarch64 stays **held** pending a
+retest under the current 6.5.3 toolchain. The backend binary was
+renamed `cc5_aarch64` → `cycc_aarch64` in Cyrius 6.0.
+See `docs/development/issues/2026-04-19-aarch64-syscall-portability.md`,
+`docs/development/issues/2026-04-19-cc5-aarch64-repro.md`, and
+`scripts/retest-aarch64.sh` (which accepts either backend name).
+The CI aarch64 gate is required, not optional — it hard-fails when
+neither `cycc_aarch64` nor `cc5_aarch64` is present in the
+toolchain install.
 
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 653 assertions, must be 0 failures
-cyrius bench tests/bcyr/yukti.bcyr        # 45+ benchmarks (batch timing)
-cyrius build fuzz/fuzz_parse_uevent.fcyr build/fuzz_parse_uevent
+cyrius test  tests/tcyr/yukti.tcyr        # 658 assertions, must be 0 failures
+cyrius bench tests/bcyr/yukti.bcyr        # 46 benchmarks (batch timing)
+cyrius build fuzz/fuzz_parse_uevent.fcyr    build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent
-cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table
+cyrius build fuzz/fuzz_mount_table.fcyr     build/fuzz_mount_table
     ./build/fuzz_mount_table
+cyrius build fuzz/fuzz_partition_table.fcyr build/fuzz_partition_table
+    ./build/fuzz_partition_table
 ```
 
 Never claim a performance improvement without before/after benchmark
@@ -120,15 +130,15 @@ a single self-contained `.cyr` file, stripping `include` directives so
 downstream consumers don't need Yukti's include chain.
 
 ```sh
-cyrius distlib            # → dist/yukti.cyr       (full userland, ~5k lines)
-cyrius distlib core       # → dist/yukti-core.cyr  (kernel-safe, ~450 lines)
+cyrius distlib            # → dist/yukti.cyr       (full userland, ~6.3k lines)
+cyrius distlib core       # → dist/yukti-core.cyr  (kernel-safe, ~470 lines)
 ```
 
 Profiles are declared in `cyrius.cyml`:
 
 ```cyml
 [lib]                      # default profile — full userland
-modules = [ "src/error.cyr", "src/core.cyr", ... ]
+modules = [ "src/syscalls.cyr", "src/error.cyr", ... ]
 
 [lib.core]                 # kernel-safe subset
 modules = [ "src/core.cyr", "src/pci.cyr" ]
@@ -146,17 +156,20 @@ cyrius build programs/core_smoke.cyr build/core_smoke && ./build/core_smoke
 ## Quality Gates
 
 ```sh
-cyrius fmt <file> --check            # emits formatted output (diff vs source to enforce)
+cyrius fmt <file> --check            # exit-code-only drift check (no stdout)
 cyrius lint <file>                   # static checks; treat warnings as errors
 cyrius vet src/main.cyr              # audit include dependencies
-cyrius audit                         # full check: self-host, test, fmt, lint
+cyrius audit                         # project sweep: fmt/lint/docs/tests/bench
 ```
 
-`fmt --check` prints the formatted source — it does not diff. Pipe to
-`diff` against the source to fail CI on a mismatch:
+`fmt --check` emits nothing on stdout — it signals drift through the
+exit code alone (non-zero when the file needs formatting). Plain
+`cyrius fmt <file>` prints the formatted source without rewriting the
+file, which is what CI diffs against the committed source (it used
+`--check` pre-2.2.2, where the empty stdout made the diff always fire):
 
 ```sh
-diff -q <(cyrius fmt src/main.cyr --check) src/main.cyr
+diff -q <(cyrius fmt src/main.cyr) src/main.cyr
 ```
 
 ## Release
@@ -188,12 +201,16 @@ release yourself.
 - `str_builder` for formatting — avoid temporary allocations.
 - Bump allocator (`alloc`) for long-lived heap data; freelist for
   data with individual lifetimes.
-- Direct syscalls: `mount(165)`, `umount2(166)`, `ioctl(16)`,
-  `socket(41)`. Arity warnings are errors.
+- Direct syscalls go through stdlib wrappers (`sys_mount`,
+  `sys_umount2`, `sys_read`, …) or `SYS_*` constants (`SYS_IOCTL`,
+  `SYS_SOCKET`, `SYS_PPOLL`) — never bare x86_64 numbers, which are
+  wrong on aarch64 and agnos. Arity mismatches are hard errors
+  since cyrius 6.5.1.
 
 ## Never
 
-- Shell out to `cc5` — always go through `cyrius <subcommand>`.
+- Shell out to `cycc` (`cc5` pre-6.0) — always go through
+  `cyrius <subcommand>`.
 - Re-vendor stdlib or first-party deps into `src/` — let `cyrius deps`
   manage `lib/`.
 - Add stdlib includes inside individual domain modules — `src/lib.cyr`

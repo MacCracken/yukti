@@ -43,17 +43,41 @@ declare -a BENCH_NAMES=()
 declare -a BENCH_NS=()
 declare -a BENCH_DISPLAY=()
 
-while IFS= read -r line; do
-    # Match lines like: "device_id/create: 42ns (100000 iterations)"
-    if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_/]+):[[:space:]]*([0-9]+)ns ]]; then
-        NAME="${BASH_REMATCH[1]}"
-        NS="${BASH_REMATCH[2]}"
-        BENCH_NAMES+=("$NAME")
-        BENCH_NS+=("$NS")
-        BENCH_DISPLAY+=("${NS} ns")
-        echo "${TIMESTAMP},${COMMIT},${BRANCH},${NAME},${NS}" >> "$HISTORY_FILE"
-    fi
-done <<< "$BENCH_OUTPUT"
+# Parse "name: <value><unit> avg (min=… max=…) [N iters]" and normalise every
+# value to nanoseconds.
+#
+# The previous matcher was `^[[:space:]]*([a-zA-Z_/]+):[[:space:]]*([0-9]+)ns`,
+# which silently dropped a benchmark unless it reported in whole nanoseconds.
+# That excluded the 11 slowest benchmarks (everything >= 1us) — precisely the
+# ones most worth tracking for regression. Worse, benchmarks hovering around the
+# 1us boundary (device_queries/query_permissions, optical/detect_disc_type_unknown)
+# crossed it run-to-run, so they appeared and vanished from history.csv depending
+# on noise, making their trend lines meaningless. The name class also lacked
+# 0-9, so any digit in a benchmark name would have dropped it too.
+while IFS='|' read -r NAME NS; do
+    [ -z "$NAME" ] && continue
+    BENCH_NAMES+=("$NAME")
+    BENCH_NS+=("$NS")
+    BENCH_DISPLAY+=("${NS} ns")
+    echo "${TIMESTAMP},${COMMIT},${BRANCH},${NAME},${NS}" >> "$HISTORY_FILE"
+done < <(awk '
+    /^[[:space:]]*[A-Za-z0-9_\/]+:[[:space:]]*[0-9.]+(ns|us|ms|s)[[:space:]]/ {
+        line = $0
+        sub(/^[[:space:]]+/, "", line)
+        name = line
+        sub(/:.*$/, "", name)
+        rest = line
+        sub(/^[^:]*:[[:space:]]*/, "", rest)
+        val  = rest + 0
+        unit = rest
+        sub(/^[0-9.]+/, "", unit)
+        sub(/[^a-z].*$/, "", unit)
+        mult = 1
+        if (unit == "us")      mult = 1000
+        else if (unit == "ms") mult = 1000000
+        else if (unit == "s")  mult = 1000000000
+        printf "%s|%.0f\n", name, val * mult
+    }' <<< "$BENCH_OUTPUT")
 
 TOTAL=${#BENCH_NAMES[@]}
 

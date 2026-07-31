@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `cyrius.lock` was frozen three minor series behind the pin
+
+CI failed `cyrius deps --verify` with 5 hash mismatches
+(`syscalls_x86_64_agnos`, `fmt`, `chrono`, `fs`, `io`) while the same command
+passed locally. Both were true, and the local pass was the bug.
+
+`cyrius deps` does **not** overwrite an existing `./lib/`. The working tree's
+`lib/` had been resolved back at cyrius **6.4.67** and never re-resolved, so every
+subsequent `deps` run re-locked those same stale hashes — lock and `lib/` drifted
+together, in agreement with each other and with nothing else. CI clones without
+`lib/` (it is gitignored), resolves fresh stdlib, and correctly rejected the
+6.4.67-era hashes the lock still carried.
+
+The stale `lib/` was also masking a real defect: `src/storage.cyr:656` calls
+`xrmdir()`, added to the stdlib's `io.cyr` after 6.4.67. Building against the frozen
+`lib/` emitted `warning: undefined function 'xrmdir'` and produced a binary with an
+unresolved call in the unmount path. A clean re-resolve fixes it — no source change
+needed.
+
+- Toolchain pin `6.5.2` → **`6.5.3`** (`cyrius.cyml`), matching the wrapper and
+  clearing the `toolchain drift` warning. Note the 6.5.2 and 6.5.3 stdlib trees are
+  byte-identical across all 99 files, so the pin bump alone would **not** have fixed
+  the verify failure — the lock regeneration is what did.
+- `cyrius.lock` regenerated from a clean `rm -rf lib && cyrius deps`. The 5 hashes it
+  changed are exactly the 5 CI reported.
+
+### Fixed — CI lint gate failure
+
+`src/syscalls.cyr:68` used box-drawing `─` for a section rule. At 3 bytes per glyph
+the line measured **171 bytes**, over the 120-byte lint limit, failing CI's
+treat-warnings-as-errors lint gate. It was the only box-drawing rule in the codebase;
+now uses the ASCII `# ---` header style every other module uses.
+
+### Fixed — CI comment invited disabling the supply-chain gate
+
+The `--no-lock` flag on CI's `Resolve dependencies` step was documented as a
+workaround for a cyrius 6.0.1 lockfile-truncation bug, ending "Drop the flag once
+upstream restores the lockfile writer." That bug **is** fixed as of 6.5.3 — so the
+comment actively invited removing a flag that is load-bearing for a different reason.
+
+Plain `cyrius deps` rewrites `cyrius.lock` from the resolve it just performed, so the
+following `--verify` compares a fresh `lib/` against a lock generated from that same
+`lib/` — it cannot fail. Measured on 6.5.3 with one committed hash corrupted:
+
+| CI step | `--verify` result | gate |
+|---|---|---|
+| `cyrius deps --no-lock` | `38 verified, 1 failed` (exit 1) | catches it |
+| `cyrius deps` | `39 verified, 0 failed` (exit 0) | **defeated** |
+
+Comment rewritten in `.github/workflows/ci.yml` and `.github/workflows/release.yml`
+to record why the flag stays. No behavior change — both workflows already passed
+`--no-lock`.
+
+### Changed
+
+- `CLAUDE.md`, `cyrius.cyml` comments, and `docs/development/cyrius-usage.md`
+  updated from the stale `6.4.66` toolchain reference to `6.5.3`.
+- Both stdlib module lists in the docs were missing `atomic`, `sync`, and
+  `thread_local` — declared in `[deps].stdlib` since 2.2.x as patra 1.12.12's
+  transitive requirements, but never added to the prose. Now 18 entries in all
+  three places.
+
 ## [2.3.0] — 2026-07-29
 
 **yukti has never worked on the agnos target — six syscall ABI mismatches, one of

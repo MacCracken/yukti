@@ -4,7 +4,7 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 6.4.66 (`cyrius = "6.4.66"` in `cyrius.cyml`).
+**Toolchain pin**: 6.5.3 (`cyrius = "6.5.3"` in `cyrius.cyml`).
 `cyrius` provides `cc5` internally — never shell out to `cc5` directly.
 
 Upgrade notes (5.5.11 → 5.7.48): the arc is mostly stdlib expansion
@@ -63,9 +63,10 @@ on real Cortex-A72 (see
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 6.4.66):
+- **Stdlib modules** (ship with Cyrius 6.5.3):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
-  `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`
+  `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`,
+  `atomic`, `sync`, `thread_local`
 - **First-party deps** (pinned in `[deps.*]`):
   - `sakshi` 2.4.6 — structured logging
   - `patra` 1.12.12 — persistent device history
@@ -112,7 +113,7 @@ cyrius build fuzz/fuzz_mount_table.fcyr  build/fuzz_mount_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.4.66)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.5.3)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so

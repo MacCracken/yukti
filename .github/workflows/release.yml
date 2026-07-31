@@ -60,9 +60,11 @@ jobs:
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Resolve deps
-        # `--no-lock` preserves the committed cyrius.lock — see the same
-        # note in ci.yml for context (cyrius 6.0.1 lockfile-writer
-        # regression truncates the file to 0 bytes).
+        # `--no-lock` is LOAD-BEARING — do not remove it. It preserves the
+        # committed cyrius.lock so the next step's `--verify` compares against
+        # COMMITTED hashes; plain `cyrius deps` would rewrite the lock from the
+        # resolve it just did, making verify unfailable. See the full note in
+        # ci.yml.
         run: cyrius deps --no-lock
 
       - name: Verify dep hashes

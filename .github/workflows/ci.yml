@@ -45,14 +45,25 @@ jobs:
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Resolve dependencies
-        # `--no-lock` preserves the committed cyrius.lock. Cyrius 6.0.1's
-        # default `cyrius deps` truncates cyrius.lock to 0 bytes (logs
-        # `cyrius.lock: 0 deps locked` despite resolving 2 deps), which
-        # then makes the next `--verify` step fail with
-        # `error: no cyrius.lock found`. `--no-lock` skips the lockfile
-        # write entirely so the in-tree committed hashes survive into
-        # the verify step. Drop the flag once upstream restores the
-        # lockfile writer.
+        # `--no-lock` is LOAD-BEARING — do not remove it.
+        #
+        # It was originally added to dodge a Cyrius 6.0.1 bug that truncated
+        # cyrius.lock to 0 bytes. That bug is fixed (verified on 6.5.3: plain
+        # `cyrius deps` now writes a byte-identical lock), but the flag must
+        # stay for a second, more important reason:
+        #
+        # Plain `cyrius deps` REWRITES cyrius.lock from whatever it just
+        # resolved. The following `--verify` step would then be comparing the
+        # freshly-resolved lib/ against a lockfile generated from that very
+        # same resolve — it can never fail. That silently turns the supply-chain
+        # gate into a no-op.
+        #
+        # Measured on 6.5.3 with one hash in the committed lock corrupted:
+        #   deps --no-lock  → verify: 38 verified, 1 failed  (exit 1)  ✅ catches it
+        #   deps            → verify: 39 verified, 0 failed  (exit 0)  ❌ gate defeated
+        #
+        # `--no-lock` skips the lockfile write, so `--verify` compares the
+        # resolved lib/ against the COMMITTED hashes — which is the whole point.
         run: cyrius deps --no-lock
 
       - name: Verify dep hashes

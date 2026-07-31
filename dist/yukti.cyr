@@ -72,7 +72,9 @@ enum YkSyscallsAgnos {
 }
 #endif
 
-# ── mount bridge (yukti 2.3.0) ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# mount bridge (yukti 2.3.0)
+# ---------------------------------------------------------------------------
 # `sys_mount` is the one Linux-only syscall whose AGNOS wrapper is not merely a
 # different arity — it is a 0-parameter NO-OP STUB that returns 0:
 #

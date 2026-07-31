@@ -3,72 +3,6 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.3.2: raw syscall review and cleanup
-
-Finishes the job 2.1.4 started. That release migrated all 33
-arch-divergent raw `syscall(N, …)` sites in `src/` to stdlib
-wrappers and `SYS_*` constants — and stopped at the `src/`
-boundary. Everything else still hardcodes x86_64 Linux numbers.
-
-Current inventory (40 live sites, comments excluded; `src/` is
-clean and must stay that way):
-
-| Location                         | Sites |
-|----------------------------------|-------|
-| `tests/tcyr/yukti.tcyr`          | 21    |
-| `fuzz/fuzz_partition_table.fcyr` | 8     |
-| `tests/bcyr/yukti.bcyr`          | 4     |
-| `programs/core_smoke.cyr`        | 3     |
-| `fuzz/fuzz_parse_uevent.fcyr`    | 2     |
-| `fuzz/fuzz_mount_table.fcyr`     | 2     |
-
-By number: `syscall(87)` unlink ×21, `syscall(1)` write ×9,
-`syscall(60)` exit ×8, `syscall(2)` open ×1, `syscall(3)` close ×1.
-
-None of those numbers mean what the code intends off x86_64.
-On aarch64 the correct values are write 64, exit 93, unlinkat 35,
-openat 56, close 57 — so every one of the 40 currently calls
-something unrelated. On agnos, `87` is `SYS_GPU_BLIT_SHM` (a GPU
-DMA op) and `60` is `SYS_WINSIZE`; only `syscall(1)` happens to
-coincide with `SYS_WRITE`.
-
-Two of these actively falsify a gate, which is what makes this a
-patch and not a cleanup nicety:
-
-- [ ] **`programs/core_smoke.cyr` cannot fail on aarch64** — the
-      kernel-safe tripwire's abort path is `syscall(60, 1)` and
-      its output path is `syscall(1, …)`, both x86-only. On
-      aarch64 it neither prints nor exits, falls through every
-      remaining assertion, and terminates 0 regardless of whether
-      the invariant holds. `scripts/retest-aarch64.sh` gates
-      purely on that exit code. CI is unaffected — it builds the
-      aarch64 binary but only *runs* the x86_64 one.
-- [ ] **`fuzz/fuzz_partition_table.fcyr` fuzzes nothing on
-      aarch64** — it writes its fixture with raw open/write/close,
-      so on aarch64 the fixture is never created and the harness
-      still exits 0.
-- [ ] **Migrate the remaining 40 sites** to `sys_write` /
-      `sys_exit` / `xunlink` / `xopen` / `sys_close`, which
-      arch-dispatch correctly. Prefer the `x*` portable wrappers
-      where one exists — they also handle the agnos
-      length-carrying ABI, which is what `_yk_mkdir` and `xrmdir`
-      exist for on the `src/` side.
-- [ ] **Add a CI grep gate** rejecting new numeric-literal
-      `syscall(` outside comments, so `src/` cannot regress and
-      the rest cannot drift back. The existing security-scan job
-      is the natural home.
-- [ ] **Check the three discarded write returns** —
-      `udev_rules.cyr:147-148` (rule file) and `storage.cyr:773`
-      (sysfs eject/delete) drop `sys_write`'s return, so a short
-      or failed write is silent. The other ~38 discarded returns
-      in `src/` are deliberate (`sys_close`, stdout writes,
-      `_yk_mkdir` where `EEXIST` is expected) and should stay.
-      Noted in `docs/development/threat-model.md`.
-
-Not in scope: the 9001+ agnos stub band in `src/syscalls.cyr` is
-deliberately numeric and deliberately invalid — see the comment
-there before touching it.
-
 ## Next minor — 2.4.0: security hardening + prepared statements
 
 Second pass on the 2026-04-19 P(-1) audit. Pulls in cyrius
@@ -101,6 +35,18 @@ opportunity).
 
 ## Held — hardware-bound
 
+- [ ] **`filesystem_usage()` returns EFAULT on aarch64.** Opened by
+      2.3.2, which made the aarch64 suite report honestly for the
+      first time. `statfs` fails with `-14` where `newfstatat` on
+      the *same* static buffer returns 0 — so the buffer is valid
+      and the fault is specific to `SYS_STATFS` (43, the correct
+      aarch64 number). Two assertions fail: `fs usage root ok` and
+      `avail > 0`; the other 656 pass.
+
+      Observed under `qemu-aarch64` only and **not confirmed on real
+      hardware** — qemu-user's statfs emulation is a plausible
+      culprit, so reproduce on a Cortex-A72 before treating it as a
+      yukti bug. Fold into the retest below.
 - [ ] **aarch64 native build — runtime SIGILL retest on
       Cortex-A72** against the current **6.5.3** toolchain.
       `src/` is cross-build-clean and runtime-correct as of 2.1.4
@@ -119,11 +65,8 @@ opportunity).
       work on every 6.x toolchain. Fixed in 2.3.1; the script now
       accepts either name.
 
-      **Sequence 2.3.2 first.** The retest gates purely on remote
-      exit code, and `core_smoke` plus `fuzz_partition_table`
-      cannot report failure on aarch64 until their raw x86-only
-      exit/write paths are migrated — so a retest run today would
-      report success no matter what the hardware did.
+      2.3.2 cleared the prerequisite: the aarch64 suite now reports
+      all 658 assertions instead of 182, so a retest can be believed.
       See `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`
       and `scripts/retest-aarch64.sh`.
 

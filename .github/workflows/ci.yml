@@ -219,6 +219,25 @@ jobs:
           scan "writes to /etc"  '"/etc/'
           scan "writes to /bin"  '"/bin/'
           scan "writes to /sbin" '"/sbin/'
+          # Raw numeric syscall numbers (2.3.2). `syscall(87, path)` is unlink on
+          # x86_64 but timerfd_gettime on aarch64, where the uninitialised second
+          # argument is treated as a pointer the kernel WRITES 32 bytes into. That
+          # silently corrupted the test harness's counters: the aarch64 suite
+          # reported "182 passed, 0 failed" instead of 658, hiding two real
+          # failures. Only a nine-number whitelist (0,1,2,3,9,10,11,60,228) is
+          # renumbered by the backend, and lib/syscalls.cyr documents even that as
+          # macOS-scoped and KNOWN-INCOMPLETE — so no raw number is safe to rely on.
+          # Use the stdlib wrappers (sys_write / sys_exit / xopen / xunlink / …),
+          # which resolve per target at compile time.
+          # Named SYS_* constants are fine and are what this permits.
+          rawsys=$(grep -rEn 'syscall\(\s*[0-9]' src/ programs/ tests/ fuzz/ 2>/dev/null | awk -F: '
+            { line=$0; sub(/^[^:]+:[0-9]+:/,"",line); sub(/^[[:space:]]+/,"",line);
+              if (substr(line,1,1) != "#") print }')
+          if [ -n "$rawsys" ]; then
+            echo "FAIL: raw numeric syscall( — use stdlib wrappers or named SYS_* constants"
+            echo "$rawsys"
+            FAIL=1
+          fi
           # Unbounded stack buffers (>= 64KB — force heap review)
           awk -F: '
             /var [A-Za-z_][A-Za-z0-9_]*\[[0-9]+\]/ {

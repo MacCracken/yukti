@@ -770,8 +770,14 @@ pub fn storage_eject(dev_path_cstr) {
         if (fd < 0) {
             return err_eject_failed(dev_s, str_from("failed to open sysfs delete"));
         }
-        sys_write(fd, "1", 1);
+        # 2.3.2: this write previously discarded its return, so a rejected
+        # sysfs delete still returned Ok(0) — the same fabricated-success shape
+        # `_yk_mount` exists to prevent. The caller believed the device was gone.
+        var w = sys_write(fd, "1", 1);
         sys_close(fd);
+        if (w != 1) {
+            return err_eject_failed(dev_s, str_from("sysfs delete write rejected"));
+        }
     }
 
     sakshi_span_exit();

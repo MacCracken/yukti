@@ -16,11 +16,14 @@ include "src/lib.cyr"
 var _tmp_path = "/tmp/yukti_fuzz_pt";
 
 # Open /tmp/yukti_fuzz_pt for write, truncating. O_WRONLY|O_CREAT|O_TRUNC = 1|64|512 = 577.
+# xopen supplies mode 0o644 itself, which is what the old raw call passed as 420.
+# 2.3.2: was syscall(2/1/3, …) — raw x86_64 open/write/close.
 fn _write_fixture(buf, n) {
-    var fd = syscall(2, _tmp_path, 577, 420);
+    var fd = xopen(_tmp_path, 577);
     if (fd < 0) { return fd; }
-    syscall(1, fd, buf, n);
-    syscall(3, fd);
+    var w = sys_write(fd, buf, n);
+    sys_close(fd);
+    if (w != n) { return 0 - 1; }   # short write => fixture is not what the caller asked for
     return 0;
 }
 
@@ -105,8 +108,8 @@ fn main() {
     _write_fixture(&pgpt, 1024);
     var r_bad = read_partition_table(_tmp_path);
     if (is_ok(r_bad)) {
-        syscall(1, 2, "FUZZ FAIL: GPT entry_size > 128 accepted\n", 41);
-        syscall(60, 1);
+        sys_write(2, "FUZZ FAIL: GPT entry_size > 128 accepted\n", 41);
+        sys_exit(1);
     }
     # Restore valid entry_size for subsequent mutation fuzzing
     store8(&pgpt + 512 + 84, 128);
@@ -130,11 +133,13 @@ fn main() {
         fuzz_one(&pgpt, tlen);
     }
 
-    # Cleanup fixture
-    syscall(87, _tmp_path);   # unlink
+    # Cleanup fixture. 2.3.2: was syscall(87, …) — raw x86_64 unlink, which is
+    # NOT in the backend's ESYSXLAT whitelist, so on aarch64 it silently failed
+    # and left the fixture behind.
+    xunlink(_tmp_path);
 
-    syscall(1, 1, "fuzz_partition_table: passed\n", 29);
-    syscall(60, 0);
+    sys_write(1, "fuzz_partition_table: passed\n", 29);
+    sys_exit(0);
 }
 
 main();

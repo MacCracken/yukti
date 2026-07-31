@@ -10,7 +10,7 @@ udev hotplug, mount/eject.
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (sovereign systems language, compiled by cc5)
 - **Version**: SemVer, version file at `VERSION`
-- **Status**: 2.3.1 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
+- **Status**: 2.3.2 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 - **Shared crates**: [shared-crates.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/shared-crates.md)
@@ -38,7 +38,7 @@ re-learning the layout.
   the `lib.cyr` include chain and the `main.cyr` CLI entry point
 - **Tests**: 658 assertions, 3 fuzz harnesses, 46 benchmarks
 - **Binary**: ~424 KB x86_64 static ELF, zero external dependencies
-- **Stable**: 2.3.1 — completes the 2.3.0 agnos ABI sweep: `_yk_mkdir` (agnos
+- **Stable**: 2.3.2 — raw syscall cleanup: 40 numeric `syscall(N, …)` sites outside `src/` migrated to stdlib wrappers. 20 raw `syscall(87)` unlinks were `timerfd_gettime` on aarch64, writing 32 bytes through an uninitialised register and corrupting the test counters — the aarch64 suite reported `182 passed, 0 failed` instead of 658, masking 2 real failures. CI now rejects raw numeric syscalls. 2.3.1 — completed the 2.3.0 agnos ABI sweep: `_yk_mkdir` (agnos
   `sys_mkdir` is `(path, pathlen)`, POSIX is `(path, mode)` — same arity, so no
   compiler diagnostic) and `_yk_umount2` (`sys_umount2` does not exist on agnos;
   fails closed rather than routing to the 0-arity `sys_umount` stub that returns

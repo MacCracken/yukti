@@ -6,8 +6,9 @@
 #
 # It deliberately does NOT include src/lib.cyr, src/device.cyr, or any
 # Linux-specific module. The only userland concessions are:
-#   - one SYS_EXIT syscall at program end (required to terminate)
-#   - one SYS_WRITE for a PASS/FAIL banner on stderr so we can see results
+#   - sys_exit at program end / on assertion failure (required to terminate)
+#   - sys_write for a PASS/FAIL banner so we can see results
+# Both are stdlib wrappers, not raw numbers — see the note above _write.
 #
 # What this smoke test proves:
 #   1. core.cyr + pci.cyr compile with 0 undefined symbols when no
@@ -34,8 +35,17 @@
 include "src/core.cyr"
 include "src/pci.cyr"
 
+# 2.3.2: these were `syscall(1, …)` and `syscall(60, …)` — raw x86_64 numbers for
+# write and exit. Those two DID work on aarch64, but only by accident of the
+# backend's ESYSXLAT renumbering, whose whitelist is exactly nine numbers
+# (0,1,2,3,9,10,11,60,228) and which lib/syscalls.cyr documents as macOS-scoped
+# and "KNOWN-INCOMPLETE". Verified under qemu-aarch64: the old build printed and
+# exited 1 on a forced assertion failure. So this was not broken — it was correct
+# for a reason nothing guarantees, one whitelist edit away from silently becoming
+# io_destroy and quotactl. The stdlib wrappers resolve per target at compile time
+# (write 1/64, exit 60/93) and depend on nothing undocumented.
 fn _write(fd, msg, n) {
-    syscall(1, fd, msg, n);
+    sys_write(fd, msg, n);
     return 0;
 }
 
@@ -44,7 +54,7 @@ fn _assert(cond, label, label_len) {
     _write(2, "FAIL: ", 6);
     _write(2, label, label_len);
     _write(2, "\n", 1);
-    syscall(60, 1);
+    sys_exit(1);
     return 0;
 }
 
@@ -87,7 +97,7 @@ fn main() {
     _assert(pci_is_network(PCI_CLASS_NETWORK) != 0,  "is_network", 10);
 
     _write(1, "core_smoke: PASS (kernel-safe subset linked clean)\n", 51);
-    syscall(60, 0);
+    sys_exit(0);
 }
 
 main();

@@ -90,8 +90,8 @@ fn main() {
         fuzz_one(base, tlen);
     }
 
-    syscall(1, 1, "fuzz_parse_uevent: passed\n", 26);
-    syscall(60, 0);
+    sys_write(1, "fuzz_parse_uevent: passed\n", 26);
+    sys_exit(0);
 }
 
 main();

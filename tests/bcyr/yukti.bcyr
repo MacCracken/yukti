@@ -188,8 +188,8 @@ fn main() {
     alloc_init();
     setup();
 
-    syscall(1, 1, "yukti benchmarks (45 operations)\n", 33);
-    syscall(1, 1, "=================================\n\n", 35);
+    sys_write(1, "yukti benchmarks (46 operations)\n", 33);
+    sys_write(1, "=================================\n\n", 35);
 
     var b = 0;
 
@@ -262,8 +262,8 @@ fn main() {
     # serialization (1)
     b = bench_new("serialization/device_info_json"); bench_run_batch(b, &_b_to_json, 10000, 100); bench_report(b);
 
-    syscall(1, 1, "\ndone\n", 6);
-    syscall(60, 0);
+    sys_write(1, "\ndone\n", 6);
+    sys_exit(0);
 }
 
 main();

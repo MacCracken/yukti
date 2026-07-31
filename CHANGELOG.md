@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-07-31
+
+Raw syscall review and cleanup. 2.1.4 migrated all 33 arch-divergent raw
+`syscall(N, …)` sites in `src/` and stopped at that boundary; this finishes the job
+across tests, fuzz harnesses, benchmarks and `programs/` — 40 sites, now zero.
+
+### Fixed — 20 raw `syscall(87)` calls were silently corrupting the aarch64 test run
+
+The headline number was supposed to be "unlink doesn't work off x86_64". It is worse
+than that.
+
+`87` is `unlink` on x86_64 and **`timerfd_gettime(fd, otmr)`** on aarch64. Called as
+`syscall(87, path)` the second argument is never set, so the kernel takes whatever
+that register happens to hold and **writes 32 bytes of `struct itimerspec` into it**.
+Twenty of those fired per test run, from the `device_db` / `audio_db` fixture cleanup.
+
+The effect was not a visible crash. It was a quiet lie:
+
+| build | x86_64 | aarch64 |
+|---|---|---|
+| 2.3.1 | `658 passed, 0 failed (658)` | **`182 passed, 0 failed (182)`** |
+| 2.3.2 | `658 passed, 0 failed (658)` | `656 passed, 2 failed (658)` |
+
+476 assertions vanished from the count and two genuine failures were masked, while
+the suite still reported a clean run. Isolated by reverting *only* the 20 unlinks on
+top of the fixed tree, which reproduces `182 passed, 0 failed` exactly.
+
+All 20 now use `xunlink`, which also handles agnos's length-carrying
+`sys_unlink(path, pathlen)` ABI. Fixture cleanup verified: 10 files leaked per
+aarch64 run before, 0 after.
+
+### Fixed — the remaining 20 sites were correct only by accident
+
+`syscall(1)` write ×9, `syscall(60)` exit ×8, `syscall(2)` open, `syscall(3)` close.
+These **did** work on aarch64 — verified under `qemu-aarch64`, where the pre-2.3.2
+`core_smoke` printed `FAIL:` and exited 1 on a forced assertion failure.
+
+They worked because the backend's `ESYSXLAT` renumbers a whitelist of exactly nine
+values `(0,1,2,3,9,10,11,60,228)`. `87` is not on that list, which is the whole
+difference. `lib/syscalls.cyr` documents the mechanism as macOS-scoped and
+"KNOWN-INCOMPLETE"; relying on it for Linux aarch64 was relying on unspecified
+behaviour that happened to hold. Migrated to `sys_write` / `sys_exit` / `xopen` /
+`sys_close`, which resolve per target at compile time.
+
+This corrects the 2.3.1 roadmap, which asserted these sites were broken and that
+`core_smoke` "cannot fail on aarch64". That came from static reading; running the
+binary disproved it.
+
+### Fixed — two writes reported success they had not earned
+
+- `storage.cyr` — the sysfs `/device/delete` eject discarded `sys_write`'s return and
+  returned `Ok(0)` regardless. A rejected write meant the device was still there and
+  the caller believed otherwise: the same fabricated-success shape `_yk_mount` exists
+  to prevent.
+- `udev_rules.cyr` — both rule-file writes discarded their return, so a short write
+  produced a truncated rule file and still returned `Ok(path)`.
+
+The other ~38 discarded returns in `src/` are deliberate (`sys_close`, stdout writes,
+`_yk_mkdir` where `EEXIST` is the expected case) and are left alone, now documented
+in the threat model rather than glossed as "every syscall is checked".
+
+### Added — CI gate against raw syscall numbers
+
+The security-scan job now rejects any numeric-literal `syscall(` outside comments
+across `src/`, `programs/`, `tests/` and `fuzz/`. Named `SYS_*` constants still pass,
+so the arch-conditional layer and the deliberate 9001+ agnos stub band are unaffected.
+Verified to pass clean and to catch a reintroduced `syscall(87, …)`.
+
+### Known — `filesystem_usage()` faults on aarch64
+
+The two failures the migration exposed are real and pre-existing: `statfs` returns
+`-14` (EFAULT) where `newfstatat` on the *same* static buffer returns 0, so the
+buffer is valid and the fault is specific to `SYS_STATFS`. **Seen only under
+`qemu-aarch64`** — qemu-user's statfs emulation is a plausible culprit, so this is
+filed as hardware-bound pending a Cortex-A72 reproduction, not claimed as a yukti
+bug. Tracked in the roadmap's Held section.
+
+Also corrected: `tests/bcyr/yukti.bcyr` announced "45 operations" while running 46.
+
 ## [2.3.1] — 2026-07-30
 
 Continues the 2.3.0 agnos ABI sweep with the two sites it missed, and repairs a

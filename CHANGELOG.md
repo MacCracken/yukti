@@ -141,6 +141,35 @@ that compiles, runs, and prints plausible output — nothing else catches it. Th
 security job now checks every literal/length pair in `src/`, `programs/`,
 `tests/` and `fuzz/`.
 
+### Fixed — CI's large-stack-buffer check reported the wrong line and matched inside comments
+
+Caught by CI failing on this very release. The check is:
+
+```awk
+awk -F: '/var [A-Za-z_][A-Za-z0-9_]*\[[0-9]+\]/ { ... print FILENAME":"NR": large stack buffer ...' src/*.cyr
+```
+
+Two defects, both latent since it was written and both surfaced by the
+`list_devices` comment above, which documents the measured cost of a
+`var buf[1048576]`:
+
+1. **`NR`, not `FNR`.** awk is handed `src/*.cyr`, so `NR` counts records
+   across *all* files. `src/udev_rules.cyr` starts at cumulative record 6355,
+   so the comment at line **413** was reported as line **6767**. Only the
+   first file alphabetically ever reported a correct line number — every
+   other hit this gate has ever produced pointed at the wrong place.
+2. **It matched inside comments.** The security job's own header says
+   *"Matches code lines only — rejects patterns in `#` comments"*, but that
+   handling lives in the `scan()` helper and this awk block never had it. So
+   documenting a buffer size failed the build.
+
+Now strips everything from the first `#` before matching (covering trailing
+comments as well as whole-line ones) and reports `FNR`. Coverage also extends
+to `programs/*.cyr`, which it never scanned. Verified both directions: a real
+`var evil_big[1048576]` injected into `udev_rules.cyr` is caught and reported
+at its true line, while both a whole-line and a trailing comment mentioning
+one are ignored.
+
 ### Changed — test credibility
 
 - **8 mock-sysfs tests, deferred since the April 2026 Rust port.** The file

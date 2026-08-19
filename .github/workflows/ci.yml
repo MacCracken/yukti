@@ -247,12 +247,30 @@ jobs:
             echo "$rawsys"
             FAIL=1
           fi
-          # Unbounded stack buffers (>= 64KB — force heap review)
-          awk -F: '
-            /var [A-Za-z_][A-Za-z0-9_]*\[[0-9]+\]/ {
-              match($0, /\[[0-9]+\]/); s=substr($0,RSTART+1,RLENGTH-2); n=s+0;
-              if (n >= 65536) print FILENAME":"NR": large stack buffer ("n" bytes): "$0
-            }' src/*.cyr | tee /tmp/bigbuf.txt
+          # Unbounded stack buffers (>= 64KB — force heap review).
+          #
+          # Two bugs fixed at 2.3.5, both exposed when a comment in
+          # src/udev_rules.cyr documented a measured `var buf[1048576]`:
+          #
+          #   1. It used NR (records seen across ALL files) where it needed
+          #      FNR (line within the current file). Since awk is given
+          #      src/*.cyr, every file after the first reported a line
+          #      number offset by the cumulative count of everything before
+          #      it — the comment at udev_rules.cyr:413 was reported as
+          #      :6767, because that file starts at NR=6355. Only the first
+          #      file alphabetically ever reported a correct line.
+          #   2. It matched inside COMMENTS. The header of this job says
+          #      "Matches code lines only — rejects patterns in # comments",
+          #      but that only ever applied to scan() above; this block had
+          #      no such handling. Now everything from the first `#` is
+          #      stripped before matching, so both whole-line and trailing
+          #      comments are ignored.
+          awk '
+            { code = $0; sub(/#.*/, "", code) }
+            code ~ /var [A-Za-z_][A-Za-z0-9_]*\[[0-9]+\]/ {
+              match(code, /\[[0-9]+\]/); s = substr(code, RSTART+1, RLENGTH-2); n = s + 0;
+              if (n >= 65536) print FILENAME":"FNR": large stack buffer ("n" bytes):"code
+            }' src/*.cyr programs/*.cyr | tee /tmp/bigbuf.txt
           [ -s /tmp/bigbuf.txt ] && FAIL=1
           # sakshi takes (literal, byte_length) pairs. A length longer than the
           # literal is a buffer OVER-READ: sakshi writes N bytes starting at the

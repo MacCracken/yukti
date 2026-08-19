@@ -7,6 +7,140 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.7] — 2026-08-19
+
+**Memory retention.** The three findings the 2.3.4 audit grouped under that
+heading, all fixed: `DeviceInfo` retained forever, `udev_monitor_run` leaking
+per event, and `device_db_open` orphaning handles. Every one mattered for the
+same reason — argonaut, aethersafha and the file-manager sidebar are all
+long-running refresh loops, so a per-iteration leak is unbounded growth.
+
+774 assertions (was 763, +11), 3/3 fuzz, `core_smoke` passes, lint 0 warnings,
+0 untracked deferrals, vet 33 deps clean, x86_64 / aarch64 / agnos all build.
+
+### Fixed — `device_info_free` freed nothing, and the comment explaining why was wrong
+
+It was `return 0;`. A documented free function that did nothing, so **168 bytes
+per device were retained permanently even when the caller dutifully called
+it** — measured at 2.3.4, 1,000 refreshes of a 10-device sidebar retained
+2,560,536 bytes.
+
+The constructor's comment justified this:
+
+> benchmark showed fl_alloc regresses this hot path by ~30% without matching
+> fl_free callsites to amortize the per-alloc overhead … so pooling doesn't
+> win here
+
+The caveat in that sentence was the whole story. Re-measured, 200,000
+iterations of a 168-byte allocation:
+
+| strategy | ns/op |
+|---|---|
+| `alloc()` — bump, never freed | 22 |
+| `fl_alloc` + `fl_free` — recycled | **17** |
+| `fl_alloc`, never freed | **133** |
+
+So the freelist *beats* bump when blocks come back, and loses 6× when they do
+not. The old measurement was the third row; the conclusion drawn from it
+("pooling doesn't win") only held because nothing was freeing.
+
+Routing `DeviceInfo` straight to `fl_alloc` was tried and **measured to
+regress**: `device_info/create` went 129 ns → 243 ns, because that benchmark —
+like `enumerate_devices` itself — creates without freeing and pays the 133 ns
+carve every time. Reporting that rather than shipping it:
+
+| | 2.3.4 | `fl_alloc` attempt | shipped |
+|---|---|---|---|
+| retained per device | 272 B | 88 B | **88 B** |
+| `device_info/create` | 129 ns | 243 ns (+88%) | **138 ns** |
+| `udev/device_info_from_udev` | 2.353 µs | 2.341 µs | **2.330 µs** |
+
+What shipped is a yukti-owned recycle list: a freed block is pushed onto
+`_di_recycled` and the next `device_info_new` pops it (two loads, cheaper than
+bump); when nothing has been freed the list is empty and it falls straight
+through to `alloc()`, so a caller that never frees pays exactly what it paid
+before. The link is threaded through `DI_ID`, which the constructor overwrites
+immediately, so a recycled block carries nothing forward.
+
+**Retention 272 → 88 bytes per device.** The remaining 88 B are the borrowed
+`Str`s and the device id: `device_info_new` and the `di_set_*` setters store
+caller-allocated pointers **without copying**, so `device_info_free` cannot
+free them without double-freeing memory the caller may still hold. Reclaiming
+those needs the ownership model `enumerate_devices_into(pool)` would give —
+new surface, still tracked separately.
+
+⚠ **Contract change.** `device_info_free` now really frees. Using a
+`DeviceInfo` after freeing it was previously harmless and is now a
+use-after-free. That is the documented meaning of the call, and the
+alternative is unbounded growth in every long-running consumer.
+
+Gated by pointer identity — a freed block must come straight back out of the
+next `device_info_new` — plus LIFO ordering, non-aliasing of live blocks, and
+that a recycled block does not carry the previous device's identity forward.
+Reverting to the no-op produces 3 failures.
+
+### Fixed — `udev_monitor_run` leaked a freelist block on every hotplug event
+
+The `UdevEvent` was never freed on **any** path, and the `DeviceEvent` leaked
+on both paths that discard it. A hotplug daemon runs this loop for the life of
+the process.
+
+The per-event body is now `_udev_handle_event`, extracted **precisely so it
+could be gated** — `udev_monitor_run` needs a real `AF_NETLINK` fd, so as long
+as the logic lived inside the loop nothing could test it, which is how it
+leaked unnoticed.
+
+Ownership, stated explicitly because it is not obvious:
+
+- **`uevent` — always freed once converted.** `udev_event_free` is
+  `fl_free(e)` on the UE *struct* only; the `Str`s it points at are
+  bump-allocated and outlive it. `udev_event_to_device_event` stores
+  `ue_dev_path(uevent)` into the `DeviceEvent`, and that `Str` stays valid, so
+  the event does not dangle.
+- **`dev_event` — freed only when no listener saw it.** It is deliberately
+  *not* freed after dispatch: `fncall1` hands the pointer downstream and
+  nothing frees it today, so a listener that retains the event is currently
+  correct. Freeing after dispatch would make that a use-after-free for every
+  existing consumer — a contract change, not a repair. Tracked.
+- **The attached `DeviceInfo`** is also freed on the reject path.
+  `device_event_free` deliberately does not touch it (a `DeviceInfo` can be
+  shared and it has no way to know), but here we do know: both were created
+  for this event a few lines earlier and nobody received them. This leak was
+  **invisible before** — `DeviceInfo` was bump-allocated, so it never showed
+  up in freelist accounting. Making `device_info_free` real is what surfaced
+  it; the new test failed on exactly this.
+
+Gated by driving 300 filtered events and asserting the freelist carves no new
+block. That single assertion covers both frees — dropping either one grows the
+arena by 24,000 bytes over 300 events, verified independently.
+
+### Fixed — `device_db_open` orphaned a handle on every reopen
+
+It assigned `patra_open()`'s result straight into the global, so a reopen never
+closed the previous handle. Measured by counting `/proc/self/fd` across 8
+reopens: **8 leaked file descriptors**, one per reopen; **0** after the fix. A
+daemon reopening on config reload or retrying after an error leaked one each
+time.
+
+A failed reopen also zeroed the global, silently swapping a live database for 0
+so every later call became a no-op returning 0 — indistinguishable from
+"nothing recorded". A reopen is now explicitly close-then-open into a local:
+a failure leaves no handle **and returns an `Err`**, rather than leaving the
+caller to discover it.
+
+An earlier version of this test asserted the handle *value* and **passed
+against both the old and new code** — it was measuring nothing. Only the
+deliberate-revert check caught that. It now asserts fd counts, which is the
+thing that actually differs.
+
+### Notes
+
+- Binary 467,784 → 467,792 bytes (+8).
+- The recycle list is a plain LIFO with no double-free detection, unlike the
+  stdlib freelist's poison mode. Freeing the same `DeviceInfo` twice would
+  make the list cyclic. That is the cost of not paying the 133 ns carve;
+  recorded here rather than discovered later.
+
 ## [2.3.6] — 2026-08-19
 
 **Gate audit.** 2.3.3 found the format gate failing every file unconditionally;

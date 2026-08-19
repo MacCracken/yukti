@@ -119,11 +119,32 @@ fn _db_exec(sql_cstr, what, what_len): i64 {
 pub fn device_db_open(path) {
     sakshi_span_enter("db_open", 7);
     patra_init();
-    _yukti_db = patra_open(path);
-    if (_yukti_db == 0) {
+
+    # 2.3.7: this used to assign straight into _yukti_db, which had two
+    # consequences on a second open:
+    #
+    #   * The previous patra handle was ORPHANED — never closed, its fd and
+    #     page cache leaked for the life of the process. A daemon that
+    #     reopens the DB (config reload, path change, retry after an error)
+    #     leaked one handle per attempt.
+    #   * If the new open FAILED, the assignment had already zeroed the
+    #     global, so a live, working database was silently swapped for 0 and
+    #     every later call became a no-op returning 0 — indistinguishable
+    #     from "no devices recorded".
+    #
+    # Close the old handle first, and open into a LOCAL so a failed open
+    # leaves the existing handle untouched.
+    if (_yukti_db != 0) {
+        patra_close(_yukti_db);
+        _yukti_db = 0;
+    }
+
+    var db = patra_open(path);
+    if (db == 0) {
         sakshi_span_exit();
         return err_io(str_from("failed to open device database"));
     }
+    _yukti_db = db;
 
     # Create tables if they don't exist
     var s1 = "CREATE TABLE devices (serial STR, vendor STR, ";

@@ -1544,6 +1544,270 @@ fn test_rule_accessors() {
 # any single sakshi_span_exit added in 2.3.4 makes it red.
 # ===================================================================
 
+# ===================================================================
+# Memory retention (2.3.7)
+#
+# DeviceEvent and UdevEvent are freelist-backed and have real *_free
+# functions, so a create/free cycle must RECYCLE the block rather than
+# carve a new one. `_fl_arena_pos` is the freelist's bump cursor: it
+# advances only when a fresh block is carved, so after a warm-up it must
+# stay EXACTLY constant across a create+free loop. If it moves, blocks are
+# being abandoned.
+#
+# This is the invariant udev_monitor_run violated: it never freed the
+# UdevEvent on any path and leaked the DeviceEvent on both discard paths,
+# so a hotplug daemon grew the freelist for the life of the process.
+#
+# Note `_fl_arena_pos` is NOT a monotonic counter across arena refills —
+# exhausting the arena re-arms it at a different address, which can make a
+# delta negative. That is why these assert the exact-zero recycled case
+# after a warm-up, rather than comparing magnitudes.
+# ===================================================================
+
+# device_info_free was `return 0;` until 2.3.7 — a documented free function
+# that freed nothing, so 168 bytes per device were retained permanently even
+# when the caller dutifully called it. Measured before: 1,000 refreshes of a
+# 10-device sidebar retained 2,560,536 bytes (272 B/device). After: 88 B/device
+# — the struct is recycled, and what remains is the borrowed Strs, which
+# device_info_free cannot free because it does not own them.
+#
+# Pointer identity is the assertion: a freed block must come straight back out
+# of the next device_info_new. That gates the recycle list directly, without
+# depending on allocator accounting that shifts when an arena refills.
+
+fn test_device_info_free_recycles() {
+    var a = device_info_new(device_id_new_cstr("block:sda"),
+      str_from("/dev/sda"), DC_USB_STORAGE);
+    device_info_free(a);
+    var b = device_info_new(device_id_new_cstr("block:sdb"),
+      str_from("/dev/sdb"), DC_USB_STORAGE);
+    assert_eq(b, a, "a freed DeviceInfo block is handed back by the next new()");
+
+    # And the recycled block must be fully re-initialised, not carry the old
+    # device's identity forward — the free list threads its link through
+    # DI_ID, which the constructor overwrites.
+    assert(str_eq_cstr(di_dev_path(b), "/dev/sdb"), "recycled block has the NEW dev_path");
+    assert(di_serial(b) == 0, "recycled block does not carry the old serial");
+    assert_eq(di_class(b), DC_USB_STORAGE, "recycled block has the new class");
+
+    # Two live blocks must be distinct — recycling must not alias.
+    var c = device_info_new(device_id_new_cstr("block:sdc"),
+      str_from("/dev/sdc"), DC_OPTICAL);
+    assert(c != b, "a second live DeviceInfo is a distinct block");
+
+    # LIFO order: free b then c, and the next two news return c then b.
+    device_info_free(b);
+    device_info_free(c);
+    var d = device_info_new(device_id_new_cstr("x"), str_from("/dev/x"), DC_UNKNOWN);
+    var e = device_info_new(device_id_new_cstr("y"), str_from("/dev/y"), DC_UNKNOWN);
+    assert_eq(d, c, "recycle list is LIFO (most recently freed first)");
+    assert_eq(e, b, "recycle list returns the second freed block next");
+    device_info_free(d);
+    device_info_free(e);
+    return 0;
+}
+
+fn test_device_event_free_recycles() {
+    test_group("memory retention");
+    fl_init();
+    for (var w = 0; w < 16; w = w + 1) {
+        var warm = device_event_new(device_id_new_cstr("block:sdx"),
+          DC_USB_STORAGE, EK_ATTACHED, str_from("/dev/sdx"));
+        device_event_free(warm);
+    }
+    var before = _fl_arena_pos;
+    for (var i = 0; i < 500; i = i + 1) {
+        var e = device_event_new(device_id_new_cstr("block:sdx"),
+          DC_USB_STORAGE, EK_ATTACHED, str_from("/dev/sdx"));
+        device_event_free(e);
+    }
+    assert_eq(_fl_arena_pos, before, "500 DeviceEvent create/free cycles carve no new blocks");
+    return 0;
+}
+
+fn test_udev_event_free_recycles() {
+    fl_init();
+    for (var w = 0; w < 16; w = w + 1) {
+        var warm = udev_event_new(str_from("add"), str_from("/sys/x"),
+          str_from("/dev/sdx"), str_from("block"), str_from("disk"), map_new());
+        udev_event_free(warm);
+    }
+    var before = _fl_arena_pos;
+    for (var i = 0; i < 500; i = i + 1) {
+        var u = udev_event_new(str_from("add"), str_from("/sys/x"),
+          str_from("/dev/sdx"), str_from("block"), str_from("disk"), map_new());
+        udev_event_free(u);
+    }
+    assert_eq(_fl_arena_pos, before, "500 UdevEvent create/free cycles carve no new blocks");
+    return 0;
+}
+
+# udev_monitor_run leaked a freelist block on EVERY hotplug event: it never
+# freed the UdevEvent on any path, and leaked the DeviceEvent on both paths
+# that discard it. A hotplug daemon runs this loop for the life of the
+# process, so the freelist grew without bound.
+#
+# The per-event body is now _udev_handle_event, extracted precisely so this
+# can be gated — udev_monitor_run itself needs a real AF_NETLINK fd.
+#
+# Both branches are exercised: an event the filter ACCEPTS (delivered, so the
+# DeviceEvent is handed to the listener and deliberately not freed) and one it
+# REJECTS (nobody saw it, so it must be reclaimed).
+
+var _uh_seen = 0;
+fn _uh_listener(event) { _uh_seen = _uh_seen + 1; return 0; }
+
+fn _uh_make_uevent() {
+    var props = map_new();
+    map_set(props, "ACTION", str_from("add"));
+    map_set(props, "DEVPATH", str_from("/devices/pci0000:00/usb1/block/sdb"));
+    map_set(props, "SUBSYSTEM", str_from("block"));
+    map_set(props, "DEVTYPE", str_from("disk"));
+    return udev_event_new(str_from("add"), str_from("/sys/block/sdb"),
+      str_from("/dev/sdb"), str_from("block"), str_from("disk"), props);
+}
+
+fn test_udev_handle_event_no_leak() {
+    fl_init();
+    # _udev_handle_event only reads the filter slot at mon+16, so a minimal
+    # struct suffices — udev_monitor_new() would open a real AF_NETLINK
+    # socket, which is exactly what made this logic ungateable before it was
+    # extracted.
+    var mon = alloc(32);
+    store64(mon + 0, 0 - 1);
+    store64(mon + 8, 0);
+    store64(mon + 16, 0);
+    store64(mon + 24, 0);
+
+    # Warm up the DELIVERED path (no filter).
+    for (var w = 0; w < 16; w = w + 1) {
+        _udev_handle_event(mon, &_uh_listener, _uh_make_uevent());
+    }
+
+    # Delivery still works.
+    _uh_seen = 0;
+    for (var i = 0; i < 100; i = i + 1) {
+        _udev_handle_event(mon, &_uh_listener, _uh_make_uevent());
+    }
+    assert_eq(_uh_seen, 100, "every unfiltered event reaches the listener");
+
+    # Now the REJECTED path. This is the assertion that matters: nothing is
+    # delivered, so BOTH the UdevEvent and the DeviceEvent must be reclaimed
+    # and the freelist must not carve a single new block. It gates both frees
+    # at once — drop udev_event_free and this grows by ~UE_SIZE per event;
+    # drop device_event_free and it grows by ~DE_SIZE per event.
+    var filt = vec_new();
+    vec_push(filt, DC_OPTICAL);
+    store64(mon + 16, filt);
+
+    # Warm up this path too — its first pass carves whatever size classes it
+    # needs, and that one-time cost is not a leak.
+    for (var w = 0; w < 16; w = w + 1) {
+        _udev_handle_event(mon, &_uh_listener, _uh_make_uevent());
+    }
+
+    _uh_seen = 0;
+    # Track the arena BASE as well as the cursor. Exhausting the arena re-arms
+    # it at a different address, which makes a cursor delta meaningless (it can
+    # even go negative). Unchanged base AND unchanged cursor together mean no
+    # block was carved at all.
+    var base_before = _fl_arena;
+    var pos_before = _fl_arena_pos;
+    for (var i = 0; i < 300; i = i + 1) {
+        _udev_handle_event(mon, &_uh_listener, _uh_make_uevent());
+    }
+    assert_eq(_uh_seen, 0, "filtered events are not delivered");
+    assert_eq(_fl_arena, base_before, "filtered events do not exhaust the freelist arena");
+    assert_eq(_fl_arena_pos, pos_before, "300 filtered events carve no new freelist blocks");
+    return 0;
+}
+
+# device_db_open used to assign patra_open()'s result straight into the
+# global, so a reopen ORPHANED the previous patra handle — never closed, its
+# fd leaked for the life of the process. A daemon that reopens on config
+# reload or retries after an error leaked one fd per attempt.
+#
+# Measured at 2.3.7 by counting /proc/self/fd across 8 reopens:
+#   old code: fd growth 8   (one leaked handle per reopen)
+#   fixed:    fd growth 0
+#
+# fd count is the assertion because it is the thing that actually differs.
+# An earlier draft of this test asserted the handle value instead, and it
+# passed against BOTH the old and new code — it was measuring nothing.
+
+fn _open_fd_count() {
+    var e = dir_list(str_from("/proc/self/fd"));
+    if (e == 0) { return 0 - 1; }
+    return vec_len(e);
+}
+
+fn test_db_reopen_does_not_leak_fds() {
+    xunlink("/tmp/yukti_reopen_a.patra");
+    xunlink("/tmp/yukti_reopen_a.patra.wal");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_reopen_a.patra");
+    if (is_ok(r) == 0) { return 0; }
+
+    var base = _open_fd_count();
+    assert(base > 0, "/proc/self/fd readable");
+
+    for (var i = 0; i < 8; i = i + 1) {
+        device_db_open("/tmp/yukti_reopen_a.patra");
+    }
+    assert_eq(_open_fd_count(), base, "8 reopens leak no file descriptors");
+
+    device_db_close();
+    xunlink("/tmp/yukti_reopen_a.patra");
+    xunlink("/tmp/yukti_reopen_a.patra.wal");
+    return 0;
+}
+
+fn test_db_failed_reopen_reports_and_leaks_nothing() {
+    xunlink("/tmp/yukti_reopen_b.patra");
+    xunlink("/tmp/yukti_reopen_b.patra.wal");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_reopen_b.patra");
+    if (is_ok(r) == 0) { return 0; }
+    var base = _open_fd_count();
+
+    # A reopen is close-then-open. A FAILED one therefore leaves no handle —
+    # deliberately, and it says so by returning an Err rather than leaving the
+    # caller to discover that every later call silently returns 0.
+    var bad = device_db_open("/yukti-no-such-dir/nope.patra");
+    assert(is_ok(bad) == 0, "failed reopen returns an error");
+    assert_eq(device_db_handle(), 0, "failed reopen leaves no handle");
+    assert(_open_fd_count() < base, "the previous handle's fd was released, not orphaned");
+
+    xunlink("/tmp/yukti_reopen_b.patra");
+    xunlink("/tmp/yukti_reopen_b.patra.wal");
+    return 0;
+}
+
+fn test_db_reopen_second_db_is_usable() {
+    xunlink("/tmp/yukti_reopen_c.patra");
+    xunlink("/tmp/yukti_reopen_c.patra.wal");
+    xunlink("/tmp/yukti_reopen_d.patra");
+    xunlink("/tmp/yukti_reopen_d.patra.wal");
+    fl_init();
+    device_db_open("/tmp/yukti_reopen_c.patra");
+    device_db_open("/tmp/yukti_reopen_d.patra");
+    assert(device_db_handle() != 0, "reopen to a different path gives a live handle");
+
+    var info = device_info_new(device_id_new_cstr("block:sdq"),
+      str_from("/dev/sdq"), DC_USB_STORAGE);
+    di_set_serial(info, str_from("REOPEN01"));
+    device_db_record_seen(info);
+    assert(device_db_is_known(str_from("REOPEN01")) != 0, "second db usable after reopen");
+
+    device_db_close();
+    assert_eq(device_db_handle(), 0, "close clears the handle");
+    xunlink("/tmp/yukti_reopen_c.patra");
+    xunlink("/tmp/yukti_reopen_c.patra.wal");
+    xunlink("/tmp/yukti_reopen_d.patra");
+    xunlink("/tmp/yukti_reopen_d.patra.wal");
+    return 0;
+}
+
 fn test_span_balance_on_error_paths() {
     test_group("span balance");
     fl_init();
@@ -2044,6 +2308,15 @@ fn main() {
 
     # Observability tests (1)
     test_span_balance_on_error_paths();
+
+    # Memory retention tests (4)
+    test_device_info_free_recycles();
+    test_device_event_free_recycles();
+    test_udev_event_free_recycles();
+    test_udev_handle_event_no_leak();
+    test_db_reopen_does_not_leak_fds();
+    test_db_failed_reopen_reports_and_leaks_nothing();
+    test_db_reopen_second_db_is_usable();
 
     # Linux device manager tests (13)
     test_linux_dm_new();

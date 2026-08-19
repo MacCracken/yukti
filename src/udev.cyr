@@ -750,30 +750,77 @@ pub fn udev_monitor_is_running(mon) {
 }
 
 # Run event loop dispatching to a listener function pointer
+# _udev_handle_event — the per-event body of udev_monitor_run.
+#
+# Extracted at 2.3.7 so the ownership rules below are testable without a
+# netlink socket. udev_monitor_run needs a real AF_NETLINK fd, so as long as
+# this logic lived inside the loop nothing could gate it — and the loop was
+# leaking a freelist block on every single event.
+#
+# What it frees, and why:
+#
+#   * `uevent` — ALWAYS, once converted. udev_event_free is `fl_free(e)` on
+#     the UE STRUCT only; the Strs it points at are bump-allocated and outlive
+#     it. udev_event_to_device_event stores `ue_dev_path(uevent)` into the
+#     DeviceEvent, and that Str stays valid in the arena, so the DeviceEvent
+#     does not dangle.
+#   * `dev_event` — ONLY when no listener saw it (the filter-reject path). It
+#     is deliberately NOT freed after dispatch: fncall1 hands the pointer to
+#     downstream code and nothing frees it today, so a listener that retains
+#     the event is currently correct. Freeing after dispatch would make that a
+#     use-after-free for every existing consumer — a contract change, not a
+#     repair. Tracked in the roadmap.
+#
+# Returns 1 if the event was delivered to the listener, 0 otherwise.
+fn _udev_handle_event(mon, listener_fn, uevent) {
+    if (uevent == 0) { return 0; }
+    var dev_event = udev_event_to_device_event(uevent);
+    udev_event_free(uevent);
+    if (dev_event == 0) { return 0; }
+
+    var deliver = 1;
+    var filter = load64(mon + 16);
+    if (filter != 0) {
+        var class = de_device_class(dev_event);
+        var found = 0;
+        var flen = vec_len(filter);
+        for (var i = 0; i < flen; i = i + 1) {
+            if (vec_get(filter, i) == class) { found = 1; }
+        }
+        if (found == 0) { deliver = 0; }
+    }
+
+    if (deliver == 1) {
+        fncall1(listener_fn, dev_event);
+        return 1;
+    }
+    # Nobody saw this event, so we still own everything it carries. That
+    # includes the DeviceInfo attached by udev_event_to_device_event, which
+    # device_event_free does NOT release — it frees the event struct only,
+    # deliberately, because a DeviceInfo can be shared and it has no way to
+    # know. Here we do know: both were created for this event a few lines
+    # ago and no listener ever received them.
+    #
+    # Before 2.3.7 DeviceInfo was bump-allocated, so this leak was invisible
+    # to freelist accounting. Making device_info_free real is what surfaced
+    # it — the monitor leak test failed on exactly this.
+    var orphan_info = de_device_info(dev_event);
+    if (orphan_info != 0) { device_info_free(orphan_info); }
+    device_event_free(dev_event);
+    return 0;
+}
+
+# No `continue` in this loop: 2.3.5 measured a `continue` aborting the
+# partition-scan loop in this same file after one iteration, and the trigger
+# was never isolated. A monitor loop that silently stops iterating would be
+# far worse than the leak this release fixes.
 pub fn udev_monitor_run(mon, listener_fn) {
     sakshi_span_enter("udev_monitor", 12);
     while (udev_monitor_is_running(mon)) {
         var r = udev_monitor_poll(mon, 500);
-        if (is_ok(r) == 0) { continue; }
-        var uevent = payload(r);
-        if (uevent == 0) { continue; }
-
-        var dev_event = udev_event_to_device_event(uevent);
-        if (dev_event == 0) { continue; }
-
-        # Check monitor-level filter
-        var filter = load64(mon + 16);
-        if (filter != 0) {
-            var class = de_device_class(dev_event);
-            var found = 0;
-            var flen = vec_len(filter);
-            for (var i = 0; i < flen; i = i + 1) {
-                if (vec_get(filter, i) == class) { found = 1; break; }
-            }
-            if (found == 0) { continue; }
+        if (is_ok(r)) {
+            _udev_handle_event(mon, listener_fn, payload(r));
         }
-
-        fncall1(listener_fn, dev_event);
     }
     sakshi_span_exit();
     return Ok(0);

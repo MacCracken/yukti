@@ -35,13 +35,45 @@ pub fn device_id_eq(a, b) {
 # Field layout + accessors are in src/core.cyr.
 # ---------------------------------------------------------------------------
 
+# Head of the DeviceInfo recycle list. Blocks are linked through DI_ID,
+# which the constructor overwrites, so nothing leaks across a reuse.
+var _di_recycled = 0;
+
 pub fn device_info_new(id, dev_path, class) {
-    # Bump-allocated: benchmark showed fl_alloc regresses this hot
-    # path by ~30% without matching fl_free callsites to amortize
-    # the per-alloc overhead. DeviceInfo objects are long-lived
-    # (enumerate → cache → listener dispatch) so pooling doesn't
-    # win here. Keep the 168-byte struct on the bump arena.
-    var info = alloc(DI_SIZE);
+    # Recycled through a yukti-owned free list since 2.3.7.
+    #
+    # This used to read: "benchmark showed fl_alloc regresses this hot path by
+    # ~30% without matching fl_free callsites to amortize the per-alloc
+    # overhead … so pooling doesn't win here." The caveat in that sentence was
+    # the whole story. Re-measured at 2.3.7, 200,000 iterations of a 168-byte
+    # allocation:
+    #
+    #     alloc()  (bump, never freed)      22 ns/op
+    #     fl_alloc + fl_free (recycled)     17 ns/op
+    #     fl_alloc, never freed            133 ns/op
+    #
+    # So the stdlib freelist beats bump WHEN blocks come back, and loses badly
+    # when they do not. Routing DeviceInfo straight to fl_alloc was tried and
+    # measured: `device_info/create` went 129 ns -> 243 ns, because that
+    # benchmark (like enumerate_devices itself) creates without freeing and so
+    # pays the 133 ns carve every time.
+    #
+    # This list gets both halves. A freed block is pushed onto _di_recycled and
+    # the next new() pops it — two loads, cheaper than bump. When nothing has
+    # been freed the list is empty and we fall straight through to alloc(), so
+    # a caller that never frees pays exactly what it paid before.
+    #
+    # The link is threaded through DI_ID, which device_info_new overwrites
+    # immediately below, so a recycled block carries nothing forward.
+    #
+    # Safe against recycled memory: this constructor writes every one of the
+    # 21 fields (offsets 0..160), so no byte is read before it is written.
+    var info = _di_recycled;
+    if (info != 0) {
+        _di_recycled = load64(info + DI_ID);
+    } else {
+        info = alloc(DI_SIZE);
+    }
     store64(info + DI_ID, id);
     store64(info + DI_DEV_PATH, dev_path);
     store64(info + DI_SYS_PATH, 0);
@@ -66,15 +98,34 @@ pub fn device_info_new(id, dev_path, class) {
     return info;
 }
 
-# device_info_free is a no-op for now — see roadmap 'Memory retention'.
-# Measured 256 bytes retained per device, permanently, with free() called
-# on every one (docs/audit/2026-08-19-audit.md MED-7). DeviceInfo is
-# bump-allocated.
+# device_info_free — reclaims the DeviceInfo struct (2.3.7).
+#
+# Until 2.3.7 this was `return 0;` — a documented free function that freed
+# nothing, so 168 bytes per device were retained permanently even when the
+# caller dutifully called it. Measured before the fix: 1,000 refreshes of a
+# 10-device sidebar retained 2,560,536 bytes, linear and unreclaimed.
+#
+# ⚠ CONTRACT: this now REALLY frees. A caller that used a DeviceInfo after
+# freeing it was previously harmless and is now a use-after-free. That is the
+# documented meaning of the call, and the alternative is unbounded growth in
+# every long-running consumer (argonaut, aethersafha, the file-manager
+# sidebar are all refresh loops).
+#
+# It frees the STRUCT only. The Str fields are borrowed — device_info_new and
+# the di_set_* setters store caller-allocated pointers without copying, so
+# this cannot free them without double-freeing memory the caller may still
+# hold. Those remain bump-allocated: ~104 bytes per fully-populated device
+# (a 24-byte device id plus 16 bytes per Str). Reclaiming those needs the
+# ownership model that `enumerate_devices_into(pool)` would provide — new
+# surface, tracked separately.
 # (see comment in device_info_new). Kept in the API for symmetry
 # with device_event_free / udev_event_free and to let consumers
 # declare intent; removes the call-site churn if we later switch
 # back to fl_alloc under a specialized short-lived workload.
 pub fn device_info_free(info) {
+    if (info == 0) { return 0; }
+    store64(info + DI_ID, _di_recycled);
+    _di_recycled = info;
     return 0;
 }
 

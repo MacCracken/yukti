@@ -3,7 +3,7 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.3.7: audit follow-through
+## Next patch — 2.3.8: audit follow-through
 
 2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
 findings it fixed are in `CHANGELOG.md`; the full write-up with severity,
@@ -12,33 +12,44 @@ file:line and refuted claims is
 
 2.3.5 took the confidently-wrong-answer batch and the test-credibility
 work; 2.3.6 audited every CI gate by deliberately breaking what each one
-checks (5 of 16 were broken, and a 6th category had no gate at all).
-These are what remains. All were independently
+checks (5 of 16 were broken, and a 6th category had no gate at all);
+2.3.7 closed the memory-retention theme. These are what remains. All were independently
 re-verified; none is speculative. Everything here is a REPAIR: no item in
 this list adds public surface, so it all belongs in the 2.3.x line.
 
-### Memory retention — the theme that ties three findings together
+### Memory retention — residue after 2.3.7
 
-- [ ] **`DeviceInfo` is retained forever.** `src/device.cyr:69`.
-      `device_info_free` is a no-op and **measured 256 bytes retained per
-      device, permanently** — 1,000 refreshes of a 10-device sidebar
-      retains 2,560,536 bytes, linear and unreclaimed, with
-      `device_info_free()` called on every one. The deferral comment's
-      rationale ("DeviceInfo objects are long-lived … so pooling doesn't
-      win here") is true for a single enumeration and false for a daemon,
-      and a no-op `free` actively misleads a caller into believing it
-      released memory. argonaut, aethersafha and the file-manager sidebar
-      are all long-running refresh loops. **Re-frame the 2.5.0
-      `enumerate_devices_into(pool)` item** below: it is filed as an
-      ergonomics/performance idea and is really the fix for this.
-- [ ] **`udev_monitor_run` leaks per event.** `src/udev.cyr:727`. Every
-      `continue` in the monitor loop abandons the `UdevEvent` (two
-      freelist blocks) and its parsed property hashmap.
-- [ ] **`device_db_open` overwrites a live handle without closing it.**
-      `src/device_db.cyr:122`. A failed re-open also zeroes `_yukti_db`,
-      silently disabling every later DB call.
+2.3.7 fixed the three findings under this heading (`DeviceInfo` recycle
+list, `udev_monitor_run` per-event leak, `device_db_open` fd leak). Two
+ownership questions it deliberately did NOT settle:
 
-### Correctness
+- [ ] **`DeviceInfo`'s `Str` fields are still bump-allocated and never
+      reclaimed** — 88 bytes per device (a 24-byte device id plus 16 bytes
+      per Str). `device_info_new` and the `di_set_*` setters store
+      caller-allocated pointers **without copying**, so `device_info_free`
+      cannot free them without double-freeing memory the caller may still
+      hold. This is what `enumerate_devices_into(pool)` (2.5.0) is really
+      for: it is filed there as an ergonomics idea and is actually the
+      ownership model this needs. Retention went 272 -> 88 B/device in
+      2.3.7; closing the last 88 needs that API.
+- [ ] **The `DeviceEvent` dispatched to a listener is never freed.**
+      `_udev_handle_event` frees it only on the filter-reject path.
+      `fncall1(listener_fn, dev_event)` hands the pointer downstream and
+      nothing frees it today, so a listener that RETAINS the event is
+      currently correct — freeing after dispatch would be a use-after-free
+      for every existing consumer. Settling this means documenting whether
+      a listener may retain, which is a contract decision for the
+      consumers (jalwa, argonaut, aethersafha, file manager), not a
+      unilateral repair.
+- [ ] **The `DeviceInfo` recycle list has no double-free detection.**
+      A plain LIFO threaded through `DI_ID`; freeing the same block twice
+      makes it cyclic. The stdlib freelist has poison mode, but routing
+      `DeviceInfo` through `fl_alloc` was measured to cost 129 -> 243 ns on
+      `device_info/create` because that path creates without freeing. If
+      double-frees become a real risk, a cheap generation tag in an unused
+      field would catch them without the allocator cost.
+
+### Correctness### Correctness
 
 - [ ] **GPT fields used without range validation.**
       `src/partition.cyr:359` (entry-array byte offset can wrap i64 to 0)

@@ -78,14 +78,30 @@ jobs:
         # Treat any warning as a failure (fail on any cyrlint "  warn " line).
         run: |
           fail=0
+          deferrals=0
           for f in src/*.cyr programs/*.cyr tests/tcyr/*.tcyr tests/bcyr/*.bcyr fuzz/*.fcyr; do
             out=$(cyrius lint "$f" 2>&1)
             echo "$out"
             if echo "$out" | grep -qE '^\s*warn '; then
               fail=1
             fi
+            # cyrlint reports untracked deferrals ("for now", "deferred",
+            # "out of scope", …) separately from warnings. CI only ever
+            # failed on `warn`, so these accumulated silently: at 2.3.6 the
+            # tree had SIX, and THREE of them had been introduced by 2.3.5
+            # itself without anything objecting. A deferral with no
+            # cross-reference is an untracked promise — exactly the class
+            # that let "skip mock sysfs for now" sit stale from April to
+            # August while hiding two real bugs. Fix by naming a
+            # CHANGELOG/roadmap/issue entry ON THE SAME LINE as the keyword,
+            # or marking the line #skip-lint.
+            n=$(echo "$out" | grep -oP '^\d+(?= untracked deferrals)' || echo 0)
+            deferrals=$((deferrals + ${n:-0}))
           done
           [ $fail -eq 0 ] || { echo "lint: warnings present"; exit 1; }
+          [ $deferrals -eq 0 ] || {
+            echo "lint: $deferrals untracked deferral(s) — cross-reference each on the same line, or #skip-lint"
+            exit 1; }
 
       - name: Format check
         # MUST use `--check`. Do not go back to diffing `cyrius fmt <file>`
@@ -113,7 +129,39 @@ jobs:
           [ $fail -eq 0 ] || { echo "fmt: drift detected"; exit 1; }
 
       - name: Vet
-        run: cyrius vet src/main.cyr
+        # Two defects fixed at 2.3.6, both measured:
+        #
+        #   1. WRONG TARGET. `cyrius vet` does NOT recurse. Pointed at
+        #      src/main.cyr it sees exactly one include (src/lib.cyr) and
+        #      reports "1 deps, 0 untrusted, 0 missing" no matter what —
+        #      it never looks at the 40 includes inside lib.cyr, which is
+        #      where the entire dependency surface lives. Pointed at
+        #      src/lib.cyr it reports 33 deps. So the gate was scanning
+        #      the one file in the tree that has nothing to find.
+        #
+        #   2. IT EXITS 0 EVEN WHEN IT FINDS SOMETHING. Injecting
+        #      `include "lib/totally_untrusted_thing.cyr"` makes vet print
+        #      "34 deps, 0 untrusted, 1 missing" — and still exit 0. So
+        #      `run: cyrius vet ...` could never fail the build on its own.
+        #      (The compiler does catch a missing include, but "untrusted"
+        #      has no other check anywhere.)
+        #
+        # Scan lib.cyr (the real include chain) and parse the summary,
+        # because the exit code cannot be trusted.
+        run: |
+          out=$(cyrius vet src/lib.cyr 2>&1)
+          echo "$out"
+          summary=$(echo "$out" | grep -E '[0-9]+ deps, [0-9]+ untrusted, [0-9]+ missing' | tail -1)
+          [ -n "$summary" ] || { echo "FAIL: vet produced no summary line"; exit 1; }
+          untrusted=$(echo "$summary" | grep -oE '[0-9]+ untrusted' | grep -oE '[0-9]+')
+          missing=$(echo "$summary" | grep -oE '[0-9]+ missing' | grep -oE '[0-9]+')
+          deps=$(echo "$summary" | grep -oE '[0-9]+ deps' | grep -oE '[0-9]+')
+          # A scan that finds almost nothing means it was pointed at the
+          # wrong file again — the chain is 30+ modules.
+          [ "$deps" -ge 20 ] || { echo "FAIL: vet only saw $deps deps; expected the full chain (>=20)"; exit 1; }
+          [ "$untrusted" -eq 0 ] || { echo "FAIL: $untrusted untrusted dep(s)"; exit 1; }
+          [ "$missing" -eq 0 ] || { echo "FAIL: $missing missing dep(s)"; exit 1; }
+          echo "vet: $deps deps, 0 untrusted, 0 missing" 
 
       - name: Verify dist bundles are in sync with src/
         run: |
@@ -163,11 +211,30 @@ jobs:
             name=$(basename "$f" .fcyr)
             CYRIUS_DCE=1 cyrius build --aarch64 "$f" "build/${name}-aarch64"
           done
-          for bin in build/yukti-aarch64 build/core_smoke-aarch64 build/*-aarch64; do
+          # `file -b`, NOT `file`. Fixed at 2.3.6: this used
+          # `file "$bin" | grep -q "aarch64"`, and `file` prints the FILENAME
+          # ahead of the description. Every binary checked here is named
+          # `*-aarch64` by construction, so the grep matched the NAME and the
+          # architecture check was tautological — it could never fail.
+          # Measured: an x86_64 build copied to `impostor-aarch64` passed,
+          # even though `file` described it as "x86-64". `-b` (brief) omits
+          # the filename and rejects it correctly.
+          #
+          # The loop is also counted now. `[ -f "$bin" ] || continue` means a
+          # run that produced NO binaries would skip every iteration and pass
+          # vacuously.
+          checked=0
+          for bin in build/*-aarch64; do
             [ -f "$bin" ] || continue
-            file "$bin" | grep -q "aarch64" || {
-              echo "ERROR: $bin is not an aarch64 ELF"; exit 1; }
+            file -b "$bin" | grep -q "ARM aarch64" || {
+              echo "ERROR: $bin is not an aarch64 ELF: $(file -b "$bin")"; exit 1; }
+            checked=$((checked + 1))
           done
+          # main + core_smoke + one per fuzz harness
+          expected=$(( 2 + $(ls fuzz/*.fcyr | wc -l) ))
+          [ "$checked" -eq "$expected" ] || {
+            echo "ERROR: verified $checked aarch64 binaries, expected $expected"; exit 1; }
+          echo "aarch64: $checked binaries verified"
           echo "yukti-aarch64: $(wc -c < build/yukti-aarch64) bytes"
 
       - name: Test
@@ -312,8 +379,37 @@ jobs:
           exit $MISSING
 
       - name: Verify version consistency
+        # This used to be `grep -q "$VERSION" CHANGELOG.md`, which accepts the
+        # version appearing ANYWHERE in the file — including in a historical
+        # entry or in prose. Measured at 2.3.6: with the tree at 2.3.5, setting
+        # VERSION back to **2.3.2** (a rollback of four releases) still PASSED,
+        # because 2.3.2 has its own old entry. So the gate could not detect a
+        # version regression or a stale VERSION file at all — the only thing it
+        # caught was a version that had never been mentioned.
+        #
+        # Now: VERSION must be semver-shaped, must equal the CHANGELOG's TOP
+        # entry, and must match both generated dist bundle headers. That is the
+        # same set that has been checked by hand at every release since 2.3.3.
         run: |
           VERSION=$(cat VERSION | tr -d '[:space:]')
           echo "VERSION file: $VERSION"
-          grep -q "$VERSION" CHANGELOG.md || { echo "FAIL: version not in CHANGELOG.md"; exit 1; }
-          echo "Version consistent (manifest pulls VERSION via \${file:VERSION})"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "FAIL: VERSION ($VERSION) is not semver x.y.z"; exit 1; }
+
+          TOP=$(grep -oP '(?<=^## \[)[0-9]+\.[0-9]+\.[0-9]+(?=\])' CHANGELOG.md | head -1)
+          [ -n "$TOP" ] || { echo "FAIL: no '## [x.y.z]' entry found in CHANGELOG.md"; exit 1; }
+          [ "$VERSION" = "$TOP" ] || {
+            echo "FAIL: VERSION ($VERSION) != top CHANGELOG entry ($TOP)"
+            echo "      A release must add its OWN entry at the top of CHANGELOG.md."
+            exit 1; }
+
+          for bundle in dist/yukti.cyr dist/yukti-core.cyr; do
+            BV=$(grep -oP '(?<=^# Version: )[0-9]+\.[0-9]+\.[0-9]+' "$bundle" | head -1)
+            [ "$VERSION" = "$BV" ] || {
+              echo "FAIL: $bundle says $BV, VERSION says $VERSION"
+              echo "      Run 'cyrius distlib' and 'cyrius distlib core' and commit."
+              exit 1; }
+          done
+
+          echo "Version consistent: VERSION = CHANGELOG top = both dist bundles = $VERSION"
+          echo "(cyrius.cyml pulls VERSION via \${file:VERSION})"

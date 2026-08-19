@@ -1515,7 +1515,8 @@ fn test_rule_accessors() {
 }
 
 # ===================================================================
-# Linux device manager tests (13 in Rust — skip mock sysfs for now)
+# Linux device manager tests — all 13 ported as of 2.3.5. The mock-sysfs
+# blocker this header used to cite was stale; see the block below.
 # ===================================================================
 
 # ===================================================================
@@ -1591,11 +1592,11 @@ fn test_span_balance_on_error_paths() {
 }
 
 # ===================================================================
-# Mock sysfs — the 8 device-manager tests deferred since the April 2026
-# Rust port (2.3.5)
+# Mock sysfs — the 8 device-manager tests that the April 2026 Rust port
+# left unported (landed 2.3.5)
 #
 # yukti.tcyr carried "Linux device manager tests (13 in Rust — skip mock
-# sysfs for now)" and only 5 of the 13 were ported. The blocker was
+# sysfs)" and only 5 of the 13 were ported. The blocker was
 # building a fake /sys tree. That blocker was STALE: `linux_dm_with_root`
 # has always existed and `linux_dm_enumerate` honours it
 # (src/linux.cyr:64 reads ldm_sysfs_root), and enumerate_devices simply

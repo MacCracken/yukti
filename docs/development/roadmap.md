@@ -3,7 +3,7 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.3.6: audit follow-through
+## Next patch — 2.3.7: audit follow-through
 
 2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
 findings it fixed are in `CHANGELOG.md`; the full write-up with severity,
@@ -11,7 +11,9 @@ file:line and refuted claims is
 [`docs/audit/2026-08-19-audit.md`](../audit/2026-08-19-audit.md).
 
 2.3.5 took the confidently-wrong-answer batch and the test-credibility
-work — see `CHANGELOG.md`. These are what remains. All were independently
+work; 2.3.6 audited every CI gate by deliberately breaking what each one
+checks (5 of 16 were broken, and a 6th category had no gate at all).
+These are what remains. All were independently
 re-verified; none is speculative. Everything here is a REPAIR: no item in
 this list adds public surface, so it all belongs in the 2.3.x line.
 
@@ -102,9 +104,9 @@ this list adds public surface, so it all belongs in the 2.3.x line.
       "rejected by validation" from "unlink failed". The name gate itself
       is covered by the four `validate_rule` assertions. (The other
       cannot-fail assertions were replaced in 2.3.5.)
-- [ ] **`pci_device_name` stub silently ignores `device_id`.**
-      `src/pci.cyr:211`. Untracked deferral — needs this cross-reference or
-      a `#skip-lint`.
+- [ ] **`pci_device_name` silently ignores `device_id`.** `src/pci.cyr`.
+      The deferral is now cross-referenced and CI gates on that (2.3.6), but
+      the API still takes an argument it discards — a caller cannot tell.
 - [ ] **`storage_eject` duplicates `optical.cyr`'s eject path** with its own
       ioctl constant (`src/storage.cyr:695`); the nvme and mmcblk branches
       at `:708` are byte-identical.

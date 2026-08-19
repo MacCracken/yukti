@@ -7,6 +7,133 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.6] — 2026-08-19
+
+**Gate audit.** 2.3.3 found the format gate failing every file unconditionally;
+2.3.5 found the large-stack-buffer check reporting wrong line numbers and
+matching inside comments. Two broken gates in three releases, both discovered
+only because something happened to trip them, is a pattern — so this release
+audits every gate the way those two were found: **deliberately break the thing
+each one checks and confirm it fails.**
+
+Result: of 16 gates, **5 were broken** and 1 category had no gate at all. Every
+one of the five would have passed a genuinely bad tree.
+
+753 assertions, 3/3 fuzz, `core_smoke` passes, lint 0 warnings, **0 untracked
+deferrals** (was 6), fmt clean, vet clean, x86_64 / aarch64 / agnos all build.
+
+### Fixed — the version gate could not detect a version regression
+
+`grep -q "$VERSION" CHANGELOG.md` matches the version **anywhere** in the file,
+including its own historical entry. Measured with the tree at 2.3.5:
+
+| VERSION | old gate |
+|---|---|
+| `2.3.2` — rolled back **four releases** | **PASS** |
+| `9.9.9` — never existed | FAIL |
+
+So the only thing it caught was a version that had never been mentioned. A
+rollback, or a VERSION left stale while the CHANGELOG moved on, sailed through.
+
+Now: VERSION must be semver-shaped, must equal the CHANGELOG's **top** entry,
+and must match **both** dist bundle headers — the same set that has been
+checked by hand at every release since 2.3.3. Verified: 2.3.2 against a 2.3.5
+tree now fails.
+
+### Fixed — the vet gate was scanning the one file with nothing in it, and could not fail anyway
+
+Two independent defects:
+
+1. **Wrong target.** `cyrius vet` does not recurse. Pointed at `src/main.cyr`
+   it sees exactly one include (`src/lib.cyr`) and reports
+   `1 deps, 0 untrusted, 0 missing` regardless of the tree's state. Pointed at
+   `src/lib.cyr` — the actual include chain — it reports **33 deps**.
+2. **It exits 0 even when it finds something.** Injecting
+   `include "lib/totally_untrusted_thing.cyr"` makes vet print
+   `34 deps, 0 untrusted, 1 missing` **and exit 0**. So `run: cyrius vet …`
+   could never fail the build on its own, at any target.
+
+Now scans `src/lib.cyr` and parses the summary, because the exit code cannot be
+trusted: it fails on any untrusted or missing dep, and also fails if the scan
+sees fewer than 20 deps (which would mean it was pointed at the wrong file
+again). Verified in both directions.
+
+### Fixed — the aarch64 architecture check was tautological
+
+```sh
+file "$bin" | grep -q "aarch64"
+```
+
+`file` prints the **filename** ahead of its description, and every binary this
+loop checks is named `*-aarch64` by construction. So the grep matched the
+name, never the architecture, and the check could not fail. Measured: an
+**x86_64** build copied to `impostor-aarch64` passed the gate, while `file`
+described it as `x86-64`.
+
+Now uses `file -b` (brief — omits the filename) and greps for `ARM aarch64`.
+The impostor is now rejected. The loop is also **counted**: it was
+`[ -f "$bin" ] || continue`, so a run that produced no binaries at all would
+skip every iteration and pass vacuously. It now asserts it verified exactly
+`2 + <fuzz harness count>` binaries — 5 today.
+
+### Fixed — a release could publish with empty notes
+
+The release workflow extracts its body with an awk range on
+`^## \[<tag>\]`. A tag with no matching heading yields a **0-byte** body, exit
+0, and a published release with no notes. Measured: tag `9.9.9` → 0 bytes, no
+error. The hardened version gate above makes that unreachable transitively
+(VERSION = tag there, VERSION = CHANGELOG top here), but a silent, user-visible
+failure is worth its own guard. The step now fails on an empty body and prints
+the headings it did find.
+
+### Added — a gate for untracked deferrals
+
+cyrlint reports untracked deferrals (`for now`, `deferred`, `out of scope`, …)
+separately from warnings, and CI only ever failed on `warn`. So they
+accumulated invisibly: the tree had **6**, and **3 of those were introduced by
+2.3.5 itself** with nothing objecting.
+
+This is not bookkeeping. An untracked deferral is an unrecorded promise, and it
+is exactly the class that let `skip mock sysfs for now` sit from April to
+August — during which the tests it was deferring turned out to be the ones that
+found `str_starts_with` being wrong at all six call sites and partitions never
+being enumerated at all.
+
+All 6 are now resolved — cross-referenced to the roadmap or audit **on the same
+line as the keyword**, which is what cyrlint requires — and CI fails on any
+new one. Verified: adding `# this is a hack for now` fails the gate.
+
+### Verified working — no change needed
+
+Broken by deliberate injection, confirmed to fail, then restored:
+
+| gate | how it was proven |
+|---|---|
+| Lint | a >120-char line → `warn line 224` → gate fires |
+| Test | a forced failing assertion → exit 1 |
+| Kernel-safe tripwire | `DC_USB_STORAGE == 999` → `FAIL: DC_USB_STORAGE`, exit 1 |
+| Fuzz | harness exiting 3 → gate fires |
+| Bench | bench exiting 4 → gate fires |
+| Dist sync | edited `src/pci.cyr` → regenerated bundles differ |
+| Verify ELF | non-ELF file → magic check fires |
+| Required files | removed `SECURITY.md` → exit 1 |
+| release Verify version | already checks semver shape **and** VERSION == tag |
+| sakshi literal/length | added and verified in 2.3.5 |
+| Format check | fixed and verified in 2.3.3 |
+| Dep-hash verify | verified in 2.3.3 (`38 verified, 1 failed`, exit 1) |
+
+### Notes
+
+- Every gate fixed here was **latent from the day it was written**. None broke;
+  they were never able to fail. The recurring shape is a check that looks
+  plausible and matches something other than what it means to match — a
+  filename instead of an architecture, any historical mention instead of the
+  current entry, one file instead of the chain, a comment instead of code.
+- The same shape is still present upstream in `dist/yukti-core.deps`, which
+  lists `alloc` because cyrius's sidecar generator matches the word inside a
+  comment. Confirmed by experiment in 2.3.4; not fixable here (CI's dist-sync
+  gate would reject a hand-edit) and still filed for upstream.
+
 ## [2.3.5] — 2026-08-19
 
 Repair release: the confidently-wrong answers from the 2.3.4 audit backlog,

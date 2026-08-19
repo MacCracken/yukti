@@ -66,7 +66,10 @@ pub fn device_info_new(id, dev_path, class) {
     return info;
 }
 
-# device_info_free is a no-op for now — DeviceInfo is bump-allocated
+# device_info_free is a no-op for now — see roadmap 'Memory retention'.
+# Measured 256 bytes retained per device, permanently, with free() called
+# on every one (docs/audit/2026-08-19-audit.md MED-7). DeviceInfo is
+# bump-allocated.
 # (see comment in device_info_new). Kept in the API for symmetry
 # with device_event_free / udev_event_free and to let consumers
 # declare intent; removes the call-site churn if we later switch

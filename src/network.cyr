@@ -385,7 +385,7 @@ pub fn network_probe_host(host_cstr, port) {
     #
     # Fail closed instead: anything that is not exactly four 0..255 octets
     # is not something this function can probe, so report unreachable rather
-    # than probing a different machine. Name resolution is out of scope —
+    # than probing a different machine. Name resolution is not in scope —
     # yukti has no resolver and inventing one here would be new surface.
     var ip = _parse_dotted_quad(host_cstr);
     if (ip < 0) {

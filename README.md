@@ -58,7 +58,7 @@ main();
 
 ## Build
 
-Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.5.3 or newer.
+Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.5.29 or newer.
 
 ```sh
 # Resolve deps into lib/

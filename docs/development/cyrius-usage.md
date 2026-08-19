@@ -4,12 +4,12 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 6.5.3 (`cyrius = "6.5.3"` in `cyrius.cyml`).
+**Toolchain pin**: 6.5.29 (`cyrius = "6.5.29"` in `cyrius.cyml`).
 `cyrius` drives the compiler internally (`cycc`, named `cc5` before
 Cyrius 6.0) — never shell out to it directly.
 
 Upgrade notes — **historical record** (5.5.11 → 5.7.48, a full major
-behind the current 6.5.3 pin; retained for the two language gotchas,
+behind the current 6.5.29 pin; retained for the two language gotchas,
 not as current guidance): that arc was mostly stdlib expansion
 (json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
 HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
@@ -68,13 +68,13 @@ not been re-run since the 2.1.4 migration (see
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 6.5.3):
+- **Stdlib modules** (ship with Cyrius 6.5.29):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
   `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`,
   `atomic`, `sync`, `thread_local`
 - **First-party deps** (pinned in `[deps.*]`):
-  - `sakshi` 2.4.6 — structured logging
-  - `patra` 1.12.12 — persistent device history
+  - `sakshi` 2.4.10 — structured logging
+  - `patra` 1.13.8 — persistent device history
 
 ```sh
 cyrius deps              # resolve [deps] into lib/
@@ -98,7 +98,7 @@ verified on real Cortex-A72 for `core_smoke`, the three fuzz
 targets, and the main CLI — but the full-target retest, the tcyr
 suite in particular, has not been re-run on hardware since the
 2.1.4 syscall migration, so aarch64 stays **held** pending a
-retest under the current 6.5.3 toolchain. The backend binary was
+retest under the current 6.5.29 toolchain. The backend binary was
 renamed `cc5_aarch64` → `cycc_aarch64` in Cyrius 6.0.
 See `docs/development/issues/2026-04-19-aarch64-syscall-portability.md`,
 `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`, and
@@ -123,7 +123,7 @@ cyrius build fuzz/fuzz_partition_table.fcyr build/fuzz_partition_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.5.3)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.5.29)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so
@@ -156,21 +156,36 @@ cyrius build programs/core_smoke.cyr build/core_smoke && ./build/core_smoke
 ## Quality Gates
 
 ```sh
-cyrius fmt <file> --check            # exit-code-only drift check (no stdout)
+cyrius fmt <file> --check            # drift check: diagnostic + exit 1, non-destructive
+cyrius fmt <file> --dry              # same, plus a "WOULD reformat" summary line
+cyrius fmt <file>                    # REWRITES THE FILE IN PLACE
 cyrius lint <file>                   # static checks; treat warnings as errors
 cyrius vet src/main.cyr              # audit include dependencies
 cyrius audit                         # project sweep: fmt/lint/docs/tests/bench
 ```
 
-`fmt --check` emits nothing on stdout — it signals drift through the
-exit code alone (non-zero when the file needs formatting). Plain
-`cyrius fmt <file>` prints the formatted source without rewriting the
-file, which is what CI diffs against the committed source (it used
-`--check` pre-2.2.2, where the empty stdout made the diff always fire):
+⚠ **`cyrius fmt <file>` with no flag rewrites the file in place and prints
+nothing.** It did once print the formatted source to stdout; on 6.5.29 it
+does not. Anything that captures its stdout gets an empty string.
+
+Use `--check` for gates. On 6.5.29 it prints the offending file and its
+first differing line, exits 1, and leaves the file untouched; on a clean
+file it is silent and exits 0. Verified both directions during the 2.3.3
+bump. `--dry` is `--check` plus a trailing summary line.
+
+This corrects the pre-2.3.3 guidance here and in CI, which said
+`--check` was "exit-code-only" and told you to diff the no-flag form's
+stdout instead:
 
 ```sh
-diff -q <(cyrius fmt src/main.cyr) src/main.cyr
+diff -q <(cyrius fmt src/main.cyr) src/main.cyr   # ⚠ BROKEN on 6.5.29
 ```
+
+That compares empty output against the file, so it reports drift on every
+file no matter how clean the tree is — and, because the no-flag form
+*writes*, it silently reformats the checkout as a side effect. The
+canonical continuation indent it enforces is **2 spaces per open paren**
+(4 also accepted).
 
 ## Release
 

@@ -139,11 +139,11 @@ surfaces that matter:
   link surface.
 - `cyrius.lock` records SHA-256 hashes of every resolved
   `lib/*.cyr`. CI runs `cyrius deps --verify` on every build.
-- First-party deps only — `sakshi 2.4.6` (logging), `patra 1.12.12`
+- First-party deps only — `sakshi 2.4.10` (logging), `patra 1.13.8`
   (embedded store). Both share the Yukti threat model and are
   audited on the same cadence.
 - Cyrius stdlib (`alloc`, `str`, `vec`, `hashmap`, `io`, `fs`,
-  `process`, etc.) ships with the toolchain release (6.5.3) and
+  `process`, etc.) ships with the toolchain release (6.5.29) and
   is SHA-pinned by the toolchain installer, not by yukti.
 
 ## Audit Cadence

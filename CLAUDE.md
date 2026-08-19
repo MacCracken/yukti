@@ -10,7 +10,7 @@ udev hotplug, mount/eject.
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (sovereign systems language, compiled by cc5)
 - **Version**: SemVer, version file at `VERSION`
-- **Status**: 2.3.2 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
+- **Status**: 2.3.3 — shipping as `lib/yukti.cyr` in Cyrius stdlib since 3.4.12
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
 - **Shared crates**: [shared-crates.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/shared-crates.md)
@@ -36,9 +36,10 @@ re-learning the layout.
 - **Source**: 6,380 lines across 18 files in `src/` — 16 domain modules
   (6,246 lines, matching the `[lib]` module list in `cyrius.cyml`) plus
   the `lib.cyr` include chain and the `main.cyr` CLI entry point
-- **Tests**: 658 assertions, 3 fuzz harnesses, 46 benchmarks
-- **Binary**: ~424 KB x86_64 static ELF, zero external dependencies
-- **Stable**: 2.3.2 — raw syscall cleanup: 40 numeric `syscall(N, …)` sites outside `src/` migrated to stdlib wrappers. 20 raw `syscall(87)` unlinks were `timerfd_gettime` on aarch64, writing 32 bytes through an uninitialised register and corrupting the test counters — the aarch64 suite reported `182 passed, 0 failed` instead of 658, masking 2 real failures. CI now rejects raw numeric syscalls. 2.3.1 — completed the 2.3.0 agnos ABI sweep: `_yk_mkdir` (agnos
+- **Tests**: 669 assertions, 3 fuzz harnesses, 46 benchmarks
+- **Binary**: ~452 KB x86_64 static ELF (463,352 bytes, `CYRIUS_DCE=1`),
+  zero external dependencies
+- **Stable**: 2.3.3 — toolchain + dependency refresh plus the one regression it carried: cyrius 6.5.3 → 6.5.29, sakshi 2.4.6 → 2.4.10, patra 1.12.12 → 1.13.8 (6.5.29 bundles exactly the latter two, clearing both the shadow-lib and toolchain-drift warnings). patra ≥1.13.6 REJECTS a >255-byte STR (`PATRA_ERR_ROWSZ`) where ≤1.12.12 truncated it silently, and yukti discarded all 12 `patra_exec` returns — so any device with a >255-byte identifier stopped being recorded at all, silently. Reachable: `_read_sysfs_attr` reads into a `var attr_buf[256]`, one byte over the cap, and audio's USB `hw_id` concatenates two such reads. Fixed by clamping in `_sql_escape_str` (the single funnel both stored values and WHERE literals pass through, so they still match — this also repairs `is_known`, broken under 1.12.12 too) and by routing the 8 mutating writes through a new `_db_exec` that warns on non-`PATRA_OK`. New boundary tests at 254/255/256/300 bytes, verified to produce 7 failures when the clamp is disabled. The bump broke CI's format gate — 6.5.29's `cyrius fmt <file>` no longer prints to stdout, it rewrites in place, so the gate's `diff <(cyrius fmt $f) $f` compared empty-vs-file and failed all 24 gated sources on a correctly-formatted tree; moved to `cyrius fmt $f --check`. 8 files reformatted to the current canonical continuation indent, proven whitespace-only (`git diff -w` empty) and semantically inert (byte-identical DCE binary). patra's public function set and error constants are unchanged 1.12.12 → 1.13.8; the deltas are behavioural (WHERE type mismatches now error, over-long STR now errors, WAL v3 → v4 with a database identity). 2.3.2 — raw syscall cleanup: 40 numeric `syscall(N, …)` sites outside `src/` migrated to stdlib wrappers. 20 raw `syscall(87)` unlinks were `timerfd_gettime` on aarch64, writing 32 bytes through an uninitialised register and corrupting the test counters — the aarch64 suite reported `182 passed, 0 failed` instead of 658, masking 2 real failures. CI now rejects raw numeric syscalls. 2.3.1 — completed the 2.3.0 agnos ABI sweep: `_yk_mkdir` (agnos
   `sys_mkdir` is `(path, pathlen)`, POSIX is `(path, mode)` — same arity, so no
   compiler diagnostic) and `_yk_umount2` (`sys_umount2` does not exist on agnos;
   fails closed rather than routing to the 0-arity `sys_umount` stub that returns
@@ -46,7 +47,7 @@ re-learning the layout.
   been frozen at 6.4.67-era stdlib, which was masking an undefined `xrmdir`.
   2.3.0 — six agnos syscall ABI mismatches, one of them (`sys_mount`) fabricating
   success. 2.2.1 — audio domain follow-on: `SUBSYSTEM=sound` events with `pcmC*D*` DEVPATH filter classify as `DC_AUDIO`; new `audio_devices` table + `device_db_record_audio_seen`/`_audio_known`/`_audio_last_seen`/`_audio_count` API key persistence by `hw_id` so re-plugging carries history forward. 2.2.0 — audio device discovery via new `src/audio.cyr` (enumerates ALSA PCM devices over `/dev/snd/` + `/proc/asound/` with PCI-BDF / USB-VID:PID anchored hw_ids; surfaces the typed descriptor adapter API for vani 0.3.x's `vani_open_yukti(desc, direction)`). `DC_AUDIO = 9` appended to DeviceClass. Fixed long-standing `_parse_uevent_key` bug in gpu.cyr (was returning whole uevent text instead of value). 2.1.4 — aarch64 *runtime* correct (33 raw-number `syscall(N, …)` sites migrated to stdlib wrappers / `SYS_*` constants; new `src/syscalls.cyr` adds arch-conditional definitions for socket-family + statfs / newfstatat / clock_gettime / ppoll where stdlib has gaps; `udev_monitor_poll` switched poll→ppoll for arch portability). 2.1.3 — aarch64 cross-build clean (30 SYS_OPEN/SYS_CLOSE/SYS_UNLINK sites migrated to stdlib wrappers; patra dep bumped 1.1.1 → 1.9.2 with the matching migration). Kernel-safe subset, multi-profile dist, P(-1) security audit closed (all HIGH/MED/LOW fixed), dual-layer / dual-sided disc support, audio CD ripping API, fuzzed parsers (uevent, mount table, partition table).
-- **Toolchain**: Cyrius 6.5.3 (`cyrius.cyml: cyrius = "6.5.3"`)
+- **Toolchain**: Cyrius 6.5.29 (`cyrius.cyml: cyrius = "6.5.29"`)
 - **Integration**: consumed by jalwa, aethersafha, argonaut, the AGNOS
   file manager; kernel-safe subset consumed by AGNOS kernel
 
@@ -65,11 +66,12 @@ re-learning the layout.
 - **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`,
   `hashmap`, `io`, `fs`, `tagged`, `process`, `fnptr`, `chrono`,
   `args`, `freelist`, `atomic`, `sync`, `thread_local`
-  (ships with Cyrius >= 6.5.3). The last three are patra 1.12.12's
+  (ships with Cyrius >= 6.5.29). The last three are patra 1.13.8's
   transitive requirements — cyrius 6.4.x+ requires them named explicitly
-  in `[deps].stdlib`.
-- **sakshi** 2.4.6 — structured logging (first-party)
-- **patra** 1.12.12 — persistent device history (first-party)
+  in `[deps].stdlib`. As of 2.3.3 `cyrius distlib` also reports all three
+  in `dist/yukti.deps` (18 leaves, was 15).
+- **sakshi** 2.4.10 — structured logging (first-party)
+- **patra** 1.13.8 — persistent device history (first-party)
 
 No external deps. No FFI. No libc. All first-party, pinned in
 `cyrius.cyml` and SHA-locked in `cyrius.lock`.
@@ -272,7 +274,7 @@ unreliable) saves a lot of debug time.
 
 ## CI / Release
 
-- **Toolchain pin**: `cyrius = "6.5.3"` in `cyrius.cyml`. Release and CI
+- **Toolchain pin**: `cyrius = "6.5.29"` in `cyrius.cyml`. Release and CI
   both read from the manifest; no hardcoded versions in YAML
 - **Dead code elimination**: `cyrius build` already strips unreachable
   functions; the `dead:` report is informational
@@ -280,6 +282,10 @@ unreliable) saves a lot of debug time.
 - **Version-verify gate**: release asserts `VERSION == cyrius.cyml version ==
   git tag` before building
 - **Lint gate**: CI runs `cyrius lint` per source; treat warnings as errors
+- **Format gate**: CI runs `cyrius fmt <file> --check` per source. Must be
+  `--check` — the no-flag `cyrius fmt <file>` rewrites in place and prints
+  nothing on 6.5.29, so diffing its stdout fails every file and mutates the
+  checkout (fixed at 2.3.3)
 - **Lock gate**: CI runs `cyrius deps --verify` against committed
   `cyrius.lock`; mismatch fails the build
 - **Dist gate**: CI regenerates `dist/yukti.cyr` and `dist/yukti-core.cyr`

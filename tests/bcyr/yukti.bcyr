@@ -36,9 +36,9 @@ fn setup() {
     map_set(usb_props, "ID_USB_DRIVER", str_from("usb-storage"));
     map_set(usb_props, "ID_PART_ENTRY_SIZE", str_from("31457280"));
     _b_usb_event = udev_event_new(str_from("add"),
-    str_from("/sys/devices/pci0000:00/usb1/1-1/block/sdb/sdb1"),
-    str_from("/dev/sdb1"), str_from("block"),
-    str_from("partition"), usb_props);
+      str_from("/sys/devices/pci0000:00/usb1/1-1/block/sdb/sdb1"),
+      str_from("/dev/sdb1"), str_from("block"),
+      str_from("partition"), usb_props);
 
     # Optical udev event
     var opt_props = map_new();
@@ -48,15 +48,15 @@ fn setup() {
     map_set(opt_props, "ID_FS_TYPE", str_from("iso9660"));
     map_set(opt_props, "ID_FS_LABEL", str_from("MOVIE_DISC"));
     _b_opt_event = udev_event_new(str_from("change"),
-    str_from("/sys/devices/pci0000:00/ata1/host0/block/sr0"),
-    str_from("/dev/sr0"), str_from("block"),
-    str_from("disk"), opt_props);
+      str_from("/sys/devices/pci0000:00/ata1/host0/block/sr0"),
+      str_from("/dev/sr0"), str_from("block"),
+      str_from("disk"), opt_props);
 
     # DM udev event
     _b_dm_event = udev_event_new(str_from("add"),
-    str_from("/sys/devices/virtual/block/dm-0"),
-    str_from("/dev/dm-0"), str_from("block"),
-    str_from("disk"), map_new());
+      str_from("/sys/devices/virtual/block/dm-0"),
+      str_from("/dev/dm-0"), str_from("block"),
+      str_from("disk"), map_new());
 
     # Mount table
     var mt_sb = str_builder_new();
@@ -77,7 +77,7 @@ fn setup() {
 
     # Event
     _b_event = device_event_new(device_id_new_cstr("block:sdb1"), DC_USB_STORAGE,
-    EK_ATTACHED, str_from("/dev/sdb1"));
+      EK_ATTACHED, str_from("/dev/sdb1"));
     return 0;
 }
 
@@ -126,7 +126,7 @@ fn _b_cap_all() {
 # device_event
 fn _b_event_create() {
     device_event_new(device_id_new_cstr("block:sdb1"), DC_USB_STORAGE,
-    EK_ATTACHED, str_from("/dev/sdb1"));
+      EK_ATTACHED, str_from("/dev/sdb1"));
     return 0;
 }
 fn _b_event_is_attach() { device_event_is_attach(_b_event); return 0; }

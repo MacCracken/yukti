@@ -570,19 +570,19 @@ pub fn storage_mount(dev_path_cstr, options) {
     if (st_rc < 0) {
         sakshi_span_exit();
         return err_mount_failed(str_from(dev_path_cstr),
-        str_from("mount target stat failed"));
+          str_from("mount target stat failed"));
     }
     var mode = load32(&stbuf + 24);
     var fmt = mode & 61440;   # 0xF000
     if (fmt == 40960) {       # 0xA000 — symlink
         sakshi_span_exit();
         return err_mount_failed(str_from(dev_path_cstr),
-        str_from("mount target is a symlink (TOCTOU guard)"));
+          str_from("mount target is a symlink (TOCTOU guard)"));
     }
     if (fmt != 16384) {       # 0x4000 — directory
         sakshi_span_exit();
         return err_mount_failed(str_from(dev_path_cstr),
-        str_from("mount target is not a directory"));
+          str_from("mount target is not a directory"));
     }
 
     var read_only = load64(options + 8);
@@ -602,7 +602,7 @@ pub fn storage_mount(dev_path_cstr, options) {
         sakshi_span_exit();
         var dev_id = device_id_new_cstr(dev_path_cstr);
         return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
-        filesystem_from_str(fs_cstr), read_only));
+            filesystem_from_str(fs_cstr), read_only));
     }
 
     # Auto-detect filesystem type
@@ -615,7 +615,7 @@ pub fn storage_mount(dev_path_cstr, options) {
             sakshi_span_exit();
             var dev_id = device_id_new_cstr(dev_path_cstr);
             return Ok(mount_result_new(dev_id, str_from(dev_path_cstr), str_from(mount_cstr),
-            filesystem_from_str(fs_try), read_only));
+                filesystem_from_str(fs_try), read_only));
         }
         last_errno = 0 - r;
     }

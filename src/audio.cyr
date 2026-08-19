@@ -95,7 +95,7 @@ pub fn yukti_audio_sys_path(d)    { return load64(d + AI_SYS_PATH); }
 # ---------------------------------------------------------------------------
 
 fn _audio_info_new(card, device, subdevice, direction, name, driver,
-hw_id, dev_path, sys_path): i64 {
+  hw_id, dev_path, sys_path): i64 {
     var d = alloc(AI_SIZE);
     store64(d + AI_CARD, card);
     store64(d + AI_DEVICE, device);
@@ -417,9 +417,9 @@ pub fn yukti_audio_devices() {
     # /proc + sysfs helpers (_audio_load_drivers / _audio_compute_hw_id).
     var results = vec_new();
     var info = _audio_info_new(0, 0, 0, YUKTI_AUDIO_PLAYBACK,
-    str_from("AGNOS HDA Output"), str_from("agnos-hda"),
-    str_from("pci:agnos:04:00.6:dev0:p"),
-    str_from("/dev/snd/pcmC0D0p"), str_from("/sys/class/sound/card0"));
+      str_from("AGNOS HDA Output"), str_from("agnos-hda"),
+      str_from("pci:agnos:04:00.6:dev0:p"),
+      str_from("/dev/snd/pcmC0D0p"), str_from("/sys/class/sound/card0"));
     vec_push(results, info);
     return results;
     #else
@@ -465,7 +465,7 @@ pub fn yukti_audio_devices() {
         var hw_id = _audio_compute_hw_id(card, device, direction);
 
         var info = _audio_info_new(card, device, 0, direction,
-        pretty_name, driver, hw_id, dev_path, sys_path);
+          pretty_name, driver, hw_id, dev_path, sys_path);
         vec_push(results, info);
     }
 

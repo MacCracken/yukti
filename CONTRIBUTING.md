@@ -4,7 +4,7 @@ Thanks for taking the time to dig in.
 
 ## Prerequisites
 
-- Cyrius toolchain 6.5.3+ (`cyrius` on `$PATH`) —
+- Cyrius toolchain 6.5.29+ (`cyrius` on `$PATH`) —
   <https://github.com/MacCracken/cyrius>
 - A Linux host for udev/mount behaviour to actually do anything useful
 

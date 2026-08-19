@@ -29,11 +29,48 @@
 #   '  -> ''           (standard SQL single-quote escape)
 #   \0 -> dropped      (terminates cstr; never belongs in a row value)
 #   \n -> dropped      (no multi-line SQL values; defense-in-depth)
+#
+# It is also where over-long values are clamped — see YK_DB_STR_MAX.
 # ---------------------------------------------------------------------------
+
+# patra stores a STR column in COL_STR_SZ (256) bytes: 255 payload + NUL.
+enum YuktiDbLimits {
+    YK_DB_STR_MAX = 255;
+}
 
 fn _sql_escape_str(s): i64 {
     if (s == 0) { return str_from(""); }
     var n = str_len(s);
+
+    # Clamp to what a patra STR column can actually hold.
+    #
+    # patra <= 1.12.12 truncated an over-long value to 255 bytes silently on
+    # write. Since 1.13.6 it REJECTS it instead (PATRA_ERR_ROWSZ), and because
+    # yukti discarded every patra_exec return the whole INSERT failed with no
+    # diagnostic — a device with a >255-byte identifier was simply never
+    # recorded, and device_db_is_known / _audio_known answered "never seen"
+    # forever. Reproduced at exactly the 255/256 boundary; see CHANGELOG 2.3.3.
+    #
+    # Clamping HERE is what makes it correct rather than merely non-failing:
+    # this is the single funnel both stored values and WHERE literals pass
+    # through, so both get clamped identically and still match each other.
+    # Clamping the raw value (not the escaped result) is deliberate — escaping
+    # doubles quotes, so cutting the escaped string could split a '' pair and
+    # emit malformed SQL. patra's own limit applies to the parsed value, which
+    # is what this bounds.
+    #
+    # >255-byte identifiers are reachable: _read_sysfs_attr reads into a
+    # var attr_buf[256] (256 bytes is one over the cap), audio.cyr's USB hw_id
+    # concatenates two such reads, parse_uevent bounds values not at all, and
+    # device_db_set_preference takes a caller-supplied mount path.
+    if (n > YK_DB_STR_MAX) {
+        # Two devices differing only past byte 255 now collide instead of
+        # both being dropped. That is the trade the 256-byte column forces;
+        # it is logged rather than hidden.
+        sakshi_warn("device_db: value clamped to 255 bytes", 37);
+        n = YK_DB_STR_MAX;
+    }
+
     var src = str_data(s);
     var sb = str_builder_new();
     for (var i = 0; i < n; i = i + 1) {
@@ -53,6 +90,31 @@ pub fn _sql_escape_str_pub(s) { return _sql_escape_str(s); }
 # ---------------------------------------------------------------------------
 
 var _yukti_db = 0;
+
+# ---------------------------------------------------------------------------
+# _db_exec — patra_exec with the return value actually checked
+#
+# Every mutating statement goes through here. yukti discarded all 12
+# patra_exec returns before 2.3.3, which is what turned patra 1.13.6's new
+# PATRA_ERR_ROWSZ rejection into silent data loss instead of a diagnosable
+# error: the write failed, nothing was stored, and the caller was told 0.
+#
+# patra keeps converting silent-wrong-answer behaviour into error codes
+# (1.13.6 alone added rejections for over-long STR, out-of-range int literals
+# and truncated token streams; 1.13.8 added WHERE type mismatches). Checking
+# the return is what stops the next one from landing the same way.
+#
+# The CREATE TABLE calls in device_db_open deliberately do NOT use this —
+# they are expected to fail on an already-initialised database.
+# ---------------------------------------------------------------------------
+
+fn _db_exec(sql_cstr, what, what_len): i64 {
+    var rc = patra_exec(_yukti_db, sql_cstr);
+    if (rc != PATRA_OK) {
+        sakshi_warn(what, what_len);
+    }
+    return rc;
+}
 
 pub fn device_db_open(path) {
     sakshi_span_enter("db_open", 7);
@@ -183,7 +245,8 @@ pub fn device_db_record_seen(info) {
             str_builder_add_cstr(upd_sb, " WHERE serial = '");
             str_builder_add_str(upd_sb, key_esc);
             str_builder_add_cstr(upd_sb, "'");
-            patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
+            _db_exec(str_cstr(str_builder_build(upd_sb)),
+              "device_db: devices last_seen update failed", 42);
             return 0;
         }
         patra_result_free(rs);
@@ -206,7 +269,8 @@ pub fn device_db_record_seen(info) {
     str_builder_add_cstr(ins_sb, ", ");
     str_builder_add_int(ins_sb, now);
     str_builder_add_cstr(ins_sb, ", 0)");
-    patra_exec(_yukti_db, str_cstr(str_builder_build(ins_sb)));
+    _db_exec(str_cstr(str_builder_build(ins_sb)),
+      "device_db: devices insert failed", 32);
 
     return 0;
 }
@@ -247,7 +311,8 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     str_builder_add_cstr(sb, ", ");
     str_builder_add_int(sb, action);
     str_builder_add_cstr(sb, ")");
-    patra_exec(_yukti_db, str_cstr(str_builder_build(sb)));
+    _db_exec(str_cstr(str_builder_build(sb)),
+      "device_db: mount_history insert failed", 38);
 
     # Update mount_count in devices table
     if (action == ACTION_MOUNT) {
@@ -258,7 +323,8 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
         str_builder_add_cstr(upd_sb, " WHERE serial = '");
         str_builder_add_str(upd_sb, key_esc);
         str_builder_add_cstr(upd_sb, "'");
-        patra_exec(_yukti_db, str_cstr(str_builder_build(upd_sb)));
+        _db_exec(str_cstr(str_builder_build(upd_sb)),
+          "device_db: devices mount_count update failed", 44);
     }
 
     return 0;
@@ -279,7 +345,8 @@ pub fn device_db_set_preference(serial, mount_point, read_only, fs_type, auto_mo
     str_builder_add_cstr(del_sb, "DELETE FROM preferences WHERE serial = '");
     str_builder_add_str(del_sb, serial_esc);
     str_builder_add_cstr(del_sb, "'");
-    patra_exec(_yukti_db, str_cstr(str_builder_build(del_sb)));
+    _db_exec(str_cstr(str_builder_build(del_sb)),
+      "device_db: preferences delete failed", 36);
 
     # Insert new preference
     var sb = str_builder_new();
@@ -294,7 +361,8 @@ pub fn device_db_set_preference(serial, mount_point, read_only, fs_type, auto_mo
     str_builder_add_cstr(sb, "', ");
     str_builder_add_int(sb, auto_mount);
     str_builder_add_cstr(sb, ")");
-    patra_exec(_yukti_db, str_cstr(str_builder_build(sb)));
+    _db_exec(str_cstr(str_builder_build(sb)),
+      "device_db: preferences insert failed", 36);
 
     return 0;
 }
@@ -468,7 +536,8 @@ pub fn device_db_record_audio_seen(audio_info) {
             str_builder_add_cstr(usb, " WHERE hw_id = '");
             str_builder_add_str(usb, hw_esc);
             str_builder_add_cstr(usb, "'");
-            patra_exec(_yukti_db, str_cstr(str_builder_build(usb)));
+            _db_exec(str_cstr(str_builder_build(usb)),
+              "device_db: audio_devices update failed", 38);
             return 0;
         }
         patra_result_free(rs);
@@ -493,7 +562,8 @@ pub fn device_db_record_audio_seen(audio_info) {
     str_builder_add_cstr(isb, ", ");
     str_builder_add_int(isb, now);
     str_builder_add_cstr(isb, ")");
-    patra_exec(_yukti_db, str_cstr(str_builder_build(isb)));
+    _db_exec(str_cstr(str_builder_build(isb)),
+      "device_db: audio_devices insert failed", 38);
     return 0;
 }
 

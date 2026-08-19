@@ -88,18 +88,27 @@ jobs:
           [ $fail -eq 0 ] || { echo "lint: warnings present"; exit 1; }
 
       - name: Format check
-        # `cyrius fmt <file>` (no flag) prints the formatted source to
-        # stdout; diff against the committed file to enforce no drift.
-        # Pre-2.2.2 this used `--check` but cyrius's `--check` mode is
-        # exit-code-only and emits no stdout, so the diff always fired
-        # spuriously — bumped to canonical invocation at 2.2.2 ship.
+        # MUST use `--check`. Do not go back to diffing `cyrius fmt <file>`
+        # stdout against the file — on 6.5.29 that gate is broken TWICE over:
+        #
+        #   1. `cyrius fmt <file>` (no flag) no longer prints to stdout, it
+        #      REWRITES IN PLACE. So the diff compares empty-vs-file and
+        #      reports every single file as drifted — the gate fails
+        #      unconditionally, on a tree that is perfectly formatted.
+        #   2. Rewriting in place also mutates the checkout underneath the
+        #      later dist-sync step, which then compares regenerated bundles
+        #      against sources CI itself just edited.
+        #
+        # The 2.2.2 comment this replaces said `--check` was "exit-code-only
+        # and emits no stdout". That is no longer true: on 6.5.29 `--check`
+        # prints the offending file and first differing line AND exits 1,
+        # while leaving the file untouched. Verified both directions on a
+        # clean file (exit 0, silent) and a deliberately de-indented one
+        # (exit 1, diagnostic, file unmodified).
         run: |
           fail=0
           for f in src/*.cyr programs/*.cyr tests/tcyr/*.tcyr tests/bcyr/*.bcyr fuzz/*.fcyr; do
-            if ! diff -q <(cyrius fmt "$f" 2>/dev/null) "$f" > /dev/null; then
-              echo "needs fmt: $f"
-              fail=1
-            fi
+            cyrius fmt "$f" --check || { echo "needs fmt: $f"; fail=1; }
           done
           [ $fail -eq 0 ] || { echo "fmt: drift detected"; exit 1; }
 

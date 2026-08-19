@@ -7,6 +7,244 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-08-19
+
+Toolchain and dependency refresh: cyrius **6.5.3 → 6.5.29**, sakshi
+**2.4.6 → 2.4.10**, patra **1.12.12 → 1.13.8**. The interesting part is not
+the bump — it is what the bump broke: one silent-data-loss regression in
+`device_db`, one CI gate that would have failed on every file, and formatting
+drift across eight sources. All three are fixed here.
+
+**669** assertions pass (was 658, +11), 3/3 fuzz harnesses pass, `core_smoke`
+passes, lint 0 warnings, vet clean, both dist bundles regenerate idempotently.
+
+### Fixed — patra 1.13.8 silently stopped recording any device with a >255-byte identifier
+
+The one behavioural regression the bump carried, and it destroys data rather
+than announcing itself.
+
+A patra `STR` column is `COL_STR_SZ` = 256 bytes: 255 payload plus a NUL.
+patra **≤ 1.12.12** truncated an over-long value to 255 on write, in silence —
+`PATRA_ERR_ROWSZ` was declared in the enum and returned from nowhere. patra
+**≥ 1.13.6** rejects it instead (their audit S2-8: "truncating silently made two
+distinct values indistinguishable on disk"). That is the right call upstream.
+
+yukti discarded the return of **all 12** `patra_exec` calls, and had zero
+references to `PATRA_OK` or any `PATRA_ERR_*` anywhere in `src/`. So the
+rejection was invisible: the `INSERT` failed, nothing was written, and
+`device_db_record_seen` returned 0 exactly as if it had succeeded.
+
+Measured with yukti's own API — three replugs of **one** device, `rows` from
+`device_db_device_count()` / `is_known` from `device_db_is_known()`:
+
+| serial length | patra 1.12.12 | patra 1.13.8 | 2.3.3 |
+|---|---|---|---|
+| 254 B | 1 / 1 | 1 / 1 | 1 / 1 |
+| 255 B | 1 / 1 | 1 / 1 | 1 / 1 |
+| **256 B** | **3** / 0 | **0** / 0 | **1 / 1** |
+| **300 B** | **3** / 0 | **0** / 0 | **1 / 1** |
+
+Both old and new patra were wrong above 255, in opposite directions. Old: the
+row landed truncated while the `WHERE` literal still compared at full length, so
+the lookup never matched and **every replug appended another duplicate**. New:
+nothing is stored at all, so `device_db_device_count()` goes from over-counting
+to reporting zero and `device_db_is_known` / `_audio_known` / `_audio_last_seen`
+answer "never seen" forever.
+
+**Fix, two parts.**
+
+1. **Clamp to 255 bytes in `_sql_escape_str`.** That function is the single
+   funnel every SQL value passes through — *both* stored values and `WHERE`
+   literals — so both are clamped identically and still match each other. That
+   is why the fix is strictly better than either patra version: it also repairs
+   the `is_known = 0` case, which was broken under 1.12.12 too. The raw value is
+   clamped, never the escaped result: escaping doubles quotes, so cutting the
+   escaped string could split a `''` pair and emit malformed SQL, and patra's
+   limit applies to the parsed value anyway. Clamping is logged with
+   `sakshi_warn` — two identifiers differing only past byte 255 now collide, and
+   that trade is stated rather than hidden.
+2. **Check the return.** New `_db_exec` wraps `patra_exec` and emits a
+   `sakshi_warn` naming the statement on any non-`PATRA_OK`. All 8 mutating call
+   sites route through it. The 4 `CREATE TABLE` calls in `device_db_open`
+   deliberately do not — they are expected to fail on an already-initialised
+   database. This is the part that stops the *next* one: patra keeps converting
+   silent-wrong-answer behaviour into error codes, and 1.13.6 alone added three
+   more.
+
+**Reachability** — over-long identifiers are not hypothetical:
+
+- `src/udev.cyr:281` `_read_sysfs_attr` reads into `var attr_buf[256]` via
+  `file_read_all(…, 256)`. A sysfs attribute that fills the buffer yields
+  **exactly 256 bytes — one over the cap.** This feeds `ID_VENDOR`, `ID_MODEL`
+  and `ID_SERIAL_SHORT`.
+- `src/audio.cyr:368` builds the USB `hw_id` as `"usb:"` + `PRODUCT` + `":"` +
+  `../serial` + `":dev"` + N + `":"` + suffix, where `PRODUCT` and `serial` are
+  each their own 256-byte `_read_sysfs_attr` read. A 250-byte USB serial alone
+  puts it past 255.
+- `parse_uevent` bounds values not at all — it splits an 8192-byte netlink
+  buffer on NULs and takes everything after `=`.
+- `device_db_set_preference` takes a caller-supplied mount path with no length
+  check. `/run/media/<user>/<volume-label>` over 255 bytes is ordinary.
+
+The most exposed callers are downstream: `device_db_record_seen`,
+`_record_mount`, `_record_audio_seen` and `_set_preference` have **no in-tree
+callers** — they exist for jalwa, argonaut, aethersafha and the file manager.
+
+**Why 658/658 said nothing.** Every fixture used short strings — `"SN12345"`,
+`"/mnt/myusb"`, a 23-byte `hw_id`. There was no assertion at or near the
+boundary. Two new tests sweep it at **254 / 255 / 256 / 300** bytes for both
+`serial` and the audio `hw_id`, asserting one row and a successful lookup after
+three replugs. Verified to fail when they should: disabling only the clamp
+produces **7 failures**, exactly the >255 cases, while 254 and 255 still pass.
+
+### Fixed — the CI format gate was about to fail unconditionally on a correctly-formatted tree
+
+`cyrius fmt <file>` **no longer prints the formatted source to stdout**. On
+6.5.29 it rewrites the file in place and prints nothing. The gate installed at
+2.2.2 was:
+
+```sh
+diff -q <(cyrius fmt "$f" 2>/dev/null) "$f"
+```
+
+which on 6.5.29 compares **empty output against the file** — so every one of the
+24 gated sources reports as drifted and the job fails, on a tree that is
+perfectly formatted. Measured before the fix: 24 of 24 files "needs fmt",
+including `src/core.cyr` and `src/error.cyr`, which `--check` simultaneously
+reported as clean. The two answers disagreeing is what gave it away.
+
+Second-order damage: because the no-flag form *writes*, the gate also mutated
+the checkout underneath the later "Verify dist bundles are in sync" step, which
+then compared regenerated bundles against sources CI itself had just edited.
+
+The 2.2.2 comment justifying the stdout form said `--check` was "exit-code-only
+and emits no stdout". That is no longer true. On 6.5.29 `--check` prints the
+offending file and its first differing line, exits 1, and leaves the file
+untouched — verified both directions on a clean file (exit 0, silent) and on a
+deliberately de-indented copy (exit 1, diagnostic, file unmodified). The gate is
+back to `cyrius fmt "$f" --check`.
+
+### Changed — 8 files reformatted to the current canonical continuation indent
+
+Real drift, not a gate artifact: `cyrfmt` wants 2 spaces per open paren on
+continuation lines, and these had 4-or-flush.
+
+`programs/core_smoke.cyr`, `src/audio.cyr`, `src/network.cyr`,
+`src/storage.cyr`, `src/udev.cyr`, `src/udev_rules.cyr`,
+`tests/bcyr/yukti.bcyr`, `tests/tcyr/yukti.tcyr`.
+
+Landed as its own whitespace-only change and **proven** to be one, so it can
+never be confused with a functional diff:
+
+- `git diff -w` across all eight is empty — the change is whitespace and nothing
+  else.
+- The DCE-built binary is byte-identical across the reformat:
+  `aac154cf5c01805e358d0a6ddde0e7dd6f7d58658be82d2dbca393dbcf789a17` both
+  before and after, from the same `CYRIUS_DCE=1 cyrius build src/main.cyr`.
+  (Measured on the reformat in isolation, before the `device_db` fix above
+  was written — that fix is a deliberate logic change and moves the hash.)
+
+The remaining 16 gated sources were already canonical and are untouched.
+
+### Changed — dependency and toolchain pins
+
+- `cyrius.cyml`: `cyrius = "6.5.3"` → **`6.5.29`**, matching the installed
+  wrapper. This clears the `toolchain drift` warning that every build, test and
+  bench invocation had been printing.
+- `[deps.sakshi]` `2.4.6` → **`2.4.10`**, `[deps.patra]` `1.12.12` → **`1.13.8`**.
+  6.5.29 bundles exactly those two versions, so this also clears the second
+  standing warning:
+
+  ```
+  warning: ./lib/ shadows version-pinned .../6.5.3/lib — 1 bundled lib(s) differ:
+        sakshi 2.4.6 (pinned: 2.4.7)
+  ```
+
+  Both warnings are now gone; `cyrius build` is silent apart from the
+  informational `dead:` note.
+- `cyrius.lock` regenerated from a clean `rm -rf build lib && cyrius deps` —
+  new commit pins `5815fa9` (sakshi 2.4.10) and `0188523` (patra 1.13.8), and 24
+  of the 39 locked hashes moved: `lib/patra.cyr` and `lib/sakshi.cyr` themselves
+  plus 22 stdlib files carried over from the 6.5.3 → 6.5.29 tree (`alloc`, `args`,
+  `atomic`, `fmt`, `fnptr`, `freelist`, `fs`, `io`, `mmap`, `process`, `result`,
+  `string`, `sync`, `tagged`, `vec` and all seven `syscalls*` variants). The other
+  15 are byte-identical across the two toolchains. `cyrius deps --verify` reports
+  `39 verified, 0 failed`.
+- The `[deps.patra]` comment claimed the override could be dropped "once cyrius
+  re-bundles patra >= 1.12.12". That has now happened, and the advice was still
+  wrong: the override carries `target = "linux"`, which a bundled lib has no way
+  to express and which is what keeps patra off the agnos build. Comment rewritten
+  to say why it stays, and to note the tag must track the bundled version or the
+  shadow warning returns. Confirmed empirically: `cyrius build --agnos
+  src/main.cyr` resolves **1 dep, 1 commit-pinned** (sakshi only — patra
+  excluded) and compiles clean, against 2 deps / 2 commit-pinned on Linux.
+
+### Changed — `dist/yukti.deps` now declares 18 stdlib leaves, was 15
+
+`atomic`, `sync` and `thread_local` were added. These have been in
+`[deps].stdlib` since 2.2.x as patra's transitive requirements, but the sidecar
+generator had not been reporting them — the same class of under-declared sidecar
+patra fixed on its own side in 1.13.7. A consumer resolving `dist/yukti.cyr`
+from the sidecar alone was getting an incomplete list.
+
+### Deferred to 2.3.4
+
+The dependency audit surfaced four issues that **predate this upgrade** and are
+not caused by it. Held out deliberately so 2.3.3 stays scoped to the bump plus
+the one regression the bump introduced; 2.3.4 is the audit-sweep release. Each
+is written up with file:line in `docs/development/roadmap.md`.
+
+- **`mount_count` never increments** — `device_db.cyr:321` emits
+  `SET mount_count = mount_count + 1`, and patra's `_parse_update` rejects a
+  column reference after `=` with `PATRA_ERR_SYNTAX`, failing the whole
+  statement so `last_seen` never updates either. This release's `_db_exec` made
+  it audible: the suite now prints
+  `[WARN] device_db: devices mount_count update failed` once, from
+  `test_device_db_mount_count`. The test at `yukti.tcyr:1768` documents the bug
+  rather than catching it (`assert(mc >= 0)` holds for every value).
+- **`st_mode` read at the x86_64 offset on all architectures** —
+  `storage.cyr:575` hardcodes `+ 24`; aarch64-Linux puts `st_mode` at 16, where
+  24 is `st_uid`. The MED-2 TOCTOU symlink guard therefore cannot fire on
+  aarch64.
+- **`lib/fs.cyr`'s `dir_list` / `is_dir` scratch lost reentrancy** — 6.5.29
+  moved it from `alloc(4096)` to `var sbuf[4096]`, which in Cyrius is *static*
+  data, not stack. yukti's seven call sites are safe today; the guarantee is
+  gone, so it is recorded rather than assumed.
+- **`dist/yukti-core.deps` falsely lists `alloc`** — upstream cyrius sidecar
+  generator matches the word in comments; confirmed by experiment. Not
+  hand-correctable without failing the dist-sync gate.
+
+### Notes
+
+- **Binary size 442,104 → 463,352 bytes** (+21,248, +4.8%), `CYRIUS_DCE=1`,
+  x86_64. Measured against a clean `git archive HEAD` checkout resolved at the
+  old pins, not against a remembered number. Almost all of it is patra: 1.13.x
+  added per-statement WHERE type checking, WAL v4 with database identity, and
+  error reporting on paths that previously failed silently. The `device_db`
+  clamp and `_db_exec` account for 352 bytes of it.
+- **Benchmarks are flat.** All 46 operations within run-to-run noise of the
+  2.3.2 baseline; the two largest moves, `storage/find_mount_in` (2.849 →
+  2.597 µs) and `find_mount_in_miss` (4.855 → 4.386 µs), are ~9% and sit inside
+  the spread these two show across repeat runs. No performance claim is made
+  either way. `docs/benchmarks/history.csv` is deliberately **not** appended
+  here: `scripts/bench-history.sh` stamps rows with `git rev-parse HEAD`, which
+  until this work is committed is still the 2.3.2 commit, and mis-attributing
+  2.3.3 numbers to it would corrupt the regression baseline. Run the script
+  after committing.
+- **`cyrius deps --verify` re-validated on 6.5.29** — the `--no-lock` step in CI
+  is load-bearing and its rationale was measured on 6.5.3, so it was re-measured
+  here. Corrupting one hash in the committed lock still yields
+  `38 verified, 1 failed` **exit 1** under `deps --no-lock` + `deps --verify`,
+  and still yields `39 verified, 0 failed` exit 0 under plain `deps` + `verify`.
+  The comment in `ci.yml` remains accurate and `--no-lock` must stay.
+- **`dist/yukti-core.deps` lists `alloc`** despite the kernel-safe bundle
+  containing zero allocation. The only two matches in `dist/yukti-core.cyr` are
+  the words "alloc" inside comments on lines 17 and 100; cyrius's sidecar
+  generator scans comment text. Pre-existing and byte-identical to what 2.3.2
+  committed, so it is not a regression here, and it cannot be hand-corrected
+  without failing CI's dist-sync gate — `cyrius distlib` would regenerate it.
+  Upstream cyrius issue. The real tripwire, `programs/core_smoke.cyr`, passes.
+
 ## [2.3.2] — 2026-07-31
 
 Raw syscall review and cleanup. 2.1.4 migrated all 33 arch-divergent raw

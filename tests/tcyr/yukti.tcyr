@@ -885,12 +885,12 @@ fn test_read_audio_sectors_rejects_bad_input() {
     var small_buf[32];
     # nframes <= 0
     assert(is_ok(read_audio_sectors("/dev/sr0", 0, 0, &small_buf, 32)) == 0,
-    "0 frames rejected");
+      "0 frames rejected");
     assert(is_ok(read_audio_sectors("/dev/sr0", 0, 0 - 5, &small_buf, 32)) == 0,
-    "negative frames rejected");
+      "negative frames rejected");
     # Buffer too small (1 frame = 2352 bytes, buf = 32)
     assert(is_ok(read_audio_sectors("/dev/sr0", 0, 1, &small_buf, 32)) == 0,
-    "undersized buf rejected");
+      "undersized buf rejected");
     return 0;
 }
 
@@ -899,7 +899,7 @@ fn test_read_audio_track_rejects_data_track() {
     var data_entry = toc_entry_new(1, TT_DATA, 0, 1000, 0);
     var buf[4096];
     assert(is_ok(read_audio_track("/dev/sr0", data_entry, &buf, 4096)) == 0,
-    "data track rejected");
+      "data track rejected");
     # Zero-length audio track returns Ok(0) without any ioctl
     var empty_entry = toc_entry_new(1, TT_AUDIO, 0, 0, 0);
     var r = read_audio_track("/dev/sr0", empty_entry, &buf, 4096);
@@ -917,7 +917,7 @@ fn test_disc_type_layered_predicates() {
     assert(disc_type_is_writable(DT_DVD_WRITABLE_DL), "DL writable");
     # Display names include the layer designation
     assert(str_eq_cstr(str_from(disc_type_to_str(DT_DVD_WRITABLE_DL)),
-    "DVD±R DL (Dual Layer)"), "DL display");
+        "DVD±R DL (Dual Layer)"), "DL display");
     return 0;
 }
 
@@ -996,7 +996,7 @@ fn make_usb_udev_event() {
     map_set(props, "ID_USB_DRIVER", str_from("usb-storage"));
     map_set(props, "ID_PART_ENTRY_SIZE", str_from("31457280"));
     return udev_event_new(str_from("add"), str_from("/sys/devices/pci0000:00/usb1/1-1/block/sdb/sdb1"),
-    str_from("/dev/sdb1"), str_from("block"), str_from("partition"), props);
+      str_from("/dev/sdb1"), str_from("block"), str_from("partition"), props);
 }
 
 fn make_optical_udev_event() {
@@ -1007,7 +1007,7 @@ fn make_optical_udev_event() {
     map_set(props, "ID_FS_TYPE", str_from("iso9660"));
     map_set(props, "ID_FS_LABEL", str_from("MOVIE_DISC"));
     return udev_event_new(str_from("change"), str_from("/sys/devices/pci0000:00/ata1/host0/block/sr0"),
-    str_from("/dev/sr0"), str_from("block"), str_from("disk"), props);
+      str_from("/dev/sr0"), str_from("block"), str_from("disk"), props);
 }
 
 fn test_classify_usb() {
@@ -1025,35 +1025,35 @@ fn test_classify_sd() {
     var props = map_new();
     map_set(props, "ID_BUS", str_from("mmc"));
     var e = udev_event_new(str_from("add"), str_from("/sys/block/mmcblk0"), str_from("/dev/mmcblk0"),
-    str_from("block"), str_from("disk"), props);
+      str_from("block"), str_from("disk"), props);
     assert_eq(classify_device(e), DC_SD_CARD, "cls sd");
     return 0;
 }
 
 fn test_classify_dm() {
     var e = udev_event_new(str_from("add"), str_from("/sys/devices/virtual/block/dm-0"),
-    str_from("/dev/dm-0"), str_from("block"), str_from("disk"), map_new());
+      str_from("/dev/dm-0"), str_from("block"), str_from("disk"), map_new());
     assert_eq(classify_device(e), DC_DEVICE_MAPPER, "cls dm");
     return 0;
 }
 
 fn test_classify_loop() {
     var e = udev_event_new(str_from("add"), str_from("/sys/devices/virtual/block/loop0"),
-    str_from("/dev/loop0"), str_from("block"), str_from("disk"), map_new());
+      str_from("/dev/loop0"), str_from("block"), str_from("disk"), map_new());
     assert_eq(classify_device(e), DC_LOOP, "cls loop");
     return 0;
 }
 
 fn test_classify_block_internal() {
     var e = udev_event_new(str_from("add"), str_from("/sys/block/sda"),
-    str_from("/dev/sda"), str_from("block"), str_from("disk"), map_new());
+      str_from("/dev/sda"), str_from("block"), str_from("disk"), map_new());
     assert_eq(classify_device(e), DC_BLOCK_INTERNAL, "cls block");
     return 0;
 }
 
 fn test_classify_unknown() {
     var e = udev_event_new(str_from("add"), str_from("/sys/something"),
-    str_from("/dev/something"), str_from("net"), 0, map_new());
+      str_from("/dev/something"), str_from("net"), 0, map_new());
     assert_eq(classify_device(e), DC_UNKNOWN, "cls unk");
     return 0;
 }
@@ -1114,7 +1114,7 @@ fn test_device_info_from_udev_optical() {
 
 fn test_no_dev_path_error() {
     var e = udev_event_new(str_from("add"), str_from("/sys/x"), 0,
-    str_from("block"), 0, map_new());
+      str_from("block"), 0, map_new());
     var r = device_info_from_udev(e);
     assert(is_ok(r) == 0, "no devpath err");
     return 0;
@@ -1127,11 +1127,11 @@ fn test_udev_event_actions() {
     assert(udev_event_is_change(add) == 0, "ue not chg");
 
     var rem = udev_event_new(str_from("remove"), str_from("/sys/x"), str_from("/dev/x"),
-    str_from("block"), 0, map_new());
+      str_from("block"), 0, map_new());
     assert(udev_event_is_remove(rem), "ue rm");
 
     var chg = udev_event_new(str_from("change"), str_from("/sys/x"), str_from("/dev/x"),
-    str_from("block"), 0, map_new());
+      str_from("block"), 0, map_new());
     assert(udev_event_is_change(chg), "ue chg");
     return 0;
 }
@@ -1237,7 +1237,7 @@ fn test_udev_event_to_device_event() {
 
 fn test_udev_event_to_device_event_remove() {
     var e = udev_event_new(str_from("remove"), str_from("/sys/block/sdb"), str_from("/dev/sdb"),
-    str_from("block"), str_from("disk"), map_new());
+      str_from("block"), str_from("disk"), map_new());
     var de = udev_event_to_device_event(e);
     assert(de != 0, "rm->de ok");
     assert(device_event_is_detach(de), "rm->de detach");
@@ -1247,7 +1247,7 @@ fn test_udev_event_to_device_event_remove() {
 
 fn test_udev_event_to_device_event_unknown() {
     var e = udev_event_new(str_from("bind"), str_from("/sys/x"), str_from("/dev/x"),
-    str_from("block"), 0, map_new());
+      str_from("block"), 0, map_new());
     assert_eq(udev_event_to_device_event(e), 0, "bind->null");
     return 0;
 }
@@ -1256,7 +1256,7 @@ fn test_readonly_device() {
     var props = map_new();
     map_set(props, "ID_FS_READONLY", str_from("1"));
     var e = udev_event_new(str_from("add"), str_from("/sys/block/sda"),
-    str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
+      str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
     var caps = extract_capabilities(e, DC_BLOCK_INTERNAL);
     assert(has_cap(caps, CAP_READ), "ro has read");
     assert(has_cap(caps, CAP_WRITE) == 0, "ro no write");
@@ -1267,7 +1267,7 @@ fn test_trim_capability() {
     var props = map_new();
     map_set(props, "ID_ATA_FEATURE_SET_TRIM", str_from("1"));
     var e = udev_event_new(str_from("add"), str_from("/sys/block/sda"),
-    str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
+      str_from("/dev/sda"), str_from("block"), str_from("disk"), props);
     var caps = extract_capabilities(e, DC_BLOCK_INTERNAL);
     assert(has_cap(caps, CAP_TRIM), "trim cap");
     return 0;
@@ -1531,6 +1531,8 @@ fn main() {
     test_device_db_preferences();
     test_device_db_mount_count();
     test_device_db_is_known();
+    test_device_db_str_len_boundary();
+    test_audio_db_str_len_boundary();
 
     # Partition tests (10)
     test_partition_constants();
@@ -1784,6 +1786,119 @@ fn test_device_db_is_known() {
     device_db_close();
     xunlink("/tmp/yukti_test_db5.patra");
     xunlink("/tmp/yukti_test_db5.patra.wal");
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
+# STR-column length boundary (2.3.3)
+#
+# patra stores a STR column in 256 bytes: 255 payload + NUL. patra <= 1.12.12
+# truncated an over-long value silently on write while comparing the WHERE
+# literal at full length, so a long key stored a row that could never be found
+# again — every replug appended ANOTHER duplicate. patra >= 1.13.6 rejects it
+# outright (PATRA_ERR_ROWSZ), and since yukti discarded every patra_exec return
+# the row was simply never written and nothing was reported.
+#
+# Measured, three replugs of ONE device, rows / is_known:
+#            255B      256B          300B
+#   1.12.12  1 / 1     3 / 0         3 / 0     (duplicate per replug)
+#   1.13.8   1 / 1     0 / 0         0 / 0     (silent total loss)
+#   2.3.3    1 / 1     1 / 1         1 / 1
+#
+# The whole suite passed 658/658 through both broken states because every
+# fixture used short strings. These sweep the boundary itself.
+# ---------------------------------------------------------------------------
+
+fn _mk_str_of_len(n) {
+    var sb = str_builder_new();
+    for (var i = 0; i < n; i = i + 1) {
+        str_builder_add_cstr(sb, "A");
+    }
+    return str_builder_build(sb);
+}
+
+fn _db_probe_keylen(keylen, path_cstr, wal_cstr) {
+    xunlink(path_cstr);
+    xunlink(wal_cstr);
+    fl_init();
+    device_db_open(path_cstr);
+
+    var key = _mk_str_of_len(keylen);
+    var info = device_info_new(device_id_new_cstr("block:sdb1"),
+      str_from("/dev/sdb1"), DC_USB_STORAGE);
+    di_set_serial(info, key);
+    di_set_vendor(info, str_from("Acme"));
+    di_set_model(info, str_from("Stick"));
+
+    # Three replugs of the SAME device must stay one row.
+    device_db_record_seen(info);
+    device_db_record_seen(info);
+    device_db_record_seen(info);
+
+    var rows = device_db_device_count();
+    var known = device_db_is_known(key);
+
+    device_db_close();
+    xunlink(path_cstr);
+    xunlink(wal_cstr);
+
+    # pack: rows in low 32, known in high
+    return rows + (known * 4294967296);
+}
+
+fn test_device_db_str_len_boundary() {
+    var r254 = _db_probe_keylen(254, "/tmp/yukti_test_len254.patra",
+      "/tmp/yukti_test_len254.patra.wal");
+    assert_eq(r254 % 4294967296, 1, "254B serial: one row");
+    assert_eq(r254 / 4294967296, 1, "254B serial: is_known");
+
+    var r255 = _db_probe_keylen(255, "/tmp/yukti_test_len255.patra",
+      "/tmp/yukti_test_len255.patra.wal");
+    assert_eq(r255 % 4294967296, 1, "255B serial: one row");
+    assert_eq(r255 / 4294967296, 1, "255B serial: is_known");
+
+    # 256 is the regression boundary — one byte over the column payload,
+    # and exactly what a full var attr_buf[256] sysfs read produces.
+    var r256 = _db_probe_keylen(256, "/tmp/yukti_test_len256.patra",
+      "/tmp/yukti_test_len256.patra.wal");
+    assert_eq(r256 % 4294967296, 1, "256B serial: one row (not 0, not 3)");
+    assert_eq(r256 / 4294967296, 1, "256B serial: is_known");
+
+    var r300 = _db_probe_keylen(300, "/tmp/yukti_test_len300.patra",
+      "/tmp/yukti_test_len300.patra.wal");
+    assert_eq(r300 % 4294967296, 1, "300B serial: one row");
+    assert_eq(r300 / 4294967296, 1, "300B serial: is_known");
+    return 0;
+}
+
+fn test_audio_db_str_len_boundary() {
+    # audio.cyr's USB hw_id concatenates "usb:" + PRODUCT + ":" + serial +
+    # ":devN:p", where PRODUCT and serial are each their own 256-byte
+    # _read_sysfs_attr read — so it clears 255 easily.
+    xunlink("/tmp/yukti_test_audio_len.patra");
+    xunlink("/tmp/yukti_test_audio_len.patra.wal");
+    fl_init();
+    device_db_open("/tmp/yukti_test_audio_len.patra");
+
+    var hw = _mk_str_of_len(300);
+    var a1 = _audio_info_new(2, 0, 0, YUKTI_AUDIO_PLAYBACK,
+      str_from("Long DAC"), str_from("USB-Audio"), hw,
+      str_from(""), str_from(""));
+    device_db_record_audio_seen(a1);
+
+    # Re-plug the same DAC — must UPDATE, not INSERT a second row.
+    var a2 = _audio_info_new(2, 0, 0, YUKTI_AUDIO_PLAYBACK,
+      str_from("Long DAC (renamed)"), str_from("USB-Audio"), hw,
+      str_from(""), str_from(""));
+    device_db_record_audio_seen(a2);
+
+    assert_eq(device_db_audio_count(), 1, "300B hw_id: one row after replug");
+    assert(device_db_audio_known(hw) != 0, "300B hw_id: known");
+    assert(device_db_audio_last_seen(hw) > 0, "300B hw_id: last_seen set");
+
+    device_db_close();
+    xunlink("/tmp/yukti_test_audio_len.patra");
+    xunlink("/tmp/yukti_test_audio_len.patra.wal");
     return 0;
 }
 
@@ -2095,14 +2210,14 @@ fn test_audio_unpack_helpers() {
 
 fn _make_sound_event(action, dev_path, sys_path) {
     return udev_event_new(str_from(action),
-    str_from(sys_path), str_from(dev_path),
-    str_from("sound"), str_from(""), map_new());
+      str_from(sys_path), str_from(dev_path),
+      str_from("sound"), str_from(""), map_new());
 }
 
 fn test_classify_audio_pcm_playback() {
     test_group("audio classify pcm playback");
     var e = _make_sound_event("add", "/dev/snd/pcmC0D3p",
-    "/sys/devices/pci0000:00/0000:04:00.1/sound/card0/pcmC0D3p");
+      "/sys/devices/pci0000:00/0000:04:00.1/sound/card0/pcmC0D3p");
     assert_eq(classify_device(e), DC_AUDIO, "pcmC0D3p -> DC_AUDIO");
     return 0;
 }
@@ -2110,7 +2225,7 @@ fn test_classify_audio_pcm_playback() {
 fn test_classify_audio_pcm_capture() {
     test_group("audio classify pcm capture");
     var e = _make_sound_event("add", "/dev/snd/pcmC1D0c",
-    "/sys/devices/pci0000:00/0000:04:00.6/sound/card1/pcmC1D0c");
+      "/sys/devices/pci0000:00/0000:04:00.6/sound/card1/pcmC1D0c");
     assert_eq(classify_device(e), DC_AUDIO, "pcmC1D0c -> DC_AUDIO");
     return 0;
 }
@@ -2121,21 +2236,21 @@ fn test_classify_audio_drops_control() {
     # Hotplug consumers (file manager) shouldn't see add/remove
     # events for these.
     var e = _make_sound_event("add", "/dev/snd/controlC0",
-    "/sys/devices/pci0000:00/0000:04:00.1/sound/card0/controlC0");
+      "/sys/devices/pci0000:00/0000:04:00.1/sound/card0/controlC0");
     assert_eq(classify_device(e), DC_UNKNOWN, "controlC0 dropped");
     return 0;
 }
 
 fn test_classify_audio_drops_seq() {
     var e = _make_sound_event("add", "/dev/snd/seq",
-    "/sys/devices/virtual/sound/seq");
+      "/sys/devices/virtual/sound/seq");
     assert_eq(classify_device(e), DC_UNKNOWN, "seq dropped");
     return 0;
 }
 
 fn test_classify_audio_drops_timer() {
     var e = _make_sound_event("add", "/dev/snd/timer",
-    "/sys/devices/virtual/sound/timer");
+      "/sys/devices/virtual/sound/timer");
     assert_eq(classify_device(e), DC_UNKNOWN, "timer dropped");
     return 0;
 }
@@ -2146,8 +2261,8 @@ fn test_classify_audio_drops_timer() {
 
 fn _make_audio_info(card, device, direction, name_cstr, driver_cstr, hw_id_cstr) {
     return _audio_info_new(card, device, 0, direction,
-    str_from(name_cstr), str_from(driver_cstr), str_from(hw_id_cstr),
-    str_from(""), str_from(""));
+      str_from(name_cstr), str_from(driver_cstr), str_from(hw_id_cstr),
+      str_from(""), str_from(""));
 }
 
 fn test_audio_db_open_creates_table() {
@@ -2170,7 +2285,7 @@ fn test_audio_db_record_seen() {
     if (is_ok(r) == 0) { return 0; }
 
     var d = _make_audio_info(0, 3, YUKTI_AUDIO_PLAYBACK,
-    "HDMI 0", "HDA-Intel", "pci:0000:04:00.1:dev3:p");
+      "HDMI 0", "HDA-Intel", "pci:0000:04:00.1:dev3:p");
     device_db_record_audio_seen(d);
 
     assert(device_db_audio_count() >= 1, "row inserted");
@@ -2190,14 +2305,14 @@ fn test_audio_db_record_seen_upsert() {
 
     # Plug a USB DAC, record it.
     var d1 = _make_audio_info(2, 0, YUKTI_AUDIO_PLAYBACK,
-    "USB DAC v1", "USB-Audio", "usb:1234/5678/100:SN42:dev0:p");
+      "USB DAC v1", "USB-Audio", "usb:1234/5678/100:SN42:dev0:p");
     device_db_record_audio_seen(d1);
     var count_after_first = device_db_audio_count();
 
     # Re-plug the same DAC (perhaps after a reboot — kernel renames
     # it but hw_id stays stable). Should UPDATE not INSERT.
     var d2 = _make_audio_info(2, 0, YUKTI_AUDIO_PLAYBACK,
-    "USB DAC v1 (renamed)", "USB-Audio", "usb:1234/5678/100:SN42:dev0:p");
+      "USB DAC v1 (renamed)", "USB-Audio", "usb:1234/5678/100:SN42:dev0:p");
     device_db_record_audio_seen(d2);
     var count_after_second = device_db_audio_count();
 
@@ -2220,7 +2335,7 @@ fn test_audio_db_known_lookup() {
 
     # Known after record
     var d = _make_audio_info(1, 0, YUKTI_AUDIO_CAPTURE,
-    "ALC897 Analog", "HDA-Intel", "pci:0000:04:00.6:dev0:c");
+      "ALC897 Analog", "HDA-Intel", "pci:0000:04:00.6:dev0:c");
     device_db_record_audio_seen(d);
     assert_eq(device_db_audio_known(str_from("pci:0000:04:00.6:dev0:c")), 1, "known after record");
     assert_eq(device_db_audio_known(str_from("pci:NEVER:dev0:p")), 0, "unrelated still unknown");
@@ -2242,7 +2357,7 @@ fn test_audio_db_last_seen() {
 
     # Recorded hw_id returns a non-zero timestamp.
     var d = _make_audio_info(0, 7, YUKTI_AUDIO_PLAYBACK,
-    "HDMI 1", "HDA-Intel", "pci:0000:04:00.1:dev7:p");
+      "HDMI 1", "HDA-Intel", "pci:0000:04:00.1:dev7:p");
     device_db_record_audio_seen(d);
     var ts = device_db_audio_last_seen(str_from("pci:0000:04:00.1:dev7:p"));
     assert(ts > 0, "last_seen positive epoch");
@@ -2265,7 +2380,7 @@ fn test_audio_info_accessors() {
     var sys_path = str_from("/sys/class/sound/card0");
 
     var d = _audio_info_new(0, 3, 0, YUKTI_AUDIO_PLAYBACK,
-    name, driver, hw_id, dev_path, sys_path);
+      name, driver, hw_id, dev_path, sys_path);
     assert(yukti_audio_card(d) == 0, "card");
     assert(yukti_audio_device(d) == 3, "device");
     assert(yukti_audio_subdevice(d) == 0, "subdevice");

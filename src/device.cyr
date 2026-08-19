@@ -150,19 +150,36 @@ pub fn device_health_new() {
 # ---------------------------------------------------------------------------
 
 pub fn query_permissions(dev_path_cstr) {
-    var buf[144];
+    #ifdef CYRIUS_TARGET_AGNOS
+    # agnos's struct stat has NO ownership fields at all — it is
+    # {mode@0, nlink@8, size@16, ino@24, blocks@32, mtime@40} in 48 bytes,
+    # so STAT_UID / STAT_GID do not exist there (which is how the agnos
+    # build caught this). There is no uid/gid to report, so fail closed
+    # rather than hand back a fabricated 0/0 that a caller would read as
+    # "root-owned". Same philosophy as _yk_mount in src/syscalls.cyr:
+    # fabricating a plausible answer is the one outcome never acceptable.
+    return 0;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    # STAT_* are the stdlib's per-target struct-stat offsets, NOT literals.
+    # x86_64-Linux is mode@24 uid@28 gid@32, but aarch64-Linux is
+    # mode@16 uid@24 gid@28 — so the old hardcoded 24/28/32 read st_uid as
+    # the mode, st_gid as the uid, and padding as the gid on aarch64.
+    # (2.3.4 audit; same class as the storage.cyr TOCTOU guard below.)
+    var buf[STAT_BUFSZ];
     var r = xstat(dev_path_cstr, &buf);
     if (r < 0) { return 0; }
 
-    var mode = load32(&buf + 24);
-    var uid = load32(&buf + 28);
-    var gid = load32(&buf + 32);
+    var mode = load32(&buf + STAT_MODE);
+    var uid = load32(&buf + STAT_UID);
+    var gid = load32(&buf + STAT_GID);
 
     var perms = alloc(24);
     store64(perms, uid);
     store64(perms + 8, gid);
     store64(perms + 16, mode);
     return perms;
+    #endif
 }
 
 pub fn perms_uid(p) { return load64(p); }

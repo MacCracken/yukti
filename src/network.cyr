@@ -231,11 +231,15 @@ pub fn network_unmount(mount_point_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn network_list_mounted() {
-    var readbuf[8192];
-    var nbytes = file_read_all("/proc/mounts", &readbuf, 8192);
-    if (nbytes <= 0) { return vec_new(); }
-
-    var table = str_from_buf(&readbuf, nbytes);
+    # Was a fixed var readbuf[8192] + file_read_all, i.e. exactly the silent
+    # truncation that audit MED-3 fixed in find_mount_point — re-introduced
+    # here because that fix was inline rather than shared. On a container /
+    # btrfs / snap-heavy host /proc/mounts clears 8 KB easily and every
+    # network share past the cut vanished from the returned list, so an
+    # already-mounted share read as not-mounted. Now shares the bounded,
+    # truncation-reporting reader (2.3.4 audit).
+    var table = read_procfs_text("/proc/mounts", PROC_READ_CAP);
+    if (table == 0) { return vec_new(); }
     var lines = str_split(table, 10);
     var shares = vec_new();
     var nlines = vec_len(lines);

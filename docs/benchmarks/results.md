@@ -6,107 +6,107 @@
 
 | | Run 1 | Run 2 | Run 3 | 
 |---|---|---|---|
-| **Date** | `2026-07-31T02:40:27Z` | `2026-07-31T02:41:02Z` | `2026-07-31T02:41:31Z` | 
-| **Commit** | `830a5fe` | `830a5fe` | `830a5fe` | 
+| **Date** | `2026-07-31T02:41:02Z` | `2026-07-31T02:41:31Z` | `2026-08-19T17:56:01Z` | 
+| **Commit** | `830a5fe` | `830a5fe` | `dbdcced` | 
 | **Toolchain** | `cyrius` | `cyrius` | `cyrius` | 
 
 ## Results
 
 ### device_id
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 63.00 ns | 63.00 ns | 63.00 ns | — |
-| eq | 146.00 ns | 146.00 ns | 146.00 ns | — |
+| create | 63.00 ns | 63.00 ns | 47.00 ns | -25.4% |
+| eq | 146.00 ns | 146.00 ns | 113.00 ns | -22.6% |
 
 ### device_info
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 204.00 ns | 204.00 ns | 204.00 ns | — |
+| create | 204.00 ns | 204.00 ns | 121.00 ns | -40.7% |
 | display_name_label | 8.00 ns | 8.00 ns | 8.00 ns | — |
-| display_name_fallback | 198.00 ns | 198.00 ns | 198.00 ns | — |
-| size_display_zero | 298.00 ns | 298.00 ns | 298.00 ns | — |
-| size_display_gb | 181.00 ns | 181.00 ns | 181.00 ns | — |
-| has_cap_hit | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| display_name_fallback | 198.00 ns | 198.00 ns | 128.00 ns | -35.4% |
+| size_display_zero | 298.00 ns | 298.00 ns | 183.00 ns | -38.6% |
+| size_display_gb | 181.00 ns | 181.00 ns | 146.00 ns | -19.3% |
+| has_cap_hit | 8.00 ns | 8.00 ns | 9.00 ns | +12.5% |
 | has_cap_miss | 9.00 ns | 9.00 ns | 9.00 ns | — |
-| is_removable | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| is_removable | 8.00 ns | 8.00 ns | 7.00 ns | -12.5% |
 | is_mounted | 10.00 ns | 10.00 ns | 10.00 ns | — |
 
 ### capabilities
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
 | contains_check | 6.00 ns | 6.00 ns | 6.00 ns | — |
-| bitwise_or_all | 6.00 ns | 6.00 ns | 6.00 ns | — |
+| bitwise_or_all | 6.00 ns | 6.00 ns | 5.00 ns | -16.7% |
 
 ### device_event
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| create | 1.57 µs | 1.57 µs | 1.57 µs | — |
-| is_attach | 8.00 ns | 8.00 ns | 8.00 ns | — |
-| is_removable | 8.00 ns | 8.00 ns | 8.00 ns | — |
+| create | 1.57 µs | 1.57 µs | 1.52 µs | -3.1% |
+| is_attach | 8.00 ns | 8.00 ns | 7.00 ns | -12.5% |
+| is_removable | 8.00 ns | 8.00 ns | 7.00 ns | -12.5% |
 
 ### event_collector
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| push_100 | 2.40 µs | 2.40 µs | 2.40 µs | — |
+| push_100 | 2.40 µs | 2.40 µs | 1.72 µs | -28.6% |
 
 ### storage
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| filesystem_parse | 46.00 ns | 46.00 ns | 46.00 ns | — |
-| filesystem_parse_case | 42.00 ns | 42.00 ns | 42.00 ns | — |
-| filesystem_parse_unknown | 571.00 ns | 571.00 ns | 571.00 ns | — |
-| validate_mount_ok | 357.00 ns | 357.00 ns | 357.00 ns | — |
-| validate_mount_forbidden | 530.00 ns | 530.00 ns | 530.00 ns | — |
-| validate_mount_deep | 417.00 ns | 417.00 ns | 417.00 ns | — |
-| default_mount_point | 317.00 ns | 317.00 ns | 317.00 ns | — |
-| mount_options_create | 74.00 ns | 74.00 ns | 74.00 ns | — |
-| find_mount_in | 3.44 µs | 3.44 µs | 3.44 µs | — |
-| find_mount_in_miss | 5.96 µs | 5.96 µs | 5.96 µs | — |
-| unescape_mount_path | 387.00 ns | 387.00 ns | 387.00 ns | — |
+| filesystem_parse | 46.00 ns | 46.00 ns | 45.00 ns | -2.2% |
+| filesystem_parse_case | 42.00 ns | 42.00 ns | 48.00 ns | +14.3% |
+| filesystem_parse_unknown | 571.00 ns | 571.00 ns | 557.00 ns | -2.5% |
+| validate_mount_ok | 357.00 ns | 357.00 ns | 341.00 ns | -4.5% |
+| validate_mount_forbidden | 530.00 ns | 530.00 ns | 446.00 ns | -15.8% |
+| validate_mount_deep | 417.00 ns | 417.00 ns | 425.00 ns | +1.9% |
+| default_mount_point | 317.00 ns | 317.00 ns | 264.00 ns | -16.7% |
+| mount_options_create | 74.00 ns | 74.00 ns | 60.00 ns | -18.9% |
+| find_mount_in | 3.44 µs | 3.44 µs | 2.61 µs | -24.1% |
+| find_mount_in_miss | 5.96 µs | 5.96 µs | 4.55 µs | -23.7% |
+| unescape_mount_path | 387.00 ns | 387.00 ns | 333.00 ns | -14.0% |
 
 ### optical
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| detect_disc_type_cd | 36.00 ns | 36.00 ns | 36.00 ns | — |
-| detect_disc_type_dvd | 165.00 ns | 165.00 ns | 165.00 ns | — |
-| detect_disc_type_bluray | 462.00 ns | 462.00 ns | 462.00 ns | — |
-| detect_disc_type_unknown | 938.00 ns | 938.00 ns | 938.00 ns | — |
+| detect_disc_type_cd | 36.00 ns | 36.00 ns | 29.00 ns | -19.4% |
+| detect_disc_type_dvd | 165.00 ns | 165.00 ns | 155.00 ns | -6.1% |
+| detect_disc_type_bluray | 462.00 ns | 462.00 ns | 470.00 ns | +1.7% |
+| detect_disc_type_unknown | 938.00 ns | 938.00 ns | 944.00 ns | +0.6% |
 | toc_audio_count | 30.00 ns | 30.00 ns | 30.00 ns | — |
-| toc_audio_duration | 35.00 ns | 35.00 ns | 35.00 ns | — |
+| toc_audio_duration | 35.00 ns | 35.00 ns | 34.00 ns | -2.9% |
 
 ### device_queries
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| query_permissions | 965.00 ns | 965.00 ns | 965.00 ns | — |
-| query_health_miss | 4.60 µs | 4.60 µs | 4.60 µs | — |
+| query_permissions | 965.00 ns | 965.00 ns | 941.00 ns | -2.5% |
+| query_health_miss | 4.60 µs | 4.60 µs | 4.33 µs | -5.8% |
 
 ### udev
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| classify_usb | 176.00 ns | 176.00 ns | 176.00 ns | — |
-| classify_optical | 267.00 ns | 267.00 ns | 267.00 ns | — |
-| classify_dm | 436.00 ns | 436.00 ns | 436.00 ns | — |
-| extract_caps_usb | 597.00 ns | 597.00 ns | 597.00 ns | — |
-| extract_caps_optical | 471.00 ns | 471.00 ns | 471.00 ns | — |
-| classify_and_extract | 782.00 ns | 782.00 ns | 782.00 ns | — |
-| device_info_from_udev | 2.44 µs | 2.44 µs | 2.44 µs | — |
-| device_info_from_udev_opt | 1.81 µs | 1.81 µs | 1.81 µs | — |
-| parse_uevent | 1.54 µs | 1.54 µs | 1.54 µs | — |
+| classify_usb | 176.00 ns | 176.00 ns | 182.00 ns | +3.4% |
+| classify_optical | 267.00 ns | 267.00 ns | 262.00 ns | -1.9% |
+| classify_dm | 436.00 ns | 436.00 ns | 439.00 ns | +0.7% |
+| extract_caps_usb | 597.00 ns | 597.00 ns | 660.00 ns | +10.6% |
+| extract_caps_optical | 471.00 ns | 471.00 ns | 485.00 ns | +3.0% |
+| classify_and_extract | 782.00 ns | 782.00 ns | 853.00 ns | +9.1% |
+| device_info_from_udev | 2.44 µs | 2.44 µs | 2.44 µs | +0.0% |
+| device_info_from_udev_opt | 1.81 µs | 1.81 µs | 1.76 µs | -2.8% |
+| parse_uevent | 1.54 µs | 1.54 µs | 1.29 µs | -16.3% |
 
 ### serialization
 
-| Benchmark | `830a5fe` | `830a5fe` | `830a5fe` | Δ first→last |
+| Benchmark | `830a5fe` | `830a5fe` | `dbdcced` | Δ first→last |
 |-----------|------|------|------|------|
-| device_info_json | 1.94 µs | 1.94 µs | 1.94 µs | — |
+| device_info_json | 1.94 µs | 1.94 µs | 1.70 µs | -12.4% |
 
 ---
 

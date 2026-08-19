@@ -1286,6 +1286,88 @@ fn make_test_rule() {
     return udev_rule_new(str_from("99-yukti-test"), matches, actions);
 }
 
+# ===================================================================
+# udev rule injection gates (2.3.4 audit)
+#
+# Two injections, both from a caller-supplied rule:
+#   PATH    — write_rule/remove_rule concatenate the name into
+#             "<rules_dir>/<name>.rules"; write_rule opens that
+#             O_WRONLY|O_CREAT|O_TRUNC, so a traversing name is arbitrary
+#             file create-and-truncate, and remove_rule is arbitrary unlink.
+#   CONTENT — render_rule emits KEY=="VALUE" unescaped, so a value carrying
+#             a quote and a newline authors a SECOND rule. udev runs RUN+=
+#             as root on device events.
+# ===================================================================
+
+fn test_validate_rule_name_traversal() {
+    var r = make_test_rule();
+
+    var trav = udev_rule_new(str_from("../../../etc/cron.d/evil"),
+      ur_match_attrs(r), ur_actions(r));
+    assert(is_ok(validate_rule(trav)) == 0, "traversing rule name rejected");
+
+    var slash = udev_rule_new(str_from("sub/dir"), ur_match_attrs(r), ur_actions(r));
+    assert(is_ok(validate_rule(slash)) == 0, "rule name with / rejected");
+
+    var dots = udev_rule_new(str_from(".."), ur_match_attrs(r), ur_actions(r));
+    assert(is_ok(validate_rule(dots)) == 0, "rule name '..' rejected");
+
+    var nulish = udev_rule_new(str_from("ok\nname"), ur_match_attrs(r), ur_actions(r));
+    assert(is_ok(validate_rule(nulish)) == 0, "rule name with newline rejected");
+
+    # remove_rule has its own gate — it never went through validate_rule.
+    assert(is_ok(remove_rule(str_from("../../../etc/passwd"), "/tmp")) == 0,
+      "remove_rule rejects traversing name");
+    assert(is_ok(remove_rule(str_from("a/b"), "/tmp")) == 0,
+      "remove_rule rejects name with /");
+
+    # The legitimate name still passes.
+    assert(is_ok(validate_rule(r)) == 1, "normal rule name still accepted");
+    return 0;
+}
+
+fn test_validate_rule_token_injection() {
+    var base = make_test_rule();
+
+    # A value that closes the quote and opens a RUN+= rule on a new line.
+    var m1 = vec_new();
+    vec_push(m1, pair_new(str_from("SUBSYSTEM"),
+        str_from("usb\", RUN+=\"/bin/sh -c evil\"")));
+    var a1 = vec_new();
+    vec_push(a1, pair_new(str_from("MODE"), str_from("0666")));
+    var inj = udev_rule_new(str_from("99-inj"), m1, a1);
+    assert(is_ok(validate_rule(inj)) == 0, "quote in match value rejected");
+
+    # Newline alone is enough — a udev rule is one line.
+    var m2 = vec_new();
+    vec_push(m2, pair_new(str_from("SUBSYSTEM"), str_from("usb\nRUN+=x")));
+    var a2 = vec_new();
+    vec_push(a2, pair_new(str_from("MODE"), str_from("0666")));
+    var nl = udev_rule_new(str_from("99-nl"), m2, a2);
+    assert(is_ok(validate_rule(nl)) == 0, "newline in match value rejected");
+
+    # Action values are rendered the same way and must be gated too.
+    var m3 = vec_new();
+    vec_push(m3, pair_new(str_from("SUBSYSTEM"), str_from("usb")));
+    var a3 = vec_new();
+    vec_push(a3, pair_new(str_from("MODE"), str_from("0666\", RUN+=\"x\"")));
+    var av = udev_rule_new(str_from("99-av"), m3, a3);
+    assert(is_ok(validate_rule(av)) == 0, "quote in action value rejected");
+
+    # Keys are interpolated raw as well.
+    var m4 = vec_new();
+    vec_push(m4, pair_new(str_from("SUB\"SYSTEM"), str_from("usb")));
+    var a4 = vec_new();
+    vec_push(a4, pair_new(str_from("MODE"), str_from("0666")));
+    var ky = udev_rule_new(str_from("99-ky"), m4, a4);
+    assert(is_ok(validate_rule(ky)) == 0, "quote in match key rejected");
+
+    # Ordinary values with = and { } must still be accepted — ATTR{idVendor}
+    # is legitimate udev syntax and the fixture relies on it.
+    assert(is_ok(validate_rule(base)) == 1, "ATTR{...} rule still accepted");
+    return 0;
+}
+
 fn test_render_rule() {
     test_group("udev_rules");
     var rendered = render_rule(make_test_rule());
@@ -1338,6 +1420,78 @@ fn test_rule_accessors() {
 # ===================================================================
 # Linux device manager tests (13 in Rust — skip mock sysfs for now)
 # ===================================================================
+
+# ===================================================================
+# Observability — sakshi span balance (2.3.4)
+#
+# Every sakshi_span_enter MUST be matched by a sakshi_span_exit on
+# EVERY path, including error returns. sakshi's span stack is a fixed
+# 16 entries (_SK_MAX_SPANS) behind a module-global depth counter that
+# is never reset, and sakshi_span_enter SILENTLY becomes a no-op once
+# the depth saturates. So an unbalanced enter is not a cosmetic log
+# artifact — it permanently burns one of 16 slots for the life of the
+# process, and after 16 of them ALL structured logging stops with no
+# diagnostic. Before that point, each leak makes the next span_exit pop
+# the wrong frame, misattributing both the span name and its elapsed
+# time.
+#
+# 2.3.4 found 18 unbalanced returns across 7 functions. Measured before
+# the fix, driving four error paths: depth 0 -> 4 and never returning.
+# CLAUDE.md lists "sakshi logging on all device operations" as a key
+# constraint, so silent permanent loss of it is a real defect.
+#
+# This test drives the error path of every span-bearing public function
+# that can be failed without root or hardware, and asserts the depth is
+# exactly where it started. Verified to fail when it should: reverting
+# any single sakshi_span_exit added in 2.3.4 makes it red.
+# ===================================================================
+
+fn test_span_balance_on_error_paths() {
+    test_group("span balance");
+    fl_init();
+
+    var base = sakshi_span_depth();
+    assert_eq(base, 0, "span depth starts at 0");
+
+    open_tray(str_from("/dev/yukti-no-such-device"));
+    assert_eq(sakshi_span_depth(), base, "open_tray error path balanced");
+
+    close_tray(str_from("/dev/yukti-no-such-device"));
+    assert_eq(sakshi_span_depth(), base, "close_tray error path balanced");
+
+    read_toc(str_from("/dev/yukti-no-such-device"));
+    assert_eq(sakshi_span_depth(), base, "read_toc error path balanced");
+
+    var abuf[64];
+    read_audio_sectors(str_from("/dev/yukti-no-such-device"), 0, 0, &abuf, 64);
+    assert_eq(sakshi_span_depth(), base, "read_audio_sectors guard balanced");
+
+    storage_unmount(str_cstr(str_from("/yukti-no-such-mount")));
+    assert_eq(sakshi_span_depth(), base, "storage_unmount error path balanced");
+
+    storage_eject(str_cstr(str_from("/dev/yukti-no-such-device")));
+    assert_eq(sakshi_span_depth(), base, "storage_eject error path balanced");
+
+    var mgr = linux_dm_with_root(str_from("/yukti-no-such-sysfs"));
+    linux_dm_enumerate(mgr);
+    assert_eq(sakshi_span_depth(), base, "linux_dm_enumerate balanced");
+
+    read_partition_table(str_cstr(str_from("/dev/yukti-no-such-device")));
+    assert_eq(sakshi_span_depth(), base, "read_partition_table balanced");
+
+    # cstr, NOT str_from — device_db_open passes its argument straight to
+    # patra_open, which wants a C string. Passing a Str here made patra read
+    # the Str STRUCT's bytes as a filename and create garbage-named 40 KB
+    # databases in the repo root. Same class as the audit's partition.cyr:394
+    # finding; caught by `git status` rather than by any assertion, which is
+    # its own lesson.
+    device_db_open("/yukti-no-such-dir/x.patra");
+    assert_eq(sakshi_span_depth(), base, "device_db_open error path balanced");
+
+    # Final: the whole sweep must leave the stack exactly as found.
+    assert_eq(sakshi_span_depth(), 0, "span stack fully unwound after sweep");
+    return 0;
+}
 
 fn test_linux_dm_new() {
     test_group("linux");
@@ -1516,7 +1670,12 @@ fn main() {
     test_validate_rule_empty_name();
     test_validate_rule_no_matches();
     test_validate_rule_no_actions();
+    test_validate_rule_name_traversal();
+    test_validate_rule_token_injection();
     test_rule_accessors();
+
+    # Observability tests (1)
+    test_span_balance_on_error_paths();
 
     # Linux device manager tests (5)
     test_linux_dm_new();

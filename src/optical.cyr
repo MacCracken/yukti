@@ -260,7 +260,10 @@ fn _open_optical_device(dev_path_cstr): i64 {
 pub fn open_tray(dev_path_cstr) {
     sakshi_span_enter("open_tray", 9);
     var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) { return fd_r; }
+    if (is_ok(fd_r) == 0) {
+        sakshi_span_exit();
+        return fd_r;
+    }
     var fd = payload(fd_r);
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMEJECT, 0);
@@ -282,7 +285,10 @@ pub fn open_tray(dev_path_cstr) {
 pub fn close_tray(dev_path_cstr) {
     sakshi_span_enter("close_tray", 10);
     var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) { return fd_r; }
+    if (is_ok(fd_r) == 0) {
+        sakshi_span_exit();
+        return fd_r;
+    }
     var fd = payload(fd_r);
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMCLOSETRAY, 0);
@@ -327,7 +333,10 @@ pub fn drive_status(dev_path_cstr) {
 pub fn read_toc(dev_path_cstr) {
     sakshi_span_enter("read_toc", 8);
     var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) { return fd_r; }
+    if (is_ok(fd_r) == 0) {
+        sakshi_span_exit();
+        return fd_r;
+    }
     var fd = payload(fd_r);
 
     # Read TOC header: struct cdrom_tochdr { u8 first, u8 last }
@@ -337,6 +346,7 @@ pub fn read_toc(dev_path_cstr) {
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCHDR, &hdr);
     if (ret < 0) {
         sys_close(fd);
+        sakshi_span_exit();
         return err_tray_failed(str_from("read TOC header failed"));
     }
 
@@ -370,6 +380,7 @@ pub fn read_toc(dev_path_cstr) {
         ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &entry);
         if (ret < 0) {
             sys_close(fd);
+            sakshi_span_exit();
             return err_tray_failed(str_from("read TOC entry failed"));
         }
 
@@ -391,6 +402,7 @@ pub fn read_toc(dev_path_cstr) {
     ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &leadout);
     if (ret < 0) {
         sys_close(fd);
+        sakshi_span_exit();
         return err_tray_failed(str_from("read lead-out failed"));
     }
     var leadout_lba = load32(&leadout + 4);

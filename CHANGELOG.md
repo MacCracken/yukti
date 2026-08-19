@@ -7,6 +7,180 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.4] — 2026-08-19
+
+P(-1) audit / refactor / hardening / security sweep. Ten parallel dimension
+reviews with two adversarial verifiers per finding — 153 agents, 72 raw
+findings, 142 verdicts, 44 refuted — plus a manual in-code deferral review.
+Full write-up in [`docs/audit/2026-08-19-audit.md`](docs/audit/2026-08-19-audit.md).
+
+**692 assertions** (was 669, +23), 3/3 fuzz, `core_smoke` passes, lint 0
+warnings, fmt clean, vet clean, and x86_64 / aarch64 / **agnos** all build.
+
+**No finding survived at HIGH.** Every HIGH-rated raw finding was downgraded or
+refuted on verification — usually because reachability was never traced, or
+because a userspace `mount.cifs` helper option had been mistaken for a kernel
+`mount(2)` parameter. Stated plainly rather than inflated.
+
+### Fixed — sakshi spans leaked on 18 error paths, permanently killing observability after 16
+
+The most consequential finding, and the sweep did not find it — a manual
+deferral review did. See *What the sweep did not catch* in the audit.
+
+`sakshi_span_enter` pushes onto a fixed 16-entry stack behind `_sk_span_depth`,
+a global that is **never reset**, and silently no-ops once
+`_sk_span_depth >= _SK_MAX_SPANS`. An unbalanced enter therefore burns one of 16
+slots for the life of the process; after 16, **all structured logging stops with
+no diagnostic**. Before that, each leak makes the next `span_exit` pop the wrong
+frame, misattributing span names and elapsed times. CLAUDE.md lists sakshi
+logging on all device operations as a key constraint.
+
+Measured with a probe reading `sakshi_span_depth()` between calls:
+
+| call | depth |
+|---|---|
+| `open_tray(bad dev)` | 0 → **1** |
+| `close_tray(bad dev)` | 1 → **2** |
+| `read_toc(bad dev)` | 2 → **3** |
+| `storage_eject(bad dev)` | 3 → **4** |
+
+`udev_monitor_run` is worse and structural — `enter=1, exit=0`, so the daemon
+main loop leaks on its **success** path. Sixteen failed ejects on a flaky
+optical drive and argonaut/aethersafha lose logging for good.
+
+18 `sakshi_span_exit()` calls added across `optical.cyr` (6), `storage.cyr`
+(10), `linux.cyr` (1) and `udev.cyr` (1). `storage_unmount` was checked and is
+**not** affected — its exit at `storage.cyr:638` dominates all four of its
+returns, which the probe confirmed. Post-fix the probe reads 0 → 0 throughout.
+
+A regex over enter/exit pairs was not good enough: it produced 3 false
+positives and missed 3 of `read_toc`'s 4 leaks. The runtime probe settled it.
+
+New `test_span_balance_on_error_paths` drives nine error paths and asserts the
+depth is unchanged. Verified to fail when it should — reverting one
+`sakshi_span_exit` yields 10 failures.
+
+### Fixed — every `struct stat` offset in `src/` was an x86_64 literal
+
+`src/` contained **zero** named `STAT_*` constants. `query_permissions`
+(`device.cyr:157`) read `load32(&buf + 24/28/32)`, which is x86_64-Linux only;
+aarch64-Linux is `STAT_MODE=16, STAT_UID=24, STAT_GID=28`, so on aarch64 it read
+**st_uid as the mode, st_gid as the uid, and padding as the gid**. Flagged
+independently by three dimensions.
+
+`storage.cyr:575` had the same bug in the TOCTOU symlink guard added for audit
+MED-2 — offset 24 is `st_uid` on aarch64, so the guard compared a uid against
+`S_IFLNK` and could never fire. That one was already filed for this release; the
+second instance is what turned it from a slip into a pattern.
+
+Both now use the stdlib's per-target `STAT_MODE`/`STAT_UID`/`STAT_GID`/
+`STAT_BUFSZ`, which resolve to exactly 24/28/32 on x86_64 — a provable no-op
+there, a correctness fix on aarch64.
+
+**The agnos build caught fallout the tests could not.** agnos's `struct stat` is
+`{mode@0, nlink@8, size@16, ino@24, blocks@32, mtime@40}` in 48 bytes with **no
+uid or gid field at all**, so `STAT_UID`/`STAT_GID` do not exist there and the
+build failed. `query_permissions` now fails closed on agnos rather than
+returning a fabricated 0/0 a caller would read as root-owned — the same
+philosophy `_yk_mount` states in `src/syscalls.cyr`.
+
+### Fixed — `network_list_mounted` had re-introduced the 8 KB `/proc/mounts` truncation
+
+Flagged by four independent dimensions. `var readbuf[8192]` +
+`file_read_all(..., 8192)` is exactly the defect audit **MED-3 (2026-04-19)**
+fixed in `find_mount_point`, whose own comment says `/proc/mounts` exceeds 8 KB
+on container/btrfs/snap-heavy systems. It came back because that fix lived
+**inline in one function** instead of being shared, so every network share past
+the cut vanished and an already-mounted share read as not-mounted.
+
+Extracted `read_procfs_text(path, cap)` into `storage.cyr`, used by both call
+sites. Chunked 4 KB reads to EOF, bounded at `PROC_READ_CAP` (1 MB) against a
+hostile `/proc` file, and — unlike either previous version — it **reports**
+truncation via `sakshi_warn` instead of silently returning a short answer.
+Third instance of the pattern, which is what makes extracting it justified
+rather than speculative.
+
+### Fixed — udev rule name and rule content were both injectable
+
+Two distinct injections, each flagged by two dimensions.
+
+**Path.** `write_rule`/`remove_rule` concatenate the rule name into
+`"<rules_dir>/<name>.rules"`, and `validate_rule` checked only that it was
+non-empty. `../../../etc/cron.d/evil` escapes `rules_dir`; `write_rule` opens
+with `577` = `O_WRONLY|O_CREAT|O_TRUNC`, so that is **arbitrary file
+create-and-truncate**, and `remove_rule` — which never called `validate_rule`
+at all — is **arbitrary unlink**.
+
+**Content.** `render_rule` emits `KEY=="VALUE"` unescaped. A value of
+`x", RUN+="/bin/sh -c '…'` closes the rule and authors a second one, and udev
+runs `RUN+=` **as root** on device events.
+
+Added `_is_safe_rule_name` (allowlist `[A-Za-z0-9_-]`, 1..64) and
+`_is_safe_rule_token` (rejects `"`, `\`, DEL and every control byte — a udev
+rule is one line by definition), applied to the name and to every match/action
+key and value, with `remove_rule` gated directly. `ATTR{idVendor}` still passes,
+asserted by test. 12 new assertions; neutering both allowlists produces 8
+failures.
+
+### Changed — `find_mount_point` and `network_list_mounted` share one procfs reader
+
+Consequence of the MED-4 fix, called out separately because it also converts a
+raw `sys_open` with literal flags to `xopen`, clearing one of the five
+agnos-portability lint notes.
+
+### Deferred to a later release
+
+Held out to keep this release reviewable; all re-verified and filed with
+file:line in the audit and roadmap. Highlights:
+
+- **`DeviceInfo` is retained forever** — `device_info_free` is a no-op and
+  **measured 256 bytes/device permanently**, 2,560,536 bytes after 1,000
+  refreshes of a 10-device sidebar, with `free` called every time. The deferral
+  comment's "pooling doesn't win here" is true for one enumeration and false for
+  a daemon, and a no-op `free` misleads callers. All three consumers are
+  long-running refresh loops.
+- **`udev_monitor_run` leaks a freelist block pair and a property hashmap per
+  event.**
+- **GPT fields used without range validation** — entry-array offset can wrap i64
+  to 0; `end_lba < start_lba` yields a negative size.
+- **`device_db_open` overwrites a live handle without closing it**;
+  `device_db_get_preference` returns `Str`s aliasing patra-owned memory.
+- **`adopt defer { sakshi_span_exit(); }`** — verified working on every
+  early-return path in 6.5.29 and recommended by sakshi's own docs; deferred
+  because it also changes which work falls inside the measured span.
+- **Mock-sysfs tests** — the "skip mock sysfs for now" blocker on 8 of the 13
+  ported Rust tests is **stale**: `linux_dm_with_root` exists and
+  `linux_dm_enumerate` honours it.
+
+### Upstream — sakshi 2.4.11
+
+The span-leak investigation found a defect on sakshi's side as well, and it is
+the reason the yukti bug was so expensive: `sakshi_span_enter` returned `0` on
+overflow — **the same value it returns on success** — and emitted nothing. So
+an unbalanced enter was undetectable by the caller and invisible to the
+operator, right up until the 16th one silently ended all tracing.
+
+Fixed in **sakshi 2.4.11** (pin also moved 6.5.15 → 6.5.29): the enter returns
+a non-zero cumulative drop count when refused, and the first drop emits a
+one-shot `sakshi_warn`. Enter/exit pairing semantics are deliberately
+unchanged — the stronger fix (skip the exit matching a refused enter) alters
+observable behaviour for unbalanced callers, and sakshi is included by every
+AGNOS Cyrius project, so it is a minor rather than a patch.
+
+**yukti still pins sakshi 2.4.10 here** — 2.4.11 is committed locally but not
+yet tagged. Bump `[deps.sakshi]` and regenerate `cyrius.lock` once it is.
+
+### Notes
+
+- **In-code deferral review.** All four in-tree deferrals audited. One
+  (`syscalls.cyr:94`) verified **still accurate** — agnos 6.5.29 does still ship
+  0-arity `sys_mount`/`sys_umount` stubs, so the fail-closed bridge rationale
+  holds. Two were stale in ways that mattered (above). Zero
+  TODO/FIXME/XXX/HACK markers exist in the tree.
+- **Refuted findings are recorded** in the audit so they are not re-reported —
+  notably the SMB `credentials=` "arbitrary file read", which is a mount.cifs
+  *userspace helper* option that never reaches `mount(2)`.
+
 ## [2.3.3] — 2026-08-19
 
 Toolchain and dependency refresh: cyrius **6.5.3 → 6.5.29**, sakshi

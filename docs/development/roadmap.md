@@ -3,63 +3,194 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.3.4: audit sweep and review
+## Next patch — 2.3.5: audit follow-through
 
-Findings from the 2.3.3 dependency-upgrade audit that were deliberately
-**not** fixed in 2.3.3, to keep that release scoped to the bump and the
-one regression the bump introduced. None is caused by the upgrade;
-all four predate it.
+2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
+findings it fixed are in `CHANGELOG.md`; the full write-up with severity,
+file:line and refuted claims is
+[`docs/audit/2026-08-19-audit.md`](../audit/2026-08-19-audit.md).
 
-- [ ] **`mount_count` never increments, and it takes `last_seen` down
-      with it.** `src/device_db.cyr:321` emits
-      `UPDATE devices SET mount_count = mount_count + 1, last_seen = <now>`.
+These are the items 2.3.4 deliberately deferred to stay reviewable. All
+were independently re-verified; none is speculative.
+
+### Memory retention — the theme that ties three findings together
+
+- [ ] **`DeviceInfo` is retained forever.** `src/device.cyr:69`.
+      `device_info_free` is a no-op and **measured 256 bytes retained per
+      device, permanently** — 1,000 refreshes of a 10-device sidebar
+      retains 2,560,536 bytes, linear and unreclaimed, with
+      `device_info_free()` called on every one. The deferral comment's
+      rationale ("DeviceInfo objects are long-lived … so pooling doesn't
+      win here") is true for a single enumeration and false for a daemon,
+      and a no-op `free` actively misleads a caller into believing it
+      released memory. argonaut, aethersafha and the file-manager sidebar
+      are all long-running refresh loops. **Re-frame the 2.5.0
+      `enumerate_devices_into(pool)` item** below: it is filed as an
+      ergonomics/performance idea and is really the fix for this.
+- [ ] **`udev_monitor_run` leaks per event.** `src/udev.cyr:727`. Every
+      `continue` in the monitor loop abandons the `UdevEvent` (two
+      freelist blocks) and its parsed property hashmap.
+- [ ] **`device_db_open` overwrites a live handle without closing it.**
+      `src/device_db.cyr:122`. A failed re-open also zeroes `_yukti_db`,
+      silently disabling every later DB call.
+
+### Correctness
+
+- [ ] **`mount_count` never increments, and takes `last_seen` with it.**
+      `src/device_db.cyr:321` emits
+      `UPDATE devices SET mount_count = mount_count + 1, last_seen = <now>`;
       patra's `_parse_update` (`lib/patra.cyr:2237`) accepts only
-      `SQLT_INT_LIT`, `SQLT_PARAM` or `SQLT_STR_LIT` after `=`; a column
-      reference falls through to the `else` and returns
-      `PATRA_ERR_SYNTAX`, so the **whole statement** fails and `last_seen`
-      is collateral damage.
+      `SQLT_INT_LIT`, `SQLT_PARAM` or `SQLT_STR_LIT` after `=`, so a column
+      reference fails the **whole statement**.
 
-      2.3.3's `_db_exec` made this audible — the suite now prints
-      `[WARN] device_db: devices mount_count update failed` exactly once,
-      from `test_device_db_mount_count`. Before that it was silent.
+      2.3.3's `_db_exec` made this audible — the suite prints
+      `[WARN] device_db: devices mount_count update failed` once, from
+      `test_device_db_mount_count`. The test at
+      `tests/tcyr/yukti.tcyr:1771` documents the bug rather than catching
+      it (`assert(mc >= 0)` holds for every value). Fix: read the count,
+      write a literal — or use `patra_bind_int`, which is available now.
+- [ ] **GPT fields used without range validation.**
+      `src/partition.cyr:359` (entry-array byte offset can wrap i64 to 0)
+      and `:379` (`end_lba < start_lba` yields a negative size). A hostile
+      disk is explicitly in the threat model. `:394` also passes a `Str` to
+      `str_from()` where a C string is expected.
+- [ ] **`device_db_get_preference` returns `Str`s aliasing patra memory.**
+      `src/device_db.cyr:391`. Values point into a patra result the caller
+      then frees, and `str_from()` runs an unbounded `strlen` over a fixed
+      256-byte field with no guaranteed NUL.
+- [ ] **`network_probe_host` maps any non-dotted-quad host to 0.0.0.0**
+      (`src/network.cyr:317`), which Linux treats as localhost for
+      `connect()` — a hostname probe silently tests the local machine and
+      reports success.
+- [ ] **TOC ctrl bitfield read from the wrong nibble** —
+      `src/optical.cyr:420` misclassifies every data track as audio.
+      `:376` additionally treats zero-extended `load32` results as signed
+      LBAs.
+- [ ] **`filesystem_usage` overflows i64 above ~839 TiB used** —
+      `src/storage.cyr:154`, `used_bytes * 10000`.
+- [ ] **`udev_monitor_poll` builds a negative `tv_nsec`** for any negative
+      `timeout_ms`; `ppoll` rejects it with EINVAL. `src/udev.cyr:672`.
+- [ ] **`_audio_load_drivers` takes an unbounded card index** from
+      `/proc/asound/cards` and uses it as a vec fill count.
+      `src/audio.cyr:255`.
+- [ ] **`list_devices` caps `udevadm info --export-db` at 8 KB** —
+      measured **344,753 bytes** on a real host, so it returns a fraction
+      of the database. `src/udev_rules.cyr:308`. Same class as the
+      `/proc/mounts` regression 2.3.4 fixed; should use the new
+      `read_procfs_text`.
 
-      The test at `tests/tcyr/yukti.tcyr:1768` documents the bug instead
-      of catching it: *"mount_count UPDATE may not work … just verify the
-      function doesn't crash"* followed by `assert(mc >= 0)`, which holds
-      for every possible value. Fix: read the count, then write a literal
-      (or use `patra_bind_int`, see 2.4.0 — the API is available now).
-      Replace the placeholder assertion with a real one.
-- [ ] **`st_mode` is read at the x86_64 offset on every architecture.**
-      `src/storage.cyr:575` does `load32(&stbuf + 24)`. That is
-      `STAT_MODE = 24` on x86_64 (`lib/syscalls_x86_64_linux.cyr:301`) but
-      aarch64-Linux puts `st_mode` at **16**
-      (`lib/syscalls_aarch64_linux.cyr:533`) — 24 is `st_uid` there. So
-      the TOCTOU symlink guard added for audit MED-2 cannot fire on
-      aarch64: it tests a uid against `S_IFLNK`. Security-relevant, and it
-      should use the named `STAT_MODE` constant rather than a literal.
-      Pairs with the held aarch64 retest.
+### Hardening (defence-in-depth)
+
+- [ ] **ANSI escape injection to the terminal.** `src/main.cyr:49` writes
+      device-controlled sysfs/uevent strings verbatim.
+- [ ] **`validate_mount_point` is a denylist, not an allowlist**
+      (`src/storage.cyr:265`), and `/mnt-evil` passes a `/mnt` prefix test.
+      `storage_unmount`'s `rmdir` gate (`:657`) likewise accepts `..` in
+      the tail after a raw `/run/media/` prefix match.
+- [ ] **SMB credentials are interpolated into the `mount(2)` data string**
+      with no `,` / `=` rejection (`src/network.cyr:115`). Reachability was
+      **not** traced to any consumer, so this is a library hardening gap,
+      not a demonstrated exploit. Note the `credentials=` "arbitrary file
+      read" variant is **refuted** — that is a mount.cifs userspace helper
+      option and never reaches the syscall.
+- [ ] **`network_mount` omits the mount-path TOCTOU lstat guard** that
+      `storage_mount` has. `src/network.cyr:178`.
+- [ ] **`audio.cyr:324` defines an unprefixed global
+      `str_starts_with_cstr`** that will collide when the stdlib gains one.
 - [ ] **`lib/fs.cyr`'s `dir_list` / `is_dir` scratch is no longer
       reentrant.** 6.5.29 changed `var buf = alloc(4096)` to
       `var sbuf[4096]; var buf = &sbuf;` (`lib/fs.cyr:125, 178, 357, 378`).
       The stdlib comment justifies it as "per-call and therefore
-      per-THREAD" — but in Cyrius `var buf[N]` inside a function body is
-      **static data**, which `docs/development/cyrius-usage.md` states
+      per-THREAD", but in Cyrius `var buf[N]` inside a function body is
+      **static data** — `docs/development/cyrius-usage.md` says so
       explicitly. yukti's seven call sites are safe today (single-threaded,
       no nesting): `src/gpu.cyr:152`, `src/audio.cyr:428`,
       `src/udev.cyr:297, :393, :419`, `src/optical.cyr:603, :608`. The
-      upside is a 4104 B/call bump-heap saving on every enumeration, which
-      matters for the long-running consumers. Recorded so the lost
-      guarantee is a known constraint rather than a surprise — verify
-      before any nested or threaded enumeration lands.
-- [ ] **`dist/yukti-core.deps` claims the kernel-safe bundle needs
-      `alloc`.** It does not — `dist/yukti-core.cyr` has zero call-shaped
-      `alloc(`. cyrius's sidecar generator matches the word inside
-      comments (lines 17 and 100 of the bundle). Confirmed by experiment:
-      rewording those two comments empties the sidecar. Misleading for the
-      AGNOS kernel consumer, which reads that file to know what to bring
-      into scope. Cannot be hand-corrected — `cyrius distlib` regenerates
-      it and CI's dist-sync gate would fail. **Upstream cyrius issue**;
-      file it. `programs/core_smoke.cyr`, the real tripwire, passes.
+      upside is a 4104 B/call bump-heap saving per enumeration, which
+      matters for exactly the long-running consumers above. Recorded so the
+      lost guarantee is a known constraint — verify before any nested or
+      threaded enumeration lands.
+
+### Structural / test quality
+
+- [ ] **Adopt `defer { sakshi_span_exit(); }`.** Verified to run on every
+      early-return path in cyrius 6.5.29, including from inside a loop, and
+      recommended by sakshi's own header comment. Makes the 2.3.4 span-leak
+      class structurally impossible instead of relying on 18 sites staying
+      correct. Deferred because it also changes **which work falls inside
+      the measured span** — `storage_unmount` and `network_mount` exit their
+      span partway through and then do more work.
+- [ ] **`core_smoke` asserts no struct-layout offset.**
+      `programs/core_smoke.cyr:62`. It checks the exported constants but not
+      the `DI_*` / `DH_*` offsets the AGNOS kernel actually depends on, so
+      that ABI could shift without the tripwire firing.
+- [ ] **Mock-sysfs tests — blocker is STALE.** `tests/tcyr/yukti.tcyr:1339`
+      defers 8 of the 13 ported Rust device-manager tests on "skip mock
+      sysfs for now". `linux_dm_with_root` exists and `linux_dm_enumerate`
+      honours it (`src/linux.cyr:64`), so a mock tree under `/tmp` is
+      buildable today. Only 5 of 13 are ported.
+- [ ] **Assertions that cannot fail.** `yukti.tcyr:1771` (`assert(mc >= 0)`),
+      `:1370` (`test_linux_dm_listener` asserts nothing about listeners and
+      duplicates `test_linux_dm_new`), `:668` (only negative assertions, so
+      an always-reject implementation passes). Also the two `remove_rule`
+      assertions added in 2.3.4 pass either way — recorded honestly in the
+      audit.
+- [ ] **Fuzz harnesses under-assert.** `fuzz_partition_table` asserts only
+      "does not crash" against a known-exact MBR; `fuzz_parse_uevent`'s
+      mutation and truncation loops only ever reach the header segment.
+- [ ] **`pci_device_name` stub silently ignores `device_id`.**
+      `src/pci.cyr:211`. Untracked deferral — needs this cross-reference or
+      a `#skip-lint`.
+- [ ] **`storage_eject` duplicates `optical.cyr`'s eject path** with its own
+      ioctl constant (`src/storage.cyr:695`); the nvme and mmcblk branches
+      at `:708` are byte-identical.
+- [ ] **`LDM_MONITOR_THREAD` is written once and never read.**
+      `src/linux.cyr:22`.
+- [ ] **4 raw `sys_open` sites with literal flags remain** (`audio.cyr` ×2,
+      `storage.cyr`, `udev_rules.cyr`) — agnos's `sys_open` is
+      `(name, namelen, flags)`. 2.3.4 cleared one via `read_procfs_text`.
+
+### Upstream
+
+- [ ] **`dist/yukti-core.deps` falsely lists `alloc`.** The kernel-safe
+      bundle has zero call-shaped `alloc(`; cyrius's sidecar generator
+      matches the word inside comments. **Confirmed by experiment** —
+      rewording the two comments in `core.cyr` empties the sidecar. Not
+      hand-correctable: `cyrius distlib` regenerates it and CI's dist-sync
+      gate would fail. File upstream.
+
+## Blocked on an upstream tag
+
+- [ ] **Bump `[deps.sakshi]` 2.4.10 → 2.4.11.** The 2.3.4 span-leak work
+      found a defect on sakshi's side too: `sakshi_span_enter` returned 0
+      on overflow — the same value it returns on success — and emitted
+      nothing, so a saturated span stack stopped ALL tracing with no
+      diagnostic anywhere. Fixed in sakshi 2.4.11: the enter now returns a
+      non-zero cumulative drop count when refused, and the first drop emits
+      a one-shot `sakshi_warn`. Pairing semantics are deliberately
+      unchanged (that is a 2.5.0 minor — it alters observable behaviour for
+      unbalanced callers, and sakshi is included by every AGNOS Cyrius
+      project). sakshi's own pin also moved 6.5.15 → 6.5.29.
+
+      **The change is committed locally but not tagged.** Bump the tag here
+      once 2.4.11 is pushed, then regenerate `cyrius.lock`. Keep it in
+      lockstep with whatever cyrius bundles, or `cyrius build` warns that
+      `./lib/` shadows the version-pinned lib.
+
+## Resolved in 2.3.4
+
+- [x] **`st_mode` read at the x86_64 offset on every architecture.** The
+      2.3.3 filing named only `src/storage.cyr:575` (the TOCTOU symlink
+      guard, which on aarch64 compared a **uid** against `S_IFLNK` and so
+      could never fire). The 2.3.4 sweep found a **second instance** —
+      `src/device.cyr:157` `query_permissions`, flagged independently by
+      three dimensions, reading st_uid as the mode and st_gid as the uid on
+      aarch64 — and that a *third* fact made it a pattern rather than a
+      slip: `src/` contained **zero** named `STAT_*` constants. Every stat
+      offset in the tree is now the stdlib's per-target constant. The agnos
+      build then caught what tests could not: agnos's `struct stat` has no
+      uid/gid field at all, so `query_permissions` fails closed there
+      rather than fabricating 0/0.
 
 ## Next minor — 2.4.0: security hardening + prepared statements
 

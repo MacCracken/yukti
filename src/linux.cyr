@@ -65,7 +65,10 @@ pub fn linux_dm_enumerate(mgr) {
     sakshi_span_enter("enumerate", 9);
 
     var r = enumerate_devices(root);
-    if (is_ok(r) == 0) { return r; }
+    if (is_ok(r) == 0) {
+        sakshi_span_exit();
+        return r;
+    }
 
     var devices = payload(r);
     var cache = load64(mgr + LDM_DEVICES);

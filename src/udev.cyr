@@ -740,5 +740,6 @@ pub fn udev_monitor_run(mon, listener_fn) {
 
         fncall1(listener_fn, dev_event);
     }
+    sakshi_span_exit();
     return Ok(0);
 }

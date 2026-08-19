@@ -254,6 +254,28 @@ jobs:
               if (n >= 65536) print FILENAME":"NR": large stack buffer ("n" bytes): "$0
             }' src/*.cyr | tee /tmp/bigbuf.txt
           [ -s /tmp/bigbuf.txt ] && FAIL=1
+          # sakshi takes (literal, byte_length) pairs. A length longer than the
+          # literal is a buffer OVER-READ: sakshi writes N bytes starting at the
+          # literal, so the tail of the log line is whatever sits after it in
+          # rodata. Nothing else catches this — it compiles, runs, and prints
+          # plausible output. 2.3.5 found one shipping (`starting udev hotplug
+          # monitor` declared 31, actual 29).
+          python3 - <<'PYEOF'
+          import re, glob, sys
+          pat = re.compile(r'(sakshi_(?:warn|info|error|debug|fatal|trace|span_enter))\("((?:[^"\\]|\\.)*)", *(\d+)\)')
+          bad = 0
+          for p in sorted(glob.glob('src/*.cyr') + glob.glob('programs/*.cyr')
+                          + glob.glob('tests/tcyr/*.tcyr') + glob.glob('fuzz/*.fcyr')):
+              for i, ln in enumerate(open(p).read().split('\n'), 1):
+                  for m in pat.finditer(ln):
+                      lit = m.group(2).encode().decode('unicode_escape')
+                      if int(m.group(3)) != len(lit):
+                          print(f"FAIL: {p}:{i} {m.group(1)} declared={m.group(3)} actual={len(lit)} :: {lit[:60]!r}")
+                          bad += 1
+          print(f"sakshi literal/length pairs checked (mismatches: {bad})")
+          sys.exit(1 if bad else 0)
+          PYEOF
+          [ $? -eq 0 ] || FAIL=1
           echo "security scan complete (fail: $FAIL)"
           exit $FAIL
 

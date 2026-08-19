@@ -27,22 +27,86 @@ fn _write_fixture(buf, n) {
     return 0;
 }
 
+# Fail loudly with a distinct exit code so a CI failure names the broken
+# invariant instead of just "crashed".
+fn _inv(cond, msg, code) {
+    if (cond == 0) {
+        sys_write(2, "INVARIANT VIOLATED: ", 20);
+        sys_write(2, msg, strlen(msg));
+        sys_write(2, "\n", 1);
+        sys_exit(code);
+    }
+    return 0;
+}
+
 fn fuzz_one(buf, n) {
     _write_fixture(buf, n);
     var r = read_partition_table(_tmp_path);
-    # Either is_ok → Result(pt) or Err — both are valid. Just exercise
-    # accessors if Ok to catch dereferences of bogus vec ptrs.
+    # Either is_ok → Result(pt) or Err — both are valid outcomes for
+    # arbitrary bytes. What is NOT valid is an Ok carrying a table that
+    # violates its own contract.
+    #
+    # 2.3.5: this used to call the accessors and assert NOTHING, so the
+    # harness only proved "does not segfault". A hostile GPT that yielded
+    # a negative size, an out-of-range index, or a bogus table type passed
+    # cleanly. Every check below must hold for EVERY input, valid or not.
     if (is_ok(r)) {
         var pt = payload(r);
         var t = pt_type(pt);
+        _inv(t >= PT_NONE, "pt_type below PT_NONE", 20);
+        _inv(t <= PT_GPT, "pt_type above PT_GPT", 21);
+
         var entries = pt_entries(pt);
+        _inv(entries != 0, "pt_entries is null on an Ok table", 22);
         var count = vec_len(entries);
+        _inv(count >= 0, "negative entry count", 23);
+        # A GPT header may claim a huge entry count; the parser must bound
+        # what it actually materialises.
+        _inv(count <= 1024, "entry count implausibly large (unbounded parse?)", 24);
+        # PT_NONE must carry no entries.
+        if (t == PT_NONE) {
+            _inv(count == 0, "PT_NONE with entries", 25);
+        }
+
         for (var i = 0; i < count; i = i + 1) {
             var pe = vec_get(entries, i);
-            pe_index(pe);
-            pe_start_lba(pe);
-            pe_size_bytes(pe);
-            pe_is_efi(pe);
+            _inv(pe != 0, "null entry in the entries vec", 26);
+
+            _inv(pe_index(pe) >= 0, "negative partition index", 27);
+            _inv(pe_index(pe) < 1024, "partition index implausibly large", 28);
+
+            # A start LBA read from disk is untrusted; it must never come
+            # back negative after parsing (which would mean a wrapped or
+            # sign-extended read).
+            _inv(pe_start_lba(pe) >= 0, "negative start_lba", 29);
+            _inv(pe_size_sectors(pe) >= 0, "negative size_sectors", 30);
+            _inv(pe_size_bytes(pe) >= 0, "negative size_bytes", 31);
+
+            # size_bytes must be the sector count scaled by 512, and that
+            # multiply must not have wrapped i64.
+            if (pe_size_sectors(pe) > 0) {
+                _inv(pe_size_bytes(pe) >= pe_size_sectors(pe),
+                  "size_bytes < size_sectors (multiply wrapped?)", 32);
+            }
+
+            # Booleans must be booleans.
+            var b = pe_bootable(pe);
+            var b_ok = 0;
+            if (b == 0) { b_ok = 1; }
+            if (b == 1) { b_ok = 1; }
+            _inv(b_ok, "bootable is not 0/1", 33);
+            var e = pe_is_efi(pe);
+            var e_ok = 0;
+            if (e == 0) { e_ok = 1; }
+            if (e == 1) { e_ok = 1; }
+            _inv(e_ok, "is_efi is not 0/1", 34);
+
+            # A name, when present, must be a readable Str of sane length.
+            var nm = pe_name(pe);
+            if (nm != 0) {
+                _inv(str_len(nm) >= 0, "negative name length", 35);
+                _inv(str_len(nm) <= 512, "name length implausibly large", 36);
+            }
         }
     }
     return 0;

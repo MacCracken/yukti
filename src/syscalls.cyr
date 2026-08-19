@@ -80,6 +80,44 @@ enum YkSyscallsAgnos {
 #endif
 
 # ---------------------------------------------------------------------------
+# _yk_starts_with_cstr — prefix test against a C STRING (yukti 2.3.5)
+#
+# The stdlib's `str_starts_with(s: Str, prefix: Str)` takes a **Str** prefix.
+# It has cstr peers for equality (`str_eq_cstr`), containment
+# (`str_contains_cstr`) and indexing (`str_index_of_cstr`) — but NOT for
+# prefix, so the obvious-looking `str_starts_with(s, "foo")` compiles and is
+# silently wrong: the cstr pointer is read as a Str struct, so `str_len` and
+# `str_data` return whatever bytes happen to follow it.
+#
+# The result is UNDEFINED, not merely false. Measured on 6.5.29: with a
+# rodata literal the call returned 0 for every input, while with a
+# `str_cstr()` result it returned 1 for every input. Both are wrong; which
+# one you get depends on adjacent memory.
+#
+# All six yukti call sites had this bug before 2.3.5 (udev partition
+# filtering, udevadm P:/E: line parsing, SMB share detection, the
+# /run/media/ rmdir guard, and optical-device detection in eject).
+#
+# Lives here because src/syscalls.cyr is first in the include chain, so
+# every later domain module can see it. Internal (`_yk_` prefix, not `pub`)
+# — this repairs behaviour, it does not add public surface. It also replaces
+# the unprefixed `str_starts_with_cstr` that src/audio.cyr had defined,
+# which would have collided the moment the stdlib gained that name.
+# ---------------------------------------------------------------------------
+
+fn _yk_starts_with_cstr(s, prefix_cstr): i64 {
+    if (s == 0) { return 0; }
+    if (prefix_cstr == 0) { return 0; }
+    var plen = strlen(prefix_cstr);
+    if (plen > str_len(s)) { return 0; }
+    var sd = str_data(s);
+    for (var i = 0; i < plen; i = i + 1) {
+        if (load8(sd + i) != load8(prefix_cstr + i)) { return 0; }
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
 # mount bridge (yukti 2.3.0)
 # ---------------------------------------------------------------------------
 # `sys_mount` is the one Linux-only syscall whose AGNOS wrapper is not merely a

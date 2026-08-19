@@ -141,6 +141,9 @@ enum OpticalIoctl {
     IOCTL_CDROMREADAUDIO = 0x530E;
     CDROM_LBA = 0x01;
     CDROM_LEADOUT = 0xAA;
+    # Value tested against cdte_CTRL (the HIGH nibble of the packed byte),
+    # NOT against the raw byte. See _toc_ctrl_is_data.
+    CDROM_DATA_TRACK = 0x04;
     CDS_NO_DISC = 1;
     CDS_TRAY_OPEN = 2;
     CDS_DRIVE_NOT_READY = 3;
@@ -330,6 +333,37 @@ pub fn drive_status(dev_path_cstr) {
 # read_toc — read CD table of contents via ioctls
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# _toc_ctrl_is_data — does this TOC entry describe a DATA track?
+#
+# `struct cdrom_tocentry` (linux/cdrom.h) packs two 4-bit fields into the
+# byte at offset 1:
+#
+#     __u8 cdte_adr  :4;
+#     __u8 cdte_ctrl :4;
+#
+# On little-endian the FIRST-declared bitfield takes the LOW bits, so the
+# raw byte is  [ ctrl(hi) | adr(lo) ]  — ctrl is the HIGH nibble.
+#
+# `CDROM_DATA_TRACK` (0x04) is defined to be tested against cdte_ctrl, so on
+# the raw byte the correct mask is 0x40, not 0x04.
+#
+# Before 2.3.5 this was `(adr_ctrl & 4)` on the raw byte, which tests bit 2
+# of cdte_ADR. adr is normally 1 (Q sub-channel carries position), so bit 2
+# is 0 and the predicate was effectively always false — **every data track
+# was classified as audio**. That is a wrong answer handed to the audio-CD
+# ripping API, which then treats a data track as rippable audio.
+#
+# Not `pub`: this is an internal predicate, reachable from tests via the
+# flat namespace. 2.3.5 repairs behaviour; it does not add public surface.
+# ---------------------------------------------------------------------------
+
+fn _toc_ctrl_is_data(adr_ctrl): i64 {
+    var ctrl = (adr_ctrl >> 4) & 15;
+    if ((ctrl & CDROM_DATA_TRACK) != 0) { return 1; }
+    return 0;
+}
+
 pub fn read_toc(dev_path_cstr) {
     sakshi_span_enter("read_toc", 8);
     var fd_r = _open_optical_device(dev_path_cstr);
@@ -429,7 +463,7 @@ pub fn read_toc(dev_path_cstr) {
         if (length > 134217728) { length = 134217728; }   # 128M-sector cap
 
         var adr_ctrl = vec_get(ctrl_vec, i);
-        var is_data_track = (adr_ctrl & 4) != 0;
+        var is_data_track = _toc_ctrl_is_data(adr_ctrl);
 
         var tt = TT_AUDIO;
         var duration_x100 = 0;

@@ -20,6 +20,37 @@ fn fuzz_one(buf, len) {
     return 0;
 }
 
+# Build a realistic multi-property uevent into `buf`, returning its true
+# byte length INCLUDING the interior NUL separators. Written byte-wise
+# because any strlen-based construction silently stops at the first NUL —
+# which is the bug this harness had.
+fn _uev_put(buf, off, cstr) {
+    var n = strlen(cstr);
+    memcpy(buf + off, cstr, n);
+    return off + n;
+}
+
+fn _build_uevent(buf) {
+    var off = 0;
+    off = _uev_put(buf, off, "add@/devices/pci0000:00/usb1/block/sdb");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "ACTION=add");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "DEVPATH=/devices/pci0000:00/usb1/block/sdb");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "SUBSYSTEM=block");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "DEVTYPE=disk");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "DEVNAME=sdb");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "ID_SERIAL_SHORT=SN12345");
+    store8(buf + off, 0); off = off + 1;
+    off = _uev_put(buf, off, "SEQNUM=4242");
+    store8(buf + off, 0); off = off + 1;
+    return off;
+}
+
 fn main() {
     alloc_init();
 
@@ -65,16 +96,26 @@ fn main() {
     var long_val = str_builder_build(sb);
     fuzz_one(str_data(long_val), str_len(long_val));
 
-    # Random mutation fuzzing. strlen() stops at the first \0, so
-    # `baselen` covers only the header segment — that's what the
-    # mutator actually flips bytes in.
-    var base = "add@/devices/pci0000:00/usb1/block/sdb";
-    var baselen = strlen(base);
-    var mutbuf[256];
-    memcpy(&mutbuf, base, baselen);
+    # Random mutation fuzzing.
+    #
+    # 2.3.5: this used `var baselen = strlen(base)` on a header-only
+    # string, and the harness's own comment admitted the consequence —
+    # strlen stops at the first NUL, so the mutator only ever flipped
+    # bytes in the `add@/devices/...` HEADER and the truncation loop only
+    # ever cut inside it. The NUL-separated KEY=VALUE properties, which
+    # are the actual parsing surface (_parse_uevent_key, the ACTION /
+    # DEVPATH / SUBSYSTEM extraction, and every consumer of them) were
+    # never mutated at all.
+    #
+    # Build the payload byte-wise with an EXPLICIT length so the NULs are
+    # part of the fuzzed region.
+    var mutbuf[512];
+    var baselen = _build_uevent(&mutbuf);
 
-    for (var round = 0; round < 1000; round = round + 1) {
-        # Simple mutation: flip random bytes
+    for (var round = 0; round < 4000; round = round + 1) {
+        # Flip one byte anywhere in the payload, NULs included — a
+        # corrupted separator is exactly the case that used to be
+        # unreachable.
         var pos = (round * 7 + 13) % baselen;
         var orig = load8(&mutbuf + pos);
         store8(&mutbuf + pos, (orig + round) & 0xFF);
@@ -85,9 +126,24 @@ fn main() {
         store8(&mutbuf + pos, orig);
     }
 
-    # Truncation fuzzing
+    # Two-byte mutations — catches separator damage that a single flip
+    # cannot produce (e.g. losing both the '=' and the terminating NUL).
+    for (var r2 = 0; r2 < 2000; r2 = r2 + 1) {
+        var p1 = (r2 * 11 + 3) % baselen;
+        var p2 = (r2 * 5 + 29) % baselen;
+        var o1 = load8(&mutbuf + p1);
+        var o2 = load8(&mutbuf + p2);
+        store8(&mutbuf + p1, (o1 + r2) & 0xFF);
+        store8(&mutbuf + p2, (o2 + r2 * 3) & 0xFF);
+        fuzz_one(&mutbuf, baselen);
+        store8(&mutbuf + p1, o1);
+        store8(&mutbuf + p2, o2);
+    }
+
+    # Truncation fuzzing across the WHOLE payload, not just the header.
+    # A cut mid-property leaves a key with no '=' or a value with no NUL.
     for (var tlen = 0; tlen < baselen; tlen = tlen + 1) {
-        fuzz_one(base, tlen);
+        fuzz_one(&mutbuf, tlen);
     }
 
     sys_write(1, "fuzz_parse_uevent: passed\n", 26);

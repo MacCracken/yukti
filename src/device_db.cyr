@@ -314,11 +314,28 @@ pub fn device_db_record_mount(info, mount_point, fs_type_str, action) {
     _db_exec(str_cstr(str_builder_build(sb)),
       "device_db: mount_history insert failed", 38);
 
-    # Update mount_count in devices table
+    # Update mount_count in devices table.
+    #
+    # 2.3.5: this used to emit `SET mount_count = mount_count + 1, last_seen
+    # = <now>`. patra's `_parse_update` accepts only an INT literal, a `?`
+    # param or a STR literal after `=` — a COLUMN reference falls through to
+    # its else branch and returns PATRA_ERR_SYNTAX, failing the WHOLE
+    # statement. So mount_count never incremented AND last_seen never
+    # updated, because they shared one statement. 2.3.3's `_db_exec` made it
+    # audible (the suite prints "devices mount_count update failed"); before
+    # that it was completely silent.
+    #
+    # Read-then-write with literals. Not atomic, but yukti is single-threaded
+    # per handle and patra serialises writes under an exclusive lock, so the
+    # window is not reachable from within one process. `patra_bind_int` would
+    # be the tidier form and is available — but adopting prepared statements
+    # across device_db is its own change, tracked separately.
     if (action == ACTION_MOUNT) {
+        var prev = device_db_mount_count(key);
         var upd_sb = str_builder_new();
-        str_builder_add_cstr(upd_sb, "UPDATE devices SET ");
-        str_builder_add_cstr(upd_sb, "mount_count = mount_count + 1, last_seen = ");
+        str_builder_add_cstr(upd_sb, "UPDATE devices SET mount_count = ");
+        str_builder_add_int(upd_sb, prev + 1);
+        str_builder_add_cstr(upd_sb, ", last_seen = ");
         str_builder_add_int(upd_sb, now);
         str_builder_add_cstr(upd_sb, " WHERE serial = '");
         str_builder_add_str(upd_sb, key_esc);

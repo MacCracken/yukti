@@ -671,6 +671,18 @@ fn test_udevadm_sysfs_path_gate() {
     assert(is_ok(trigger_device("/etc/passwd")) == 0, "trigger rejects /etc");
     assert(is_ok(trigger_device("sys/block/sda")) == 0, "trigger rejects rel");
     assert(is_ok(trigger_device("/")) == 0, "trigger rejects root");
+    # 2.3.5: previously this test had ONLY negative assertions, so an
+    # _is_sysfs_path that rejected everything would have passed it clean.
+    # Assert the gate ACCEPTS a legitimate /sys/ path too — reaching the
+    # udevadm exec (which then fails harmlessly in CI) proves the gate let
+    # it through rather than short-circuiting.
+    assert_eq(_is_sysfs_path("/sys/block/sda"), 1, "gate accepts /sys/ path");
+    assert_eq(_is_sysfs_path("/sys/"), 1, "gate accepts bare /sys/");
+    assert_eq(_is_sysfs_path("/etc/passwd"), 0, "gate rejects /etc");
+    assert_eq(_is_sysfs_path("/sysfoo/x"), 0, "gate rejects /sysfoo prefix trick");
+    assert_eq(_is_sysfs_path("sys/block/sda"), 0, "gate rejects relative");
+    assert_eq(_is_sysfs_path(0), 0, "gate rejects null");
+
     # query_device rejects same
     assert(is_ok(query_device("/etc/passwd")) == 0, "query rejects /etc");
     assert(is_ok(query_device("")) == 0, "query rejects empty");
@@ -1368,6 +1380,91 @@ fn test_validate_rule_token_injection() {
     return 0;
 }
 
+# ===================================================================
+# TOC ctrl nibble (2.3.5)
+#
+# struct cdrom_tocentry packs cdte_adr:4 then cdte_ctrl:4. Little-endian
+# puts the first-declared field in the LOW bits, so the raw byte reads
+# [ ctrl(hi) | adr(lo) ] and CDROM_DATA_TRACK (0x04) — which is defined
+# against cdte_ctrl — is mask 0x40 on the raw byte.
+#
+# The old `(adr_ctrl & 4)` tested bit 2 of cdte_ADR, which is 0 for the
+# normal adr=1, so EVERY data track was reported as audio.
+# ===================================================================
+
+# ===================================================================
+# Strict dotted-quad parsing (2.3.5)
+#
+# The old parser skipped every non-digit and accumulated the rest, so a
+# HOSTNAME parsed to 0.0.0.0 — which Linux treats as localhost for
+# connect(2). network_probe_host therefore probed the LOCAL machine and,
+# if something was listening, reported the remote host as reachable.
+# ===================================================================
+
+fn test_parse_dotted_quad() {
+    test_group("dotted quad");
+
+    # Valid. First octet lands in the LOW byte so a little-endian store32
+    # lays the bytes down in network order: 127.0.0.1 -> 0x0100007F.
+    assert_eq(_parse_dotted_quad("127.0.0.1"), 0x0100007F, "127.0.0.1");
+    assert_eq(_parse_dotted_quad("0.0.0.0"), 0, "0.0.0.0 parses to 0");
+    assert_eq(_parse_dotted_quad("255.255.255.255"), 0xFFFFFFFF, "broadcast");
+    assert_eq(_parse_dotted_quad("192.168.1.10"), 0x0A01A8C0, "192.168.1.10");
+
+    # Hostnames — the actual bug. These MUST be rejected, not silently
+    # turned into 0.0.0.0 (= localhost).
+    assert_eq(_parse_dotted_quad("server.local"), 0 - 1, "hostname rejected");
+    assert_eq(_parse_dotted_quad("nas"), 0 - 1, "bare hostname rejected");
+    assert_eq(_parse_dotted_quad("fileserver.example.com"), 0 - 1, "fqdn rejected");
+
+    # A hostname WITH digits was the nastiest case: it produced a real,
+    # wrong address rather than an obviously-broken one.
+    assert_eq(_parse_dotted_quad("host1.example.com"), 0 - 1, "digits in hostname rejected");
+
+    # Range and shape.
+    assert_eq(_parse_dotted_quad("256.1.1.1"), 0 - 1, "octet > 255 rejected");
+    assert_eq(_parse_dotted_quad("999.1.1.1"), 0 - 1, "3-digit overflow rejected");
+    assert_eq(_parse_dotted_quad("1.2.3"), 0 - 1, "three parts rejected");
+    assert_eq(_parse_dotted_quad("1.2.3.4.5"), 0 - 1, "five parts rejected");
+    assert_eq(_parse_dotted_quad("1..3.4"), 0 - 1, "empty octet rejected");
+    assert_eq(_parse_dotted_quad("1.2.3."), 0 - 1, "trailing dot rejected");
+    assert_eq(_parse_dotted_quad(".1.2.3"), 0 - 1, "leading dot rejected");
+    assert_eq(_parse_dotted_quad(""), 0 - 1, "empty rejected");
+    assert_eq(_parse_dotted_quad("1.2.3.4444"), 0 - 1, "4-digit octet rejected");
+    assert_eq(_parse_dotted_quad("1.2.3.-4"), 0 - 1, "negative rejected");
+    assert_eq(_parse_dotted_quad("1.2.3.4 "), 0 - 1, "trailing space rejected");
+    return 0;
+}
+
+fn test_toc_ctrl_is_data() {
+    test_group("toc ctrl nibble");
+
+    # adr=1 (position), ctrl=0 (2-channel audio, no pre-emphasis) -> 0x01
+    assert_eq(_toc_ctrl_is_data(0x01), 0, "adr=1 ctrl=0 is audio");
+
+    # adr=1, ctrl=4 (data track) -> 0x41. This is the case the old mask
+    # got backwards: 0x41 & 4 == 0, so it read as audio.
+    assert_eq(_toc_ctrl_is_data(0x41), 1, "adr=1 ctrl=4 is DATA");
+
+    # ctrl=6 = data + incremental -> 0x61
+    assert_eq(_toc_ctrl_is_data(0x61), 1, "ctrl=6 is DATA");
+
+    # ctrl=2 (audio, copy permitted) -> 0x21, still audio
+    assert_eq(_toc_ctrl_is_data(0x21), 0, "ctrl=2 is audio");
+
+    # adr=4 (video track adr) with ctrl=0 -> 0x04. The OLD code returned
+    # DATA here purely because it was reading the adr nibble.
+    assert_eq(_toc_ctrl_is_data(0x04), 0, "adr=4 ctrl=0 is audio, not data");
+
+    # ctrl=5 = data + pre-emphasis bit -> 0x51
+    assert_eq(_toc_ctrl_is_data(0x51), 1, "ctrl=5 is DATA");
+
+    # All-zero and all-ones boundaries
+    assert_eq(_toc_ctrl_is_data(0x00), 0, "0x00 is audio");
+    assert_eq(_toc_ctrl_is_data(0xFF), 1, "0xFF has the data bit set");
+    return 0;
+}
+
 fn test_render_rule() {
     test_group("udev_rules");
     var rendered = render_rule(make_test_rule());
@@ -1493,6 +1590,229 @@ fn test_span_balance_on_error_paths() {
     return 0;
 }
 
+# ===================================================================
+# Mock sysfs — the 8 device-manager tests deferred since the April 2026
+# Rust port (2.3.5)
+#
+# yukti.tcyr carried "Linux device manager tests (13 in Rust — skip mock
+# sysfs for now)" and only 5 of the 13 were ported. The blocker was
+# building a fake /sys tree. That blocker was STALE: `linux_dm_with_root`
+# has always existed and `linux_dm_enumerate` honours it
+# (src/linux.cyr:64 reads ldm_sysfs_root), and enumerate_devices simply
+# lists "<root>/block". So a real tree under /tmp works, and these drive
+# the enumeration path end to end instead of asserting around it.
+#
+# Layout built by _mock_sysfs_build:
+#
+#   <root>/block/sdz/           size, removable, ro
+#                    device/    vendor, model, serial, idVendor, idProduct
+#              /sdz/sdz1/       size            (a partition)
+# ===================================================================
+
+fn _mock_write(path_cstr, content_cstr) {
+    var fd = xopen(path_cstr, O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0) { return 0 - 1; }
+    var n = strlen(content_cstr);
+    sys_write(fd, content_cstr, n);
+    sys_close(fd);
+    return 0;
+}
+
+fn _mock_sysfs_build(root_cstr) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, root_cstr);
+    str_builder_add_cstr(sb, "/block/sdz/device");
+    xmkdir_p(str_cstr(str_builder_build(sb)), 493);
+
+    var pb = str_builder_new();
+    str_builder_add_cstr(pb, root_cstr);
+    str_builder_add_cstr(pb, "/block/sdz/sdz1");
+    xmkdir_p(str_cstr(str_builder_build(pb)), 493);
+
+    # 2048 sectors of 512 B = 1 MiB
+    _mock_write(_mock_path(root_cstr, "/block/sdz/size"), "2048\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/removable"), "1\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/ro"), "0\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/device/vendor"), "MockCo\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/device/model"), "MockDisk\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/device/serial"), "MOCKSN01\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/device/idVendor"), "0951\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/device/idProduct"), "1666\n");
+    _mock_write(_mock_path(root_cstr, "/block/sdz/sdz1/size"), "1024\n");
+    # Real sysfs marks a partition directory with a `partition` file holding
+    # the partition number, and enumerate_devices requires it — a subdir whose
+    # name merely extends the disk's is not enough. Mirror that.
+    _mock_write(_mock_path(root_cstr, "/block/sdz/sdz1/partition"), "1\n");
+    return 0;
+}
+
+fn _mock_path(root_cstr, tail_cstr) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, root_cstr);
+    str_builder_add_cstr(sb, tail_cstr);
+    return str_cstr(str_builder_build(sb));
+}
+
+fn _mock_sysfs_teardown(root_cstr) {
+    xunlink(_mock_path(root_cstr, "/block/sdz/sdz1/size"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/sdz1/partition"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/device/vendor"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/device/model"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/device/serial"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/device/idVendor"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/device/idProduct"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/size"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/removable"));
+    xunlink(_mock_path(root_cstr, "/block/sdz/ro"));
+    xrmdir(_mock_path(root_cstr, "/block/sdz/sdz1"));
+    xrmdir(_mock_path(root_cstr, "/block/sdz/device"));
+    xrmdir(_mock_path(root_cstr, "/block/sdz"));
+    xrmdir(_mock_path(root_cstr, "/block"));
+    xrmdir(root_cstr);
+    return 0;
+}
+
+# Find the enumerated entry whose name matches dev_name, or 0.
+fn _mock_find(devices, want_cstr) {
+    var n = vec_len(devices);
+    for (var i = 0; i < n; i = i + 1) {
+        var info = vec_get(devices, i);
+        var dp = di_dev_path(info);
+        if (str_eq_cstr(dp, want_cstr)) { return info; }
+    }
+    return 0;
+}
+
+fn test_mock_sysfs_enumerate_finds_device() {
+    test_group("mock sysfs");
+    var root = "/tmp/yukti_mock_sys_a";
+    _mock_sysfs_build(root);
+
+    var mgr = linux_dm_with_root(str_from(root));
+    var r = linux_dm_enumerate(mgr);
+    assert(is_ok(r), "enumerate ok over mock root");
+    var devices = payload(r);
+    assert(vec_len(devices) >= 1, "at least the mock disk");
+    assert(_mock_find(devices, "/dev/sdz") != 0, "sdz enumerated");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_device_fields() {
+    var root = "/tmp/yukti_mock_sys_b";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+    var devices = payload(linux_dm_enumerate(mgr));
+    var info = _mock_find(devices, "/dev/sdz");
+    assert(info != 0, "sdz present");
+
+    assert(str_eq_cstr(di_vendor(info), "MockCo"), "vendor from sysfs");
+    assert(str_eq_cstr(di_model(info), "MockDisk"), "model from sysfs");
+    assert(str_eq_cstr(di_serial(info), "MOCKSN01"), "serial from sysfs");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_removable_and_ro() {
+    var root = "/tmp/yukti_mock_sys_c";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+    var devices = payload(linux_dm_enumerate(mgr));
+    var info = _mock_find(devices, "/dev/sdz");
+    assert(info != 0, "sdz present");
+
+    # removable=1 in the mock tree
+    assert(device_info_is_removable(info) != 0, "removable=1 honoured");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_size_parsed() {
+    var root = "/tmp/yukti_mock_sys_d";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+    var devices = payload(linux_dm_enumerate(mgr));
+    var info = _mock_find(devices, "/dev/sdz");
+    assert(info != 0, "sdz present");
+
+    # sysfs `size` is in 512-byte sectors: 2048 * 512 = 1048576.
+    assert_eq(di_size_bytes(info), 1048576, "size = sectors * 512");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_partitions() {
+    var root = "/tmp/yukti_mock_sys_e";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+    var devices = payload(linux_dm_enumerate(mgr));
+
+    # sdz1 is a subdirectory of sdz whose name extends it — the partition
+    # branch of enumerate_devices.
+    assert(_mock_find(devices, "/dev/sdz1") != 0, "partition sdz1 enumerated");
+    assert(vec_len(devices) >= 2, "disk plus partition");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_dm_get_by_id() {
+    var root = "/tmp/yukti_mock_sys_f";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+    var devices = payload(linux_dm_enumerate(mgr));
+    var info = _mock_find(devices, "/dev/sdz");
+    assert(info != 0, "sdz present");
+
+    # enumerate populates the manager cache keyed by device id.
+    var got = linux_dm_get(mgr, di_id(info));
+    assert(is_ok(got), "get ok");
+    assert(payload(got) != 0, "cached device found by id");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_dm_refresh() {
+    var root = "/tmp/yukti_mock_sys_g";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+    var devices = payload(linux_dm_enumerate(mgr));
+    var info = _mock_find(devices, "/dev/sdz");
+    assert(info != 0, "sdz present");
+
+    # refresh of a device that DOES exist must succeed — the existing
+    # test_linux_dm_refresh_nonexistent only covers the failure path.
+    var r = linux_dm_refresh(mgr, di_id(info));
+    assert(is_ok(r), "refresh of existing device ok");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
+fn test_mock_sysfs_reenumerate_rebuilds_cache() {
+    var root = "/tmp/yukti_mock_sys_h";
+    _mock_sysfs_build(root);
+    var mgr = linux_dm_with_root(str_from(root));
+
+    var first = payload(linux_dm_enumerate(mgr));
+    var n1 = vec_len(first);
+    assert(n1 >= 2, "first enumerate found devices");
+
+    # linux_dm_enumerate replaces the cache with a fresh map each call.
+    # Re-enumerating the same tree must yield the same count, not double it.
+    var second = payload(linux_dm_enumerate(mgr));
+    assert_eq(vec_len(second), n1, "re-enumerate is stable, not cumulative");
+    assert(_mock_find(second, "/dev/sdz") != 0, "sdz still found after re-enumerate");
+
+    _mock_sysfs_teardown(root);
+    return 0;
+}
+
 fn test_linux_dm_new() {
     test_group("linux");
     var mgr = linux_dm_new();
@@ -1521,12 +1841,57 @@ fn test_linux_dm_refresh_nonexistent() {
     return 0;
 }
 
+# 2.3.5: this test used to assert `ldm_sysfs_root(mgr) == "/sys"` — a
+# verbatim duplicate of test_linux_dm_new that said nothing about
+# listeners, on the stated grounds that a function-pointer listener needs
+# global state. It does; a module-level counter is that global state.
+var _lsn_seen = 0;
+var _lsn_last_class = 0 - 1;
+
+fn _test_listener_handler(event) {
+    _lsn_seen = _lsn_seen + 1;
+    _lsn_last_class = de_device_class(event);
+    return 0;
+}
+
+fn _test_listener_filter_all(event) {
+    return 1;
+}
+
+fn _test_listener_filter_none(event) {
+    return 0;
+}
+
 fn test_linux_dm_listener() {
     var mgr = linux_dm_new();
-    var collector = event_collector_new();
-    # Can't easily test function pointer listener here without global state,
-    # but verify the manager accepts setup calls without crashing
-    assert(str_eq_cstr(ldm_sysfs_root(mgr), "/sys"), "dm listener setup");
+
+    var event = device_event_new(device_id_new_cstr("block:sdb1"),
+      DC_USB_STORAGE, EK_ATTACHED, str_from("/dev/sdb1"));
+
+    # No listener registered: dispatch must be a no-op, not a crash.
+    _lsn_seen = 0;
+    linux_dm_dispatch_event(mgr, event);
+    assert_eq(_lsn_seen, 0, "no listener, no delivery");
+
+    # Registered with an accept-all filter: the handler must actually run,
+    # and must receive the event we dispatched.
+    linux_dm_add_listener(mgr, &_test_listener_handler, &_test_listener_filter_all);
+    _lsn_seen = 0;
+    _lsn_last_class = 0 - 1;
+    linux_dm_dispatch_event(mgr, event);
+    assert_eq(_lsn_seen, 1, "listener invoked once");
+    assert_eq(_lsn_last_class, DC_USB_STORAGE, "listener got the right event");
+
+    # Dispatching again delivers again — the listener is not consumed.
+    linux_dm_dispatch_event(mgr, event);
+    assert_eq(_lsn_seen, 2, "listener invoked on every dispatch");
+
+    # A reject-all filter must suppress delivery.
+    var mgr2 = linux_dm_new();
+    linux_dm_add_listener(mgr2, &_test_listener_handler, &_test_listener_filter_none);
+    _lsn_seen = 0;
+    linux_dm_dispatch_event(mgr2, event);
+    assert_eq(_lsn_seen, 0, "reject-all filter suppresses delivery");
     return 0;
 }
 
@@ -1665,6 +2030,8 @@ fn main() {
     test_trim_capability();
 
     # Udev rules tests (7)
+    test_toc_ctrl_is_data();
+    test_parse_dotted_quad();
     test_render_rule();
     test_validate_rule_good();
     test_validate_rule_empty_name();
@@ -1677,12 +2044,20 @@ fn main() {
     # Observability tests (1)
     test_span_balance_on_error_paths();
 
-    # Linux device manager tests (5)
+    # Linux device manager tests (13)
     test_linux_dm_new();
     test_linux_dm_custom_root();
     test_linux_dm_get_nonexistent();
     test_linux_dm_refresh_nonexistent();
     test_linux_dm_listener();
+    test_mock_sysfs_enumerate_finds_device();
+    test_mock_sysfs_device_fields();
+    test_mock_sysfs_removable_and_ro();
+    test_mock_sysfs_size_parsed();
+    test_mock_sysfs_partitions();
+    test_mock_sysfs_dm_get_by_id();
+    test_mock_sysfs_dm_refresh();
+    test_mock_sysfs_reenumerate_rebuilds_cache();
 
     # Device database tests (8)
     test_device_db_open_close();
@@ -1923,11 +2298,25 @@ fn test_device_db_mount_count() {
 
     assert_eq(device_db_mount_count(str_from("MC_TEST")), 0, "initial count 0");
 
+    # 2.3.5: this used to read
+    #   # mount_count UPDATE may not work with "mount_count + 1" syntax
+    #   # just verify the function doesn't crash
+    #   assert(mc >= 0, "mount count non-negative");
+    # which holds for EVERY possible value, so it documented the bug instead
+    # of catching it. patra rejects a column reference after SET, so the whole
+    # statement failed and last_seen died with it. Now asserted for real.
     device_db_record_mount(info, str_from("/mnt/usb"), str_from("vfat"), ACTION_MOUNT);
-    # mount_count UPDATE may not work with "mount_count + 1" syntax in patra
-    # just verify the function doesn't crash
-    var mc = device_db_mount_count(str_from("MC_TEST"));
-    assert(mc >= 0, "mount count non-negative");
+    assert_eq(device_db_mount_count(str_from("MC_TEST")), 1, "count 1 after mount");
+
+    device_db_record_mount(info, str_from("/mnt/usb"), str_from("vfat"), ACTION_MOUNT);
+    assert_eq(device_db_mount_count(str_from("MC_TEST")), 2, "count 2 after second mount");
+
+    # UNMOUNT must not bump the counter.
+    device_db_record_mount(info, str_from("/mnt/usb"), str_from("vfat"), ACTION_UNMOUNT);
+    assert_eq(device_db_mount_count(str_from("MC_TEST")), 2, "unmount does not bump");
+
+    # last_seen shared the failing statement, so assert it moved too.
+    assert(device_db_is_known(str_from("MC_TEST")) != 0, "device still known");
 
     device_db_close();
     xunlink("/tmp/yukti_test_db4.patra");

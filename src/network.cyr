@@ -268,7 +268,7 @@ pub fn network_list_mounted() {
 
             if (fs == NET_FS_SMB) {
                 # //host/share → strip //, split on first /
-                if (str_starts_with(device, "//")) {
+                if (_yk_starts_with_cstr(device, "//")) {
                     var rest = str_substr(device, 2, str_len(device));
                     var slash = str_index_of(rest, 47);
                     if (slash >= 0) {
@@ -300,6 +300,66 @@ pub fn network_list_mounted() {
 # Returns 1 if reachable, 0 if not. Timeout ~2 seconds.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# _parse_dotted_quad — strict IPv4 literal parser
+#
+# Returns the address packed for sockaddr_in.sin_addr (first octet in the
+# LOW byte, so a little-endian store32 lays the bytes down in network
+# order), or -1 if the input is not exactly four 0..255 decimal octets.
+#
+# Rejects: hostnames, empty octets ("1..2.3"), >3 digits, octets > 255,
+# fewer or more than 4 parts, trailing dots, and any non-digit/non-dot byte.
+# Not `pub` — internal, reachable from tests via the flat namespace.
+# ---------------------------------------------------------------------------
+
+fn _parse_dotted_quad(host_cstr): i64 {
+    if (host_cstr == 0) { return 0 - 1; }
+    var ip = 0;
+    var shift = 0;
+    var parts = 0;
+    var digits = 0;
+    var octet = 0;
+    var i = 0;
+    var ok = 1;
+    var done = 0;
+    while (done == 0) {
+        var c = load8(host_cstr + i);
+        if (c == 0) {
+            done = 1;
+        } elif (c == 46) {
+            if (digits == 0) { ok = 0; }
+            if (parts >= 3) { ok = 0; }
+            if (octet > 255) { ok = 0; }
+            ip = ip | (octet << shift);
+            shift = shift + 8;
+            parts = parts + 1;
+            octet = 0;
+            digits = 0;
+            i = i + 1;
+        } elif (c >= 48) {
+            if (c <= 57) {
+                octet = octet * 10 + (c - 48);
+                digits = digits + 1;
+                if (digits > 3) { ok = 0; }
+                i = i + 1;
+            } else {
+                ok = 0;
+                done = 1;
+            }
+        } else {
+            ok = 0;
+            done = 1;
+        }
+        if (ok == 0) { done = 1; }
+    }
+    if (ok == 0) { return 0 - 1; }
+    if (digits == 0) { return 0 - 1; }
+    if (octet > 255) { return 0 - 1; }
+    if (parts != 3) { return 0 - 1; }
+    ip = ip | (octet << shift);
+    return ip;
+}
+
 pub fn network_probe_host(host_cstr, port) {
     # Create TCP socket
     var fd = syscall(SYS_SOCKET, 2, 1, 0);
@@ -313,23 +373,25 @@ pub fn network_probe_host(host_cstr, port) {
     store8(&addr + 2, (port >> 8) & 0xFF);
     store8(&addr + 3, port & 0xFF);
 
-    # Parse IP from dotted notation (simple — 4 octets)
-    var ip = 0;
-    var octet = 0;
-    var shift = 0;
-    var hi = 0;
-    while (load8(host_cstr + hi) != 0) {
-        var c = load8(host_cstr + hi);
-        if (c == 46) {
-            ip = ip | (octet << shift);
-            shift = shift + 8;
-            octet = 0;
-        } else {
-            if (c >= 48) { if (c <= 57) { octet = octet * 10 + (c - 48); } }
-        }
-        hi = hi + 1;
+    # Parse the host as a strict dotted quad.
+    #
+    # 2.3.5: the old parser SKIPPED every non-digit and accumulated whatever
+    # digits it saw. A hostname such as "server.local" contains no digits, so
+    # every octet stayed 0 and the address became **0.0.0.0** — which Linux
+    # treats as localhost for connect(2). So probing a remote share silently
+    # connected to the LOCAL machine and, if anything was listening on that
+    # port, reported the remote host as reachable. It also accepted
+    # out-of-range octets ("999.1.1.1") and any number of them.
+    #
+    # Fail closed instead: anything that is not exactly four 0..255 octets
+    # is not something this function can probe, so report unreachable rather
+    # than probing a different machine. Name resolution is out of scope —
+    # yukti has no resolver and inventing one here would be new surface.
+    var ip = _parse_dotted_quad(host_cstr);
+    if (ip < 0) {
+        sys_close(fd);
+        return 0;
     }
-    ip = ip | (octet << shift);
     store32(&addr + 4, ip);
 
     # Non-blocking connect would be better, but simple blocking test works

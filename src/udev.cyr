@@ -419,28 +419,49 @@ pub fn enumerate_devices(sysfs_root) {
         var sub_entries = dir_list(sys_path);
         if (sub_entries != 0) {
             var nsub = vec_len(sub_entries);
+            # NO `continue` IN THIS LOOP.
+            #
+            # 2.3.5: this loop used two `continue` guards. In this toolchain,
+            # `continue` inside a loop whose body declares `var`s after it
+            # behaves as `break` — the loop ABORTED at the first entry that
+            # failed a guard. dir_list returns sysfs entries in directory
+            # order, so on a real disk the very first entry ("ro", "size",
+            # "device", …) failed the prefix test and killed the scan.
+            # Net effect: **partitions were never enumerated at all**, on any
+            # machine. Measured on a mock tree with 5 entries — the body ran
+            # exactly once, for j=0.
+            #
+            # CLAUDE.md documents `break` as unreliable in var-heavy loops;
+            # `continue` carries the same defect. Guard with nested `if`
+            # instead, the flag/nesting shape used elsewhere in src/.
             for (var j = 0; j < nsub; j = j + 1) {
                 var part_name = vec_get(sub_entries, j);
-                if (str_starts_with(part_name, str_cstr(dev_name)) == 0) { continue; }
-                if (str_len(part_name) <= str_len(dev_name)) { continue; }
+                var is_candidate = 1;
+                if (_yk_starts_with_cstr(part_name, str_cstr(dev_name)) == 0) {
+                    is_candidate = 0;
+                }
+                if (str_len(part_name) <= str_len(dev_name)) {
+                    is_candidate = 0;
+                }
+                if (is_candidate == 1) {
+                    # Check if partition file exists
+                    var pp_sb = str_builder_new();
+                    str_builder_add_str(pp_sb, sys_path);
+                    str_builder_add_cstr(pp_sb, "/");
+                    str_builder_add_str(pp_sb, part_name);
+                    var part_path = str_builder_build(pp_sb);
 
-                # Check if partition file exists
-                var pp_sb = str_builder_new();
-                str_builder_add_str(pp_sb, sys_path);
-                str_builder_add_cstr(pp_sb, "/");
-                str_builder_add_str(pp_sb, part_name);
-                var part_path = str_builder_build(pp_sb);
+                    var chk_sb = str_builder_new();
+                    str_builder_add_str(chk_sb, part_path);
+                    str_builder_add_cstr(chk_sb, "/partition");
+                    var part_file = str_builder_build(chk_sb);
 
-                var chk_sb = str_builder_new();
-                str_builder_add_str(chk_sb, part_path);
-                str_builder_add_cstr(chk_sb, "/partition");
-                var part_file = str_builder_build(chk_sb);
-
-                if (file_exists(str_cstr(part_file))) {
-                    var part_info = _build_device_info_from_sysfs(
-                      part_path, part_name, "partition");
-                    if (part_info != 0) {
-                        vec_push(devices, part_info);
+                    if (file_exists(str_cstr(part_file))) {
+                        var part_info = _build_device_info_from_sysfs(
+                          part_path, part_name, "partition");
+                        if (part_info != 0) {
+                            vec_push(devices, part_info);
+                        }
                     }
                 }
             }
@@ -667,10 +688,24 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
     # SYS_POLL, only SYS_PPOLL. ppoll takes a timespec* (not int ms)
     # and an extra (sigmask, sigsetsize) pair. We drive both arches
     # through ppoll uniformly via SYS_PPOLL (defined in src/syscalls.cyr).
+    # A NEGATIVE timeout means "block indefinitely" in poll(2) terms. ppoll
+    # spells that as a NULL timespec, not as a negative one.
+    #
+    # 2.3.5: the old code computed tv_sec = timeout_ms / 1000 and
+    # tv_nsec = (timeout_ms - tv_sec * 1000) * 1000000 unconditionally. For
+    # the conventional timeout_ms = -1 that is tv_sec = 0 (i64 division
+    # truncates toward zero) and tv_nsec = **-1000000**. ppoll rejects a
+    # negative tv_nsec with EINVAL, so a caller asking to block forever got
+    # an immediate error instead — and udev_monitor_run treats that as a
+    # failed poll and spins.
+    var tsp = 0;
     var ts[16];
-    store64(&ts, timeout_ms / 1000);
-    store64(&ts + 8, (timeout_ms - (timeout_ms / 1000) * 1000) * 1000000);
-    var ret = syscall(SYS_PPOLL, &pfd, 1, &ts, 0, 8);
+    if (timeout_ms >= 0) {
+        store64(&ts, timeout_ms / 1000);
+        store64(&ts + 8, (timeout_ms - (timeout_ms / 1000) * 1000) * 1000000);
+        tsp = &ts;
+    }
+    var ret = syscall(SYS_PPOLL, &pfd, 1, tsp, 0, 8);
     if (ret < 0) {
         return err_udev_socket(str_from("ppoll() failed"));
     }

@@ -314,23 +314,13 @@ fn _audio_read_pcm_name(card, device, direction): i64 {
     var nlines = vec_len(lines);
     for (var i = 0; i < nlines; i = i + 1) {
         var line = vec_get(lines, i);
-        if (str_starts_with_cstr(line, "name: ") == 0) { continue; }
+        if (_yk_starts_with_cstr(line, "name: ") == 0) { continue; }
         return str_substr(line, 6, str_len(line));
     }
     return 0;
 }
 
 # Helper: test if Str starts with cstr.
-fn str_starts_with_cstr(s, prefix_cstr): i64 {
-    var nlen = strlen(prefix_cstr);
-    if (nlen > str_len(s)) { return 0; }
-    var sd = str_data(s);
-    for (var i = 0; i < nlen; i = i + 1) {
-        if (load8(sd + i) != load8(prefix_cstr + i)) { return 0; }
-    }
-    return 1;
-}
-
 # ---------------------------------------------------------------------------
 # hw_id construction
 #

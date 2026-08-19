@@ -402,17 +402,44 @@ pub fn query_device(syspath_cstr) {
 # list_devices — enumerate devices (optionally filtered by subsystem)
 # ---------------------------------------------------------------------------
 
+# Capture buffer for `udevadm info --export-db`.
+#
+# 2.3.5: this was `var buf[8192]`. The real database is far bigger —
+# measured **344,721 bytes** on an ordinary desktop — so list_devices was
+# parsing roughly 2% of it and silently returning a fraction of the
+# devices, with no indication anything was missing.
+#
+# Two obvious fixes are both wrong here:
+#   * `var buf[1048576]` — a `var buf[N]` inside a function is STATIC data
+#     in Cyrius, and it lands in the BINARY, not .bss. Measured: the DCE
+#     build went 467,720 -> 1,516,296 bytes, tripling a library that
+#     advertises ~452 KB.
+#   * `alloc()` per call — the bump arena never frees, so a daemon calling
+#     list_devices on every refresh leaks a megabyte each time. That is the
+#     same retention trap tracked elsewhere in the roadmap.
+#
+# So: ONE lazily-created heap buffer, reused across calls. No binary
+# growth, no per-call growth. Truncation is reported rather than silent.
+var _ld_buf = 0;
+
+enum UdevadmCapture {
+    UDEVADM_CAP = 1048576;   # 1 MB — ~3x the measured real-world size
+}
+
 pub fn list_devices(subsystem) {
-    var buf[8192];
+    if (_ld_buf == 0) { _ld_buf = alloc(UDEVADM_CAP); }
     var args = vec_new();
     vec_push(args, _udevadm_path());
     vec_push(args, "info");
     vec_push(args, "--export-db");
-    var n = exec_capture(args, &buf, 8192);
+    var n = exec_capture(args, _ld_buf, UDEVADM_CAP);
     if (n <= 0) { return vec_new(); }
+    if (n >= UDEVADM_CAP) {
+        sakshi_warn("list_devices: udevadm output hit 1MB cap, device list truncated", 63);
+    }
 
     # Parse output: device blocks separated by blank lines
-    var output = str_from_buf(&buf, n);
+    var output = str_from_buf(_ld_buf, n);
     var devices = vec_new();
     var lines = str_split(output, 10);
     var nlines = vec_len(lines);
@@ -452,9 +479,9 @@ pub fn list_devices(subsystem) {
         }
 
         # Parse P: (syspath), E: (property)
-        if (str_starts_with(line, "P: ")) {
+        if (_yk_starts_with_cstr(line, "P: ")) {
             cur_syspath = str_substr(line, 3, str_len(line));
-        } elif (str_starts_with(line, "E: ")) {
+        } elif (_yk_starts_with_cstr(line, "E: ")) {
             var kv = str_substr(line, 3, str_len(line));
             var eq = str_index_of(kv, 61);
             if (eq >= 0) {

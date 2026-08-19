@@ -204,7 +204,7 @@ pub fn linux_dm_start_monitor(mgr) {
         return err_udev(str_from("monitor already running"));
     }
 
-    sakshi_info("starting udev hotplug monitor", 31);
+    sakshi_info("starting udev hotplug monitor", 29);
     var r = udev_monitor_new();
     if (is_ok(r) == 0) { return r; }
 

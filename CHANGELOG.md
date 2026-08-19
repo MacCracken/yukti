@@ -7,6 +7,172 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.5] — 2026-08-19
+
+Repair release: the confidently-wrong answers from the 2.3.4 audit backlog,
+plus the test-credibility work. No new public surface — every change here
+fixes behaviour that was already meant to work.
+
+**753 assertions** (was 692, +61), 3/3 fuzz, `core_smoke` passes, lint 0
+warnings, fmt clean, vet clean, x86_64 / aarch64 / agnos all build.
+Binary 467,712 → 467,784 bytes (+72).
+
+Two of the findings below were **not** on the 2.3.4 backlog. They surfaced
+because the deferred mock-sysfs tests finally got written, and they are the
+most serious things in this release.
+
+### Fixed — `str_starts_with` was called with a C string at all 6 sites, which is undefined behaviour
+
+The stdlib's `str_starts_with(s: Str, prefix: Str)` takes a **Str** prefix. It
+has cstr peers for equality (`str_eq_cstr`), containment (`str_contains_cstr`)
+and indexing (`str_index_of_cstr`) — but **none for prefix**. So the
+natural-looking `str_starts_with(s, "foo")` compiles clean and is silently
+wrong: the cstr pointer is read as a Str struct, so `str_len` and `str_data`
+return whatever bytes follow it in memory.
+
+The result is **undefined, not merely false**. Measured on 6.5.29: against a
+rodata literal it returned 0 for every input; against a `str_cstr()` result it
+returned 1 for every input. Which one you get depends on adjacent memory.
+
+Every yukti call site had it:
+
+| site | consequence |
+|---|---|
+| `udev.cyr:424` | partition filter — see the `continue` bug below |
+| `udev_rules.cyr:482`, `:484` | `list_devices` matched neither `P: ` nor `E: `, so it parsed **nothing** |
+| `network.cyr:271` | `network_list_mounted` detected **no SMB share** |
+| `storage.cyr:690` | the `/run/media/` guard never matched, so unmount **never cleaned up** its mount dirs |
+| `storage.cyr:729` | optical devices took the sysfs-delete path instead of `CDROMEJECT` |
+
+Added `_yk_starts_with_cstr` in `src/syscalls.cyr` (first in the include chain,
+already the `_yk_` shim home; internal, not `pub`). This also absorbs the
+unprefixed `str_starts_with_cstr` that `src/audio.cyr` had defined privately —
+which the 2.3.4 audit flagged as a collision waiting to happen the moment the
+stdlib gains that name.
+
+### Fixed — partitions were never enumerated, on any machine
+
+`enumerate_devices`' partition scan used two `continue` guards. In this
+toolchain that loop **aborted at the first entry that failed a guard** rather
+than skipping it. `dir_list` returns sysfs entries in directory order, so the
+first entry (`ro`, `size`, `device`, …) killed the scan every time.
+
+Measured in situ with counters inside the real function against a mock tree of
+5 entries: **1 iteration, 0 candidates passing**. After restructuring to nested
+`if` guards: all 5 iterate and the partition is found.
+
+CLAUDE.md documents `break` as unreliable in var-heavy loops; `continue`
+carries the same defect here. Note the honest limit of this finding: **the
+trigger is not isolated.** Six synthetic reproductions — `continue` with a
+`var` after it, nested loops, `var` loop bounds, allocation in the body,
+allocation inside the guard condition, two guards — all behave correctly. So
+the in-situ measurement is unambiguous but the minimal case is not known, and
+the other 27 `continue` sites in `src/` have **not** been rewritten on a
+hypothesis. Most have direct test or benchmark coverage that demonstrates they
+iterate fully. Tracked for a follow-up sweep with per-site verification.
+
+### Fixed — every data track on an audio CD was reported as audio
+
+`struct cdrom_tocentry` packs `cdte_adr:4` then `cdte_ctrl:4`. Little-endian
+puts the first-declared bitfield in the LOW bits, so the raw byte is
+`[ctrl(hi) | adr(lo)]` and `CDROM_DATA_TRACK` (0x04), which is defined against
+`cdte_ctrl`, is mask **0x40** on the raw byte.
+
+The code tested `(adr_ctrl & 4)` — bit 2 of **cdte_adr**, which is 0 for the
+normal `adr=1`. So the predicate was effectively always false and every data
+track was classified as audio, which the audio-CD ripping API then treats as
+rippable. Extracted as `_toc_ctrl_is_data` so it is testable without a drive;
+8 assertions, verified to produce 4 failures under the old mask.
+
+### Fixed — `list_devices` was reading 2.4% of the udev database
+
+`var buf[8192]` against `udevadm info --export-db`, which is **344,721 bytes**
+on an ordinary desktop (measured on the dev box).
+
+Both obvious fixes are wrong here and are documented at the call site: a
+`var buf[1048576]` is **static data that lands in the binary** (measured: the
+DCE build went 467,720 → 1,516,296 bytes), and an `alloc()` per call leaks a
+megabyte per invocation under the bump allocator. So: one lazily-created heap
+buffer, reused across calls — 80 bytes of binary growth, no per-call growth —
+and truncation is now reported rather than silent.
+
+### Fixed — `mount_count` never incremented, and took `last_seen` with it
+
+`SET mount_count = mount_count + 1, last_seen = <now>`; patra's `_parse_update`
+accepts only an INT literal, a `?` param or a STR literal after `=`, so a
+column reference failed the **whole statement** and `last_seen` was collateral
+damage. Now read-then-write with literals.
+
+Its test asserted `assert(mc >= 0)` — true for every possible value — under a
+comment explaining that the UPDATE "may not work". It now asserts the count
+reaches 1, then 2, and that an UNMOUNT does not bump it. 3 failures under the
+old form.
+
+### Fixed — `network_probe_host` probed the local machine for any hostname
+
+The parser skipped every non-digit and accumulated the rest, so `server.local`
+produced **0.0.0.0** — which Linux treats as localhost for `connect(2)`. A
+remote-share probe therefore tested the local machine and, if anything was
+listening on that port, reported the remote host as reachable. It also accepted
+`999.1.1.1` and any number of octets.
+
+Replaced with a strict `_parse_dotted_quad` (exactly four 0..255 octets,
+rejects hostnames, empty octets, >3 digits, leading/trailing dots). Failing to
+parse now reports unreachable rather than probing a different machine — name
+resolution is out of scope and inventing a resolver here would be new surface.
+19 assertions.
+
+### Fixed — `udev_monitor_poll` rejected the conventional "block forever"
+
+`tv_sec = timeout_ms / 1000` and `tv_nsec = (timeout_ms - tv_sec*1000)*1000000`
+computed unconditionally. For `timeout_ms = -1` that is `tv_nsec = -1000000`,
+which `ppoll` rejects with EINVAL — so a caller asking to block indefinitely got
+an immediate error and `udev_monitor_run` spun. A negative timeout now passes a
+NULL timespec, which is how ppoll spells "no timeout".
+
+### Fixed — a `sakshi_info` literal/length pair over-read by 2 bytes
+
+`linux.cyr` declared 31 for a 29-byte literal, so the log line carried two bytes
+of whatever followed it in rodata. Found by sweeping every
+`sakshi_*("literal", N)` pair in the tree; it was the only mismatch.
+
+**CI now gates this.** A length longer than its literal is a buffer over-read
+that compiles, runs, and prints plausible output — nothing else catches it. The
+security job now checks every literal/length pair in `src/`, `programs/`,
+`tests/` and `fuzz/`.
+
+### Changed — test credibility
+
+- **8 mock-sysfs tests, deferred since the April 2026 Rust port.** The file
+  carried "Linux device manager tests (13 in Rust — skip mock sysfs for now)"
+  and only 5 were ported. The blocker was **stale**: `linux_dm_with_root` has
+  always existed and `linux_dm_enumerate` honours it, so a real tree under
+  `/tmp` works. These drive enumeration end to end — device discovery, sysfs
+  field population, removable flag, size conversion, partitions, cache lookup by
+  id, refresh of an existing device, and re-enumeration stability. **They are
+  what found the two headline bugs above.**
+- **`test_linux_dm_listener` was a duplicate of `test_linux_dm_new`** — it
+  asserted `ldm_sysfs_root(mgr) == "/sys"` and nothing about listeners, on the
+  stated grounds that a function-pointer listener needs global state. It does; a
+  module-level counter is that global state. Now asserts delivery happens, that
+  the handler receives the right event, that repeat dispatch delivers again, and
+  that a reject-all filter suppresses. 3 failures when dispatch is disabled.
+- **`test_udevadm_sysfs_path_gate` had only negative assertions**, so an
+  `_is_sysfs_path` that rejected everything would have passed it. Now asserts
+  acceptance of `/sys/` paths and rejection of the `/sysfoo` prefix trick.
+- **`fuzz_parse_uevent` only ever mutated the header.** Its own comment admitted
+  it: `strlen()` stops at the first NUL, so the NUL-separated `KEY=VALUE`
+  properties — the actual parsing surface — were never touched by the mutation
+  or truncation loops. The payload is now built byte-wise with an explicit
+  length, so NULs are inside the fuzzed region: 4000 single-byte mutations, 2000
+  two-byte mutations, and truncation across the whole thing.
+- **`fuzz_partition_table` asserted nothing** beyond "does not crash". It now
+  checks invariants that must hold for any input — table type in range, entry
+  count bounded, `PT_NONE` carries no entries, no negative index / start_lba /
+  size, `size_bytes >= size_sectors` (catching a wrapped multiply), booleans
+  actually 0/1, name length sane — each with a distinct exit code so a CI
+  failure names the broken invariant. Verified to fire.
+
 ## [2.3.4] — 2026-08-19
 
 P(-1) audit / refactor / hardening / security sweep. Ten parallel dimension

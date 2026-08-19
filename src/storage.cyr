@@ -687,7 +687,7 @@ pub fn storage_unmount(mount_point_cstr) {
     # Clean up mount directory if under /run/media/. xrmdir (lib/io.cyr) handles
     # the agnos length-carrying rmdir ABI; do not call sys_rmdir directly.
     var mp_s = str_from(mount_point_cstr);
-    if (str_starts_with(mp_s, "/run/media/")) {
+    if (_yk_starts_with_cstr(mp_s, "/run/media/")) {
         xrmdir(mount_point_cstr);
     }
 
@@ -726,7 +726,7 @@ pub fn storage_eject(dev_path_cstr) {
     }
 
     # Check if optical drive (starts with "sr")
-    if (str_starts_with(dev_name, "sr")) {
+    if (_yk_starts_with_cstr(dev_name, "sr")) {
         # Optical: open device and CDROMEJECT ioctl
         var fd = sys_open(dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
         if (fd < 0) {

@@ -3,15 +3,17 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.3.5: audit follow-through
+## Next patch — 2.3.6: audit follow-through
 
 2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
 findings it fixed are in `CHANGELOG.md`; the full write-up with severity,
 file:line and refuted claims is
 [`docs/audit/2026-08-19-audit.md`](../audit/2026-08-19-audit.md).
 
-These are the items 2.3.4 deliberately deferred to stay reviewable. All
-were independently re-verified; none is speculative.
+2.3.5 took the confidently-wrong-answer batch and the test-credibility
+work — see `CHANGELOG.md`. These are what remains. All were independently
+re-verified; none is speculative. Everything here is a REPAIR: no item in
+this list adds public surface, so it all belongs in the 2.3.x line.
 
 ### Memory retention — the theme that ties three findings together
 
@@ -36,19 +38,6 @@ were independently re-verified; none is speculative.
 
 ### Correctness
 
-- [ ] **`mount_count` never increments, and takes `last_seen` with it.**
-      `src/device_db.cyr:321` emits
-      `UPDATE devices SET mount_count = mount_count + 1, last_seen = <now>`;
-      patra's `_parse_update` (`lib/patra.cyr:2237`) accepts only
-      `SQLT_INT_LIT`, `SQLT_PARAM` or `SQLT_STR_LIT` after `=`, so a column
-      reference fails the **whole statement**.
-
-      2.3.3's `_db_exec` made this audible — the suite prints
-      `[WARN] device_db: devices mount_count update failed` once, from
-      `test_device_db_mount_count`. The test at
-      `tests/tcyr/yukti.tcyr:1771` documents the bug rather than catching
-      it (`assert(mc >= 0)` holds for every value). Fix: read the count,
-      write a literal — or use `patra_bind_int`, which is available now.
 - [ ] **GPT fields used without range validation.**
       `src/partition.cyr:359` (entry-array byte offset can wrap i64 to 0)
       and `:379` (`end_lba < start_lba` yields a negative size). A hostile
@@ -58,26 +47,11 @@ were independently re-verified; none is speculative.
       `src/device_db.cyr:391`. Values point into a patra result the caller
       then frees, and `str_from()` runs an unbounded `strlen` over a fixed
       256-byte field with no guaranteed NUL.
-- [ ] **`network_probe_host` maps any non-dotted-quad host to 0.0.0.0**
-      (`src/network.cyr:317`), which Linux treats as localhost for
-      `connect()` — a hostname probe silently tests the local machine and
-      reports success.
-- [ ] **TOC ctrl bitfield read from the wrong nibble** —
-      `src/optical.cyr:420` misclassifies every data track as audio.
-      `:376` additionally treats zero-extended `load32` results as signed
-      LBAs.
 - [ ] **`filesystem_usage` overflows i64 above ~839 TiB used** —
       `src/storage.cyr:154`, `used_bytes * 10000`.
-- [ ] **`udev_monitor_poll` builds a negative `tv_nsec`** for any negative
-      `timeout_ms`; `ppoll` rejects it with EINVAL. `src/udev.cyr:672`.
 - [ ] **`_audio_load_drivers` takes an unbounded card index** from
       `/proc/asound/cards` and uses it as a vec fill count.
       `src/audio.cyr:255`.
-- [ ] **`list_devices` caps `udevadm info --export-db` at 8 KB** —
-      measured **344,753 bytes** on a real host, so it returns a fraction
-      of the database. `src/udev_rules.cyr:308`. Same class as the
-      `/proc/mounts` regression 2.3.4 fixed; should use the new
-      `read_procfs_text`.
 
 ### Hardening (defence-in-depth)
 
@@ -95,8 +69,6 @@ were independently re-verified; none is speculative.
       option and never reaches the syscall.
 - [ ] **`network_mount` omits the mount-path TOCTOU lstat guard** that
       `storage_mount` has. `src/network.cyr:178`.
-- [ ] **`audio.cyr:324` defines an unprefixed global
-      `str_starts_with_cstr`** that will collide when the stdlib gains one.
 - [ ] **`lib/fs.cyr`'s `dir_list` / `is_dir` scratch is no longer
       reentrant.** 6.5.29 changed `var buf = alloc(4096)` to
       `var sbuf[4096]; var buf = &sbuf;` (`lib/fs.cyr:125, 178, 357, 378`).
@@ -124,20 +96,12 @@ were independently re-verified; none is speculative.
       `programs/core_smoke.cyr:62`. It checks the exported constants but not
       the `DI_*` / `DH_*` offsets the AGNOS kernel actually depends on, so
       that ABI could shift without the tripwire firing.
-- [ ] **Mock-sysfs tests — blocker is STALE.** `tests/tcyr/yukti.tcyr:1339`
-      defers 8 of the 13 ported Rust device-manager tests on "skip mock
-      sysfs for now". `linux_dm_with_root` exists and `linux_dm_enumerate`
-      honours it (`src/linux.cyr:64`), so a mock tree under `/tmp` is
-      buildable today. Only 5 of 13 are ported.
-- [ ] **Assertions that cannot fail.** `yukti.tcyr:1771` (`assert(mc >= 0)`),
-      `:1370` (`test_linux_dm_listener` asserts nothing about listeners and
-      duplicates `test_linux_dm_new`), `:668` (only negative assertions, so
-      an always-reject implementation passes). Also the two `remove_rule`
-      assertions added in 2.3.4 pass either way — recorded honestly in the
-      audit.
-- [ ] **Fuzz harnesses under-assert.** `fuzz_partition_table` asserts only
-      "does not crash" against a known-exact MBR; `fuzz_parse_uevent`'s
-      mutation and truncation loops only ever reach the header segment.
+- [ ] **The two `remove_rule` assertions added in 2.3.4 still pass either
+      way** — with validation disabled `remove_rule` proceeds to `xunlink`
+      a nonexistent path and still errors, so the assertion cannot tell
+      "rejected by validation" from "unlink failed". The name gate itself
+      is covered by the four `validate_rule` assertions. (The other
+      cannot-fail assertions were replaced in 2.3.5.)
 - [ ] **`pci_device_name` stub silently ignores `device_id`.**
       `src/pci.cyr:211`. Untracked deferral — needs this cross-reference or
       a `#skip-lint`.
@@ -149,6 +113,18 @@ were independently re-verified; none is speculative.
 - [ ] **4 raw `sys_open` sites with literal flags remain** (`audio.cyr` ×2,
       `storage.cyr`, `udev_rules.cyr`) — agnos's `sys_open` is
       `(name, namelen, flags)`. 2.3.4 cleared one via `read_procfs_text`.
+- [ ] **`continue`-as-`break` sweep.** 2.3.5 measured `enumerate_devices`'
+      partition loop running 1 of 5 iterations because `continue` aborted
+      it, and fixed that loop by restructuring to nested `if`. **The
+      trigger was never isolated** — six synthetic reproductions (var after
+      the continue, nested loops, var loop bounds, allocation in the body,
+      allocation in the guard, two guards) all behave correctly, so the
+      minimal case is unknown. 27 other `continue` sites remain in `src/`;
+      most have test or benchmark coverage demonstrating they iterate
+      fully, and none was rewritten on a hypothesis. Verify each
+      empirically — a counter in the real function, as 2.3.5 did — rather
+      than by inspection. Worth an upstream cyrius report once a minimal
+      repro exists.
 
 ### Upstream
 

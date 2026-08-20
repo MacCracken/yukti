@@ -144,14 +144,42 @@ pub fn filesystem_usage(mount_point_cstr) {
     var bfree = load64(&buf + 24);
     var bavail = load64(&buf + 32);
 
+    # 2.3.8: every field here is attacker-influenceable. statfs is a kernel
+    # call, but a FUSE or network filesystem supplies these numbers itself, so
+    # they are NOT trustworthy bounds. Reject nonsense before doing arithmetic
+    # on it: a negative block size or count means the multiply below is
+    # meaningless, and an absurd f_bsize makes `blocks * bsize` overflow i64.
+    if (bsize <= 0) { return err_io(str_from("statfs: non-positive f_bsize")); }
+    if (bsize > 1048576) { return err_io(str_from("statfs: implausible f_bsize")); }
+    if (blocks < 0) { return err_io(str_from("statfs: negative f_blocks")); }
+    if (bfree < 0) { bfree = 0; }
+    if (bavail < 0) { bavail = 0; }
+    if (bfree > blocks) { bfree = blocks; }
+    if (bavail > blocks) { bavail = blocks; }
+    # blocks * bsize must not overflow: i64max / bsize is the largest safe count.
+    if (blocks > 9223372036854775807 / bsize) {
+        return err_io(str_from("statfs: block count overflows i64 bytes"));
+    }
+
     var total_bytes = blocks * bsize;
     var free_bytes = bfree * bsize;
     var available_bytes = bavail * bsize;
     var used_bytes = total_bytes - free_bytes;
 
+    # `(used_bytes * 10000) / total_bytes` overflowed i64 once used_bytes passed
+    # i64max/10000 — about 839 TiB — yielding a negative or wrapped percentage
+    # on any filesystem that large. Scale both sides down until the multiply is
+    # safe; halving loses at most one part in 10^4 of the answer, which is below
+    # the precision this x100 figure reports anyway.
     var usage_pct_x100 = 0;
     if (total_bytes > 0) {
-        usage_pct_x100 = (used_bytes * 10000) / total_bytes;
+        var u = used_bytes;
+        var t = total_bytes;
+        while (t > 922337203685477) {
+            u = u / 2;
+            t = t / 2;
+        }
+        if (t > 0) { usage_pct_x100 = (u * 10000) / t; }
     }
 
     var usage = alloc(32);

@@ -181,6 +181,73 @@ fn main() {
     store8(&pgpt + 512 + 80, 0);
     _write_fixture(&pgpt, 1024);
 
+    # ---------------------------------------------------------------
+    # Hostile LBA fields (2.3.8)
+    #
+    # Every LBA in a GPT comes off the disk and the threat model names a
+    # hostile disk explicitly. Until 2.3.8 they were used raw:
+    #   * entry_start_lba * SECTOR_SIZE overflows i64 and wraps to a
+    #     negative or aliased seek target
+    #   * end_lba < start_lba makes `end - start + 1` NEGATIVE
+    #   * a u64 above 2^63 reads as a negative i64
+    #   * a huge span overflows `sector_count * SECTOR_SIZE`
+    #
+    # These fixtures drive each case through the real entry point. The
+    # invariants in fuzz_one do the asserting — no negative index, LBA,
+    # sector count or byte size may ever escape, and size_bytes must not be
+    # smaller than size_sectors (a wrapped multiply).
+    #
+    # A build without the range checks exits 29/30/31/32 here.
+    var gh = 512;   # GPT header offset
+
+    # 1. entry_start_lba = 2^56 — overflows when scaled by 512
+    store8(&pgpt + gh + 80, 1);       # num_entries = 1
+    for (var b = 0; b < 8; b = b + 1) { store8(&pgpt + gh + 72 + b, 0); }
+    store8(&pgpt + gh + 72 + 7, 0x01);
+    fuzz_one(&pgpt, 1024);
+
+    # 2. entry_start_lba = 0xFFFFFFFFFFFFFFFF (reads as -1)
+    for (var b = 0; b < 8; b = b + 1) { store8(&pgpt + gh + 72 + b, 0xFF); }
+    fuzz_one(&pgpt, 1024);
+
+    # Put the entry array back at LBA 2 so the entries below are reachable.
+    for (var b = 0; b < 8; b = b + 1) { store8(&pgpt + gh + 72 + b, 0); }
+    store8(&pgpt + gh + 72, 2);
+
+    # A non-zero type GUID so the entry is not skipped as empty.
+    var ent = 1024;   # LBA 2
+    for (var b = 0; b < 16; b = b + 1) { store8(&pgpt + ent + b, 0x5A); }
+
+    # 3. end_lba < start_lba  -> negative sector count
+    for (var b = 0; b < 16; b = b + 1) { store8(&pgpt + ent + 32 + b, 0); }
+    store8(&pgpt + ent + 32, 200);    # start_lba = 200
+    store8(&pgpt + ent + 40, 100);    # end_lba   = 100
+    fuzz_one(&pgpt, 1152);
+
+    # 4. start_lba = 2^63 (negative as i64)
+    for (var b = 0; b < 16; b = b + 1) { store8(&pgpt + ent + 32 + b, 0); }
+    store8(&pgpt + ent + 32 + 7, 0x80);
+    store8(&pgpt + ent + 40 + 7, 0x80);
+    fuzz_one(&pgpt, 1152);
+
+    # 5. huge but "positive" span -> sector_count * 512 overflows
+    for (var b = 0; b < 16; b = b + 1) { store8(&pgpt + ent + 32 + b, 0); }
+    store8(&pgpt + ent + 40 + 6, 0x40);   # end_lba ~ 2^54, start 0
+    fuzz_one(&pgpt, 1152);
+
+    # 6. both LBAs at the i64 max nibble
+    for (var b = 0; b < 8; b = b + 1) { store8(&pgpt + ent + 32 + b, 0xFF); }
+    for (var b = 0; b < 8; b = b + 1) { store8(&pgpt + ent + 40 + b, 0xFF); }
+    store8(&pgpt + ent + 32 + 7, 0x7F);
+    store8(&pgpt + ent + 40 + 7, 0x7F);
+    fuzz_one(&pgpt, 1152);
+
+    # Restore a sane entry for the mutation pass below.
+    for (var b = 0; b < 16; b = b + 1) { store8(&pgpt + ent + 32 + b, 0); }
+    store8(&pgpt + ent + 32, 34);
+    store8(&pgpt + ent + 40, 100);
+    store8(&pgpt + gh + 80, 0);
+
     # Random mutation fuzzing on the GPT-header sector
     var mutbuf[1024];
     memcpy(&mutbuf, &pgpt, 1024);

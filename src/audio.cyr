@@ -50,6 +50,12 @@
 # vani_open_yukti(desc, direction) without a translation table.
 # ---------------------------------------------------------------------------
 
+# ALSA's own ceiling is SNDRV_CARDS = 32. A larger index in
+# /proc/asound/cards is not a card number.
+enum AudioLimits {
+    AUDIO_MAX_CARDS = 32;
+}
+
 enum AudioDirection {
     YUKTI_AUDIO_PLAYBACK = 0;
     YUKTI_AUDIO_CAPTURE = 1;
@@ -193,19 +199,24 @@ fn _audio_parsed_direction(packed): i64 { return packed % 256; }
 # name (e.g. "HDA-Intel"). Indices for missing cards have value 0.
 # ---------------------------------------------------------------------------
 
+# _audio_load_drivers — read /proc/asound/cards and parse it.
+#
+# The parse is split out as _audio_parse_cards_text (2.3.8) so the card-index
+# bound below is testable without a real /proc/asound/cards. Reads through the
+# shared bounded reader rather than its own fixed buffer.
 fn _audio_load_drivers(): i64 {
+    var content = read_procfs_text("/proc/asound/cards", PROC_READ_CAP);
+    if (content == 0) { return vec_new(); }
+    return _audio_parse_cards_text(content);
+}
+
+fn _audio_parse_cards_text(content): i64 {
     var drivers = vec_new();
-    var buf = alloc(8192);
-    var fd = sys_open("/proc/asound/cards", 0, 0);
-    if (fd < 0) { return drivers; }
-    var n = sys_read(fd, buf, 8192);
-    sys_close(fd);
-    if (n <= 0) { return drivers; }
+    if (content == 0) { return drivers; }
 
     # Parse line by line — expect even-numbered lines to start with
     # " N [...]: DRIVER - ..." where N is the card index. Odd-numbered
     # lines are continuation (location info) and ignored here.
-    var content = str_from_buf(buf, n);
     var lines = str_split(content, 10);
     var nlines = vec_len(lines);
     for (var li = 0; li < nlines; li = li + 1) {
@@ -251,6 +262,15 @@ fn _audio_load_drivers(): i64 {
         var dash = _audio_str_index_from(line, " - ", dstart);
         if (dash < 0) { dash = llen; }
         var driver = str_substr(line, dstart, dash);
+
+        # 2.3.8: `idx` is parsed straight out of /proc/asound/cards and was
+        # used unbounded as a vec fill count, so a crafted or corrupted line
+        # ("999999999 [x]: drv - x") drove this pad loop that many times —
+        # and the rebuild below is O(n) per line, making it O(n^2). ALSA's own
+        # ceiling is SNDRV_CARDS = 32; anything at or above that is not a card
+        # index, so drop the line rather than allocate for it.
+        if (idx >= AUDIO_MAX_CARDS) { idx_digits = 0; }
+        if (idx_digits == 0) { continue; }
 
         # Pad drivers vec to idx with 0 entries
         while (vec_len(drivers) <= idx) { vec_push(drivers, 0); }

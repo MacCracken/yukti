@@ -7,6 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.8] — 2026-08-19
+
+**Untrusted input.** The four correctness items from the 2.3.4 audit backlog,
+all of the same shape: a value that comes off a disk, out of `/proc`, or back
+from patra was used without checking it, and produced a wrong answer or an
+unsafe read.
+
+797 assertions (was 774, +23), 3/3 fuzz, `core_smoke` passes, lint 0 warnings,
+0 untracked deferrals, vet 33 deps clean, x86_64 / aarch64 / agnos all build.
+
+### Fixed — `device_db_get_preference` returned strings pointing into freed memory
+
+Every preference this function returned pointed at memory that had already been
+released, and whether the caller saw the right value depended on whether
+anything had reused the block yet.
+
+Two stdlib facts combine badly:
+
+- **`str_from` does not copy.** `str_from_a` is
+  `store64(s, cstr); store64(s + 8, slen)` — it keeps the caller's pointer.
+- **`patra_result_get_str` returns a raw pointer into the result row**, and
+  that row lives inside the `rs` allocation, so `patra_result_free(rs)` —
+  three lines further down — frees it.
+
+The same call also ran an unbounded `strlen` over a fixed 256-byte column with
+no guaranteed NUL, so a field holding exactly `COL_STR_SZ` non-NUL bytes scanned
+off the end of the field and through whatever followed.
+
+Both fixed by a new `_db_own_str`, which uses patra's own bounded accessor
+(`patra_result_get_str_len` stops at `COL_STR_SZ`) and then `str_clone`, which
+memcpy's into a fresh NUL-terminated buffer the caller owns.
+
+Gated by forcing the reuse: fetch a preference, run 40 rounds of patra work over
+the freed block, *then* read the string. Reverting to `str_from` produces
+exactly the predicted corruption — 2 failures on `mount_point` and `fs_type`.
+
+### Fixed — GPT type GUIDs that were not one of four hardcoded values rendered as one garbage byte
+
+`_gpt_type_guid_to_str` returned a cstr **literal** for the four known GUIDs and
+`_format_guid`'s **Str** for everything else — a function whose return *type*
+depended on which branch it took. The single call site wrapped it in
+`str_from(...)`, correct for a literal and reading a Str struct as a cstr
+otherwise.
+
+Measured: an unknown type GUID that should render as
+`abababab-abab-abab-abab-abababababab` came out as `x`. That is most of the real
+world — Windows recovery, LVM PV, ZFS, BIOS boot, LUKS, anything vendor-specific
+— all showing a one-character name in a device sidebar.
+
+It now returns a `Str` on every path. The two existing assertions used `streq`
+(cstr-vs-cstr) and so only ever covered the literal branches, which is exactly
+why the suite stayed green through this; they now use `str_eq_cstr`, and three
+new assertions cover the formatted branch including that two different unknown
+GUIDs render differently.
+
+### Fixed — GPT LBA fields were used without any range check
+
+Every LBA in a GPT comes off the disk, and the threat model names a hostile disk
+explicitly. Until now:
+
+- `entry_start_lba * SECTOR_SIZE` overflowed i64 and wrapped to a negative or
+  aliased seek target.
+- `end_lba - start_lba + 1` with `end < start` yielded a **negative** sector
+  count, which flowed into `pe_size_sectors` and out to callers.
+- `sector_count * SECTOR_SIZE` overflowed for a large span.
+- A u64 LBA above 2^63 reads as a **negative** i64 here.
+
+New `GPT_MAX_LBA` (2^48 sectors — 144 PB, far past any real device and low
+enough that `lba * 512` cannot approach i64 overflow) bounds both the entry
+array offset and each entry's start/end, and `end < start` is rejected. Entries
+that fail are skipped via a `keep` flag rather than `continue`, because 2.3.5
+measured a `continue` aborting a loop in `src/udev.cyr` after one iteration and
+that trigger was never isolated.
+
+Six hostile fixtures added to `fuzz_partition_table` driving each case through
+the real entry point. Removing the per-entry checks trips
+**`INVARIANT VIOLATED: negative size_sectors`**.
+
+⚠ Honest limit: the `entry_start_lba` guard is **not** gated. Removing it still
+passes, because a wild seek simply reads nothing and the loop breaks — the
+observable outcome is identical. It is defense-in-depth against handing a
+wrapped negative offset to a seek, and is recorded as such rather than counted
+as covered.
+
+### Fixed — `filesystem_usage` overflowed above ~839 TiB, and trusted `statfs` blindly
+
+`(used_bytes * 10000) / total_bytes` overflows i64 once `used_bytes` passes
+`i64max / 10000` — about 839 TiB — returning a negative or wrapped percentage.
+`blocks * bsize` had no overflow check at all.
+
+`statfs` looks like a kernel call, but **a FUSE or network filesystem supplies
+these numbers itself**, so they are not trustworthy bounds. Now rejects a
+non-positive or implausible `f_bsize` (> 1 MiB), a negative `f_blocks`, and a
+block count whose byte product would overflow; clamps `f_bfree`/`f_bavail` into
+range. The percentage is computed by halving both sides until the multiply is
+safe, which costs at most one part in 10^4 — below the precision this x100
+figure reports.
+
+### Fixed — `_audio_load_drivers` took an unbounded card index from `/proc/asound/cards`
+
+The parsed index was used directly as a vec fill count, and the rebuild that
+follows is O(n) per line — so a crafted or corrupted line
+(`999999999 [x]: drv - x`) made it O(n²) on an arbitrary n. ALSA's own ceiling
+is `SNDRV_CARDS = 32`; anything at or above that is not a card index, so the
+line is dropped.
+
+The parse is now `_audio_parse_cards_text`, split from the file read so the
+bound is testable without a real `/proc/asound/cards` — and the read goes
+through the shared `read_procfs_text` added in 2.3.4, which clears one more of
+the raw-`sys_open` portability notes (4 → 3).
+
+### Notes
+
+- Binary 467,792 → 467,928 bytes (+136).
+- `filesystem_usage`'s guards are the one item here that cannot be gated by
+  reverting: the real `statfs` will not return hostile values on demand. The
+  test asserts a real mount still reports sanely, and checks the replacement
+  scaling arithmetic directly on the boundary values.
+- Two of my own additions tripped gates added in earlier releases, which is the
+  point of having them: a churn key containing `XXX` was flagged as an untracked
+  deferral by the 2.3.6 deferral gate, and a long fixture line by the lint
+  120-column rule.
+
 ## [2.3.7] — 2026-08-19
 
 **Memory retention.** The three findings the 2.3.4 audit grouped under that

@@ -3,7 +3,7 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Next patch — 2.3.8: audit follow-through
+## Next patch — 2.3.9: audit follow-through
 
 2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
 findings it fixed are in `CHANGELOG.md`; the full write-up with severity,
@@ -13,7 +13,8 @@ file:line and refuted claims is
 2.3.5 took the confidently-wrong-answer batch and the test-credibility
 work; 2.3.6 audited every CI gate by deliberately breaking what each one
 checks (5 of 16 were broken, and a 6th category had no gate at all);
-2.3.7 closed the memory-retention theme. These are what remains. All were independently
+2.3.7 closed the memory-retention theme; 2.3.8 took the
+untrusted-input correctness batch. These are what remains. All were independently
 re-verified; none is speculative. Everything here is a REPAIR: no item in
 this list adds public surface, so it all belongs in the 2.3.x line.
 
@@ -49,24 +50,33 @@ ownership questions it deliberately did NOT settle:
       double-frees become a real risk, a cheap generation tag in an unused
       field would catch them without the allocator cost.
 
-### Correctness### Correctness
+### Correctness — residue after 2.3.8
 
-- [ ] **GPT fields used without range validation.**
-      `src/partition.cyr:359` (entry-array byte offset can wrap i64 to 0)
-      and `:379` (`end_lba < start_lba` yields a negative size). A hostile
-      disk is explicitly in the threat model. `:394` also passes a `Str` to
-      `str_from()` where a C string is expected.
-- [ ] **`device_db_get_preference` returns `Str`s aliasing patra memory.**
-      `src/device_db.cyr:391`. Values point into a patra result the caller
-      then frees, and `str_from()` runs an unbounded `strlen` over a fixed
-      256-byte field with no guaranteed NUL.
-- [ ] **`filesystem_usage` overflows i64 above ~839 TiB used** —
-      `src/storage.cyr:154`, `used_bytes * 10000`.
-- [ ] **`_audio_load_drivers` takes an unbounded card index** from
-      `/proc/asound/cards` and uses it as a vec fill count.
-      `src/audio.cyr:255`.
+- [ ] **`filesystem_usage`'s statfs guards are not gated.** The real syscall
+      will not return hostile values on demand, so the rejection paths
+      (non-positive/implausible `f_bsize`, negative `f_blocks`, byte-product
+      overflow) have no test that fails when they are removed. The test
+      asserts a real mount reports sanely and checks the replacement scaling
+      arithmetic directly, which is not the same thing. Gating this properly
+      needs a seam — either a `_statfs_usage_from(buf)` split from the syscall
+      (the shape used for `_udev_handle_event` and `_audio_parse_cards_text`),
+      or a mock FUSE mount.
+- [ ] **The GPT `entry_start_lba` guard is not gated.** Removing it still
+      passes the fuzzer: a wild seek reads nothing, the loop breaks, and the
+      observable outcome is identical to a rejected header. It is
+      defense-in-depth against handing a wrapped negative offset to a seek.
+      Gating it means observing the seek offset itself.
+- [ ] **`str_from` does not copy, and yukti calls it on borrowed pointers
+      elsewhere.** 2.3.8 fixed `device_db_get_preference`, where the borrowed
+      pointer came from a patra result that was then freed. The same pattern —
+      `str_from(<pointer into a buffer with a shorter lifetime>)` — deserves a
+      sweep across `src/`: `_read_sysfs_attr` returns
+      `str_trim(str_from_buf(&attr_buf, n))` over a STATIC buffer, and
+      `str_from_buf` is `str_new_a`, which also does not copy. That has not
+      been shown to be reachable as a bug, but it is the same shape and has
+      not been checked.
 
-### Hardening (defence-in-depth)
+### Hardening (defence-in-depth)### Hardening (defence-in-depth)
 
 - [ ] **ANSI escape injection to the terminal.** `src/main.cyr:49` writes
       device-controlled sysfs/uevent strings verbatim.

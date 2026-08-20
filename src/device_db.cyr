@@ -108,6 +108,24 @@ var _yukti_db = 0;
 # they are expected to fail on an already-initialised database.
 # ---------------------------------------------------------------------------
 
+# _db_own_str — copy a STR column out of a patra result into memory the
+# caller owns (2.3.8).
+#
+# patra_result_get_str hands back a raw pointer into the result row, and that
+# row lives inside the `rs` block that patra_result_free releases. str_from
+# would only store that pointer (str_from_a does no copying), so the value
+# would dangle the moment the result is freed. patra_result_get_str_len bounds
+# its scan at COL_STR_SZ, so it is also the answer to the missing-NUL problem.
+#
+# Returns 0 for an absent or empty value, matching what the callers expect.
+fn _db_own_str(rs, row, col): i64 {
+    var raw = patra_result_get_str(rs, row, col);
+    if (raw == 0) { return 0; }
+    var n = patra_result_get_str_len(rs, row, col);
+    if (n <= 0) { return 0; }
+    return str_clone(str_new(raw, n));
+}
+
 fn _db_exec(sql_cstr, what, what_len): i64 {
     var rc = patra_exec(_yukti_db, sql_cstr);
     if (rc != PATRA_OK) {
@@ -425,28 +443,30 @@ pub fn device_db_get_preference(serial) {
         return 0;
     }
 
+    # 2.3.8: this used `str_from(patra_result_get_str(...))`, which was wrong
+    # twice over.
+    #
+    #   1. USE-AFTER-FREE. `str_from` does NOT copy — str_from_a stores the
+    #      caller's pointer and a length (`store64(s, cstr)`), nothing more. And
+    #      `patra_result_get_str` returns a raw pointer INTO the result row,
+    #      whose buffer lives inside the `rs` allocation that
+    #      `patra_result_free(rs)` releases three lines later. So every
+    #      preference this function returned pointed at freed memory, and the
+    #      value the caller read back depended on whether anything had reused
+    #      the block yet.
+    #
+    #   2. UNBOUNDED strlen. `str_from` runs `strlen` over a fixed 256-byte
+    #      column with no guaranteed NUL. A field holding exactly
+    #      COL_STR_SZ non-NUL bytes runs the scan off the end of the field,
+    #      through the following columns and past the row.
+    #
+    # Both fixed by using patra's own bounded accessor —
+    # `patra_result_get_str_len` stops at COL_STR_SZ — and then `str_clone`,
+    # which memcpy's into a fresh NUL-terminated buffer the caller owns.
     var pref = alloc(32);
-    var mp_raw = patra_result_get_str(rs, 0, 0);
-    if (mp_raw != 0) {
-        if (load8(mp_raw) != 0) {
-            store64(pref, str_from(mp_raw));
-        } else {
-            store64(pref, 0);
-        }
-    } else {
-        store64(pref, 0);
-    }
+    store64(pref, _db_own_str(rs, 0, 0));
     store64(pref + 8, patra_result_get_int(rs, 0, 1));
-    var fs_raw = patra_result_get_str(rs, 0, 2);
-    if (fs_raw != 0) {
-        if (load8(fs_raw) != 0) {
-            store64(pref + 16, str_from(fs_raw));
-        } else {
-            store64(pref + 16, 0);
-        }
-    } else {
-        store64(pref + 16, 0);
-    }
+    store64(pref + 16, _db_own_str(rs, 0, 2));
     store64(pref + 24, patra_result_get_int(rs, 0, 3));
     patra_result_free(rs);
     return pref;

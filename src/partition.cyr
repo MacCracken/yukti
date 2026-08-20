@@ -19,6 +19,12 @@ enum PartConst {
     GPT_HEADER_LBA = 1;
     GPT_ENTRY_SIZE = 128;
     GPT_MAX_ENTRIES = 128;
+    # Largest LBA this parser will believe from a disk. 2^48 sectors is 144 PB
+    # at 512 B/sector — far beyond any real device, and low enough that
+    # `lba * SECTOR_SIZE` (2^57) cannot come near overflowing i64. Every LBA
+    # read off the disk is untrusted: the threat model names a hostile disk
+    # explicitly, and a u64 above 2^63 also reads as a NEGATIVE i64 here.
+    GPT_MAX_LBA = 281474976710656;
 }
 
 # MBR partition type IDs
@@ -315,11 +321,23 @@ fn _is_msdata_type_guid(guid_buf): i64 {
     return 0;
 }
 
+# Returns a **Str** on every path (2.3.8).
+#
+# This used to return a cstr LITERAL for the four known GUIDs and
+# `_format_guid`'s **Str** for everything else — a function whose return TYPE
+# depended on which branch it took. The single call site wrapped it in
+# `str_from(...)`, which is right for a cstr and reads a Str struct as a cstr
+# otherwise. Measured: an unknown type GUID that should render as
+# `abababab-abab-abab-abab-abababababab` came out as `x` — one garbage byte.
+#
+# So every GPT partition whose type GUID is not one of the four hardcoded ones
+# got a 1-character name. That is most of the real world: Windows recovery,
+# LVM PV, ZFS, BIOS boot, LUKS, and anything vendor-specific.
 fn _gpt_type_guid_to_str(guid_buf): i64 {
-    if (_is_efi_type_guid(guid_buf)) { return "EFI System"; }
-    if (_is_linux_type_guid(guid_buf)) { return "Linux filesystem"; }
-    if (_is_linux_swap_guid(guid_buf)) { return "Linux swap"; }
-    if (_is_msdata_type_guid(guid_buf)) { return "Microsoft Basic Data"; }
+    if (_is_efi_type_guid(guid_buf)) { return str_from("EFI System"); }
+    if (_is_linux_type_guid(guid_buf)) { return str_from("Linux filesystem"); }
+    if (_is_linux_swap_guid(guid_buf)) { return str_from("Linux swap"); }
+    if (_is_msdata_type_guid(guid_buf)) { return str_from("Microsoft Basic Data"); }
     return _format_guid(guid_buf);
 }
 
@@ -356,6 +374,13 @@ fn _parse_gpt_name(buf): i64 {
 fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size): i64 {
     var entries = vec_new();
     var buf[128];
+
+    # entry_start_lba is read straight out of the GPT header and was used
+    # unvalidated (2.3.8). `entry_start_lba * SECTOR_SIZE` on a crafted value
+    # overflows i64 and wraps — a negative or aliased byte offset, then fed to
+    # _read_at as a seek target.
+    if (entry_start_lba <= 0) { return entries; }
+    if (entry_start_lba >= GPT_MAX_LBA) { return entries; }
     var byte_offset = entry_start_lba * SECTOR_SIZE;
 
     for (var i = 0; i < num_entries; i = i + 1) {
@@ -370,39 +395,62 @@ fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size): i64 {
         # 48-55: Attributes (u64)
         # 56-127: Name (72 bytes, UTF-16LE)
 
-        # Skip empty entries (zero type GUID)
-        if (_is_zero_guid(&buf)) { continue; }
+        # Skip empty entries (zero type GUID), and entries whose LBA range is
+        # not physically meaningful.
+        #
+        # 2.3.8: start/end were used raw. `end_lba - start_lba + 1` with
+        # end < start yields a NEGATIVE sector count, and `sector_count *
+        # SECTOR_SIZE` overflows i64 for a large span — so a crafted disk
+        # produced negative or wrapped partition sizes that flowed straight
+        # into pe_size_bytes and out to callers. A u64 LBA above 2^63 also
+        # reads as negative here, which the `< 0` checks catch.
+        #
+        # `keep` rather than `continue`: 2.3.5 measured a `continue` aborting a
+        # loop in src/udev.cyr after one iteration and the trigger was never
+        # isolated. A partition scan that silently stops is worse than a slow
+        # one.
+        var keep = 1;
+        if (_is_zero_guid(&buf)) { keep = 0; }
 
         var start_lba = load64(&buf + 32);
         var end_lba = load64(&buf + 40);
         var attrs = load64(&buf + 48);
-        var sector_count = end_lba - start_lba + 1;
 
-        var pe = partition_entry_new();
-        store64(pe + PE_INDEX, i);
-        store64(pe + PE_TYPE_ID, 0);
-        store64(pe + PE_START_LBA, start_lba);
-        store64(pe + PE_SIZE_SECTORS, sector_count);
-        store64(pe + PE_SIZE_BYTES, sector_count * SECTOR_SIZE);
+        if (start_lba < 0) { keep = 0; }
+        if (start_lba >= GPT_MAX_LBA) { keep = 0; }
+        if (end_lba < 0) { keep = 0; }
+        if (end_lba >= GPT_MAX_LBA) { keep = 0; }
+        if (end_lba < start_lba) { keep = 0; }
 
-        # GPT legacy BIOS bootable: attribute bit 2
-        store64(pe + PE_BOOTABLE, (attrs >> 2) & 1);
+        if (keep == 1) {
+            var sector_count = end_lba - start_lba + 1;
 
-        # Name
-        var name = _parse_gpt_name(&buf + 56);
-        if (str_len(name) == 0) {
-            name = str_from(_gpt_type_guid_to_str(&buf));
+            var pe = partition_entry_new();
+            store64(pe + PE_INDEX, i);
+            store64(pe + PE_TYPE_ID, 0);
+            store64(pe + PE_START_LBA, start_lba);
+            store64(pe + PE_SIZE_SECTORS, sector_count);
+            store64(pe + PE_SIZE_BYTES, sector_count * SECTOR_SIZE);
+
+            # GPT legacy BIOS bootable: attribute bit 2
+            store64(pe + PE_BOOTABLE, (attrs >> 2) & 1);
+
+            # Name
+            var name = _parse_gpt_name(&buf + 56);
+            if (str_len(name) == 0) {
+                name = _gpt_type_guid_to_str(&buf);
+            }
+            store64(pe + PE_NAME, name);
+
+            # Type GUID
+            store64(pe + PE_TYPE_GUID_HI, load64(&buf));
+            store64(pe + PE_TYPE_GUID_LO, load64(&buf + 8));
+
+            # EFI detection
+            store64(pe + PE_IS_EFI, _is_efi_type_guid(&buf));
+
+            vec_push(entries, pe);
         }
-        store64(pe + PE_NAME, name);
-
-        # Type GUID
-        store64(pe + PE_TYPE_GUID_HI, load64(&buf));
-        store64(pe + PE_TYPE_GUID_LO, load64(&buf + 8));
-
-        # EFI detection
-        store64(pe + PE_IS_EFI, _is_efi_type_guid(&buf));
-
-        vec_push(entries, pe);
     }
 
     return entries;

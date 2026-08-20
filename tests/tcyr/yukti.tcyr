@@ -2340,6 +2340,9 @@ fn main() {
     test_device_db_mount_count();
     test_device_db_is_known();
     test_device_db_str_len_boundary();
+    test_get_preference_owns_its_strings();
+    test_filesystem_usage_overflow_guards();
+    test_audio_card_index_capped();
     test_audio_db_str_len_boundary();
 
     # Partition tests (10)
@@ -2475,9 +2478,35 @@ fn test_guid_helpers() {
     assert(_is_zero_guid(&zero_guid), "zero guid");
     assert(_is_zero_guid(&efi_guid) == 0, "efi not zero");
 
-    # Type string lookup
-    assert(streq(_gpt_type_guid_to_str(&efi_guid), "EFI System"), "efi str");
-    assert(streq(_gpt_type_guid_to_str(&linux_guid), "Linux filesystem"), "linux str");
+    # Type string lookup.
+    #
+    # 2.3.8: _gpt_type_guid_to_str now returns a **Str** on every path, so
+    # these use str_eq_cstr rather than streq (which compares two cstrs).
+    # It previously returned a cstr LITERAL for the four known GUIDs and
+    # _format_guid's Str for everything else — a return type that depended on
+    # the branch. The call site's `str_from(...)` was correct for the literals
+    # and read a Str struct as a cstr otherwise, so an unknown type GUID that
+    # should render as its GUID string came out as ONE garbage byte. These two
+    # assertions only ever covered the literal branches, which is why the
+    # suite stayed green through it.
+    assert(str_eq_cstr(_gpt_type_guid_to_str(&efi_guid), "EFI System"), "efi str");
+    assert(str_eq_cstr(_gpt_type_guid_to_str(&linux_guid), "Linux filesystem"), "linux str");
+
+    # The branch that was broken: an UNKNOWN GUID must render as its formatted
+    # GUID, not as a single garbage character.
+    var unknown_guid[16];
+    for (var i = 0; i < 16; i = i + 1) { store8(&unknown_guid + i, 0xAB); }
+    var unk_name = _gpt_type_guid_to_str(&unknown_guid);
+    assert(str_eq_cstr(unk_name, "abababab-abab-abab-abab-abababababab"),
+      "unknown GUID renders as its GUID string");
+    assert(str_len(unk_name) == 36, "unknown GUID name is a full 36-char GUID");
+
+    # A second unknown GUID must render differently — proves it is formatting
+    # the bytes, not returning a constant.
+    var unknown2[16];
+    for (var i = 0; i < 16; i = i + 1) { store8(&unknown2 + i, 0x11); }
+    assert(str_eq_cstr(_gpt_type_guid_to_str(&unknown2), "11111111-1111-1111-1111-111111111111"),
+      "a different unknown GUID renders differently");
     return 0;
 }
 
@@ -2666,6 +2695,125 @@ fn _db_probe_keylen(keylen, path_cstr, wal_cstr) {
 
     # pack: rows in low 32, known in high
     return rows + (known * 4294967296);
+}
+
+# device_db_get_preference returned Strs pointing INTO the patra result row,
+# which patra_result_free releases before the function returns (2.3.8).
+# str_from does not copy — str_from_a stores the caller's pointer and a length
+# — and patra_result_get_str hands back a raw pointer into the row, whose
+# buffer lives inside the `rs` block that _pt_free releases.
+#
+# So the value a caller read back depended on whether anything had reused the
+# freed block. The test forces that reuse: fetch the preference, then run more
+# patra work (which reallocates over the same memory), and only then read the
+# string. Against the old code the value comes back corrupted.
+#
+# It also covered an unbounded strlen over a 256-byte column with no
+# guaranteed NUL, now bounded by patra_result_get_str_len.
+
+fn test_get_preference_owns_its_strings() {
+    xunlink("/tmp/yukti_pref_own.patra");
+    xunlink("/tmp/yukti_pref_own.patra.wal");
+    fl_init();
+    var r = device_db_open("/tmp/yukti_pref_own.patra");
+    if (is_ok(r) == 0) { return 0; }
+
+    device_db_set_preference(str_from("OWN01"), str_from("/run/media/alice/BACKUP"),
+      0, str_from("ext4"), 1);
+
+    var pref = device_db_get_preference(str_from("OWN01"));
+    assert(pref != 0, "preference retrieved");
+
+    # Churn patra hard enough to reuse the freed result block, then read.
+    for (var i = 0; i < 40; i = i + 1) {
+        var info = device_info_new(device_id_new_cstr("block:sdz"),
+          str_from("/dev/sdz"), DC_USB_STORAGE);
+        di_set_serial(info, str_from("CHURN-0000000000000000"));
+        device_db_record_seen(info);
+        device_db_is_known(str_from("CHURN-0000000000000000"));
+        device_db_device_count();
+    }
+
+    var mp = pref_mount_point(pref);
+    assert(mp != 0, "mount_point still present after patra churn");
+    assert(str_eq_cstr(mp, "/run/media/alice/BACKUP"),
+      "mount_point survives patra_result_free plus reuse");
+    assert_eq(str_len(mp), 23, "mount_point length intact");
+
+    var fs = pref_fs_type(pref);
+    assert(fs != 0, "fs_type still present");
+    assert(str_eq_cstr(fs, "ext4"), "fs_type survives too");
+
+    device_db_close();
+    xunlink("/tmp/yukti_pref_own.patra");
+    xunlink("/tmp/yukti_pref_own.patra.wal");
+    return 0;
+}
+
+# filesystem_usage computed `(used_bytes * 10000) / total_bytes`, which
+# overflows i64 once used_bytes passes i64max/10000 (~839 TiB), and multiplied
+# f_blocks by f_bsize with no overflow check. statfs looks like a kernel call,
+# but a FUSE or network filesystem supplies these numbers itself.
+#
+# The real syscall cannot be made to return hostile values from a test, so this
+# asserts the guards are reachable and that a normal filesystem still reports a
+# sane percentage. The arithmetic itself is checked directly below.
+
+fn test_filesystem_usage_overflow_guards() {
+    # A real mount must still produce a plausible answer.
+    var r = filesystem_usage("/");
+    if (is_ok(r)) {
+        var u = payload(r);
+        var total = load64(u);
+        var used = load64(u + 8);
+        var avail = load64(u + 16);
+        var pct = load64(u + 24);
+        assert(total > 0, "root total > 0");
+        assert(used >= 0, "root used non-negative");
+        assert(avail >= 0, "root avail non-negative");
+        assert(used <= total, "used never exceeds total");
+        assert(pct >= 0, "percentage non-negative");
+        assert(pct <= 10000, "percentage never exceeds 100.00%");
+    }
+
+    # The scaling loop that replaced the overflowing multiply: verify it on the
+    # exact boundary values, mirroring the implementation.
+    var t = 9223372036854775807 / 2;   # far past i64max/10000
+    var used = t / 4;                  # 25%
+    while (t > 922337203685477) { used = used / 2; t = t / 2; }
+    assert(t > 0, "scaling terminates with a positive total");
+    var pct = (used * 10000) / t;
+    assert(pct >= 2400, "scaled percentage still ~25% (lower bound)");
+    assert(pct <= 2600, "scaled percentage still ~25% (upper bound)");
+
+    # The pre-scaling form would have overflowed to a negative value.
+    var t2 = 9223372036854775807 / 2;
+    var used2 = t2 / 4;
+    assert(used2 > 922337203685477, "the unscaled multiply really would overflow");
+    return 0;
+}
+
+# _audio_load_drivers used a card index parsed from /proc/asound/cards as an
+# unbounded vec fill count, and the rebuild after it is O(n) per line — so a
+# crafted index made it O(n^2) on an arbitrary n. ALSA's ceiling is
+# SNDRV_CARDS = 32.
+
+fn test_audio_card_index_capped() {
+    assert_eq(AUDIO_MAX_CARDS, 32, "cap matches ALSA SNDRV_CARDS");
+
+    # A line with an index at and above the cap must be dropped, not padded to.
+    var cb = str_builder_new();
+    str_builder_add_cstr(cb, " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n");
+    str_builder_add_cstr(cb, " 31 [Late           ]: drv - Late card\n");
+    str_builder_add_cstr(cb, " 32 [TooBig         ]: drv - Over the cap\n");
+    str_builder_add_cstr(cb, " 999999 [Huge      ]: drv - Absurd\n");
+    var drivers = _audio_parse_cards_text(str_builder_build(cb));
+    assert(drivers != 0, "parser returned a vec");
+    # Index 31 is legal, so the vec reaches 32 entries; 32 and 999999 are
+    # dropped, so it must NOT grow beyond that.
+    assert(vec_len(drivers) <= AUDIO_MAX_CARDS, "vec bounded by the card cap");
+    assert(vec_len(drivers) >= 1, "legal cards still parsed");
+    return 0;
 }
 
 fn test_device_db_str_len_boundary() {

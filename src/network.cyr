@@ -167,10 +167,10 @@ pub fn network_mount(share, mount_point_cstr) {
     var kernel_type = net_fs_to_kernel_type(fs_type);
 
     # Validate mount point
-    var val_r = validate_mount_point(mount_point_cstr);
-    if (is_ok(val_r) == 0) {
+    var val_r_tag, val_r = validate_mount_point(mount_point_cstr);
+    if (is_ok(val_r_tag) == 0) {
         sakshi_span_exit();
-        return val_r;
+        return Err(val_r);
     }
 
     # Create mount point directory, mode 0755. Routed through _yk_mkdir:

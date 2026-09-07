@@ -262,12 +262,12 @@ fn _open_optical_device(dev_path_cstr): i64 {
 
 pub fn open_tray(dev_path_cstr) {
     sakshi_span_enter("open_tray", 9);
-    var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) {
+    var fd_r_tag, fd_r = _open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r_tag) == 0) {
         sakshi_span_exit();
-        return fd_r;
+        return Err(fd_r);
     }
-    var fd = payload(fd_r);
+    var fd = fd_r;
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMEJECT, 0);
     sys_close(fd);
@@ -287,12 +287,12 @@ pub fn open_tray(dev_path_cstr) {
 
 pub fn close_tray(dev_path_cstr) {
     sakshi_span_enter("close_tray", 10);
-    var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) {
+    var fd_r_tag, fd_r = _open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r_tag) == 0) {
         sakshi_span_exit();
-        return fd_r;
+        return Err(fd_r);
     }
-    var fd = payload(fd_r);
+    var fd = fd_r;
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMCLOSETRAY, 0);
     sys_close(fd);
@@ -311,9 +311,9 @@ pub fn close_tray(dev_path_cstr) {
 # ---------------------------------------------------------------------------
 
 pub fn drive_status(dev_path_cstr) {
-    var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) { return fd_r; }
-    var fd = payload(fd_r);
+    var fd_r_tag, fd_r = _open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r_tag) == 0) { return Err(fd_r); }
+    var fd = fd_r;
 
     var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROM_DRIVE_STATUS, 0);
     sys_close(fd);
@@ -366,12 +366,12 @@ fn _toc_ctrl_is_data(adr_ctrl): i64 {
 
 pub fn read_toc(dev_path_cstr) {
     sakshi_span_enter("read_toc", 8);
-    var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) {
+    var fd_r_tag, fd_r = _open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r_tag) == 0) {
         sakshi_span_exit();
-        return fd_r;
+        return Err(fd_r);
     }
-    var fd = payload(fd_r);
+    var fd = fd_r;
 
     # Read TOC header: struct cdrom_tochdr { u8 first, u8 last }
     var hdr[2];
@@ -526,12 +526,12 @@ pub fn read_audio_sectors(dev_path_cstr, start_lba, nframes, buf, buflen) {
     }
 
     sakshi_span_enter("read_audio", 10);
-    var fd_r = _open_optical_device(dev_path_cstr);
-    if (is_ok(fd_r) == 0) {
+    var fd_r_tag, fd_r = _open_optical_device(dev_path_cstr);
+    if (is_ok(fd_r_tag) == 0) {
         sakshi_span_exit();
-        return fd_r;
+        return Err(fd_r);
     }
-    var fd = payload(fd_r);
+    var fd = fd_r;
 
     var req[24];
     # Zero the struct before populating — stray bits in padding
@@ -573,9 +573,9 @@ pub fn read_audio_track(dev_path_cstr, entry, buf, buflen) {
         var batch = remaining;
         if (batch > CDDA_MAX_FRAMES_PER_READ) { batch = CDDA_MAX_FRAMES_PER_READ; }
         var batch_bytes = batch * CDDA_FRAME_SIZE;
-        var r = read_audio_sectors(dev_path_cstr, lba, batch, buf + off, buflen - off);
-        if (is_ok(r) == 0) { return r; }
-        written = written + payload(r);
+        var r_tag, r = read_audio_sectors(dev_path_cstr, lba, batch, buf + off, buflen - off);
+        if (is_ok(r_tag) == 0) { return Err(r); }
+        written = written + r;
         off = off + batch_bytes;
         lba = lba + batch;
         remaining = remaining - batch;

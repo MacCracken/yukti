@@ -358,9 +358,9 @@ fn _build_device_info_from_sysfs(sys_path, dev_name, dev_type_cstr): i64 {
       props
       );
 
-    var info_r = device_info_from_udev(event);
-    if (is_ok(info_r) == 0) { return 0; }
-    var info = payload(info_r);
+    var info_r_tag, info_r = device_info_from_udev(event);
+    if (is_ok(info_r_tag) == 0) { return 0; }
+    var info = info_r;
 
     # Query device node permissions
     var perms = query_permissions(str_cstr(dev_path));
@@ -604,9 +604,9 @@ pub fn udev_event_to_device_event(uevent) {
 
     # Attach info for non-remove events
     if (udev_event_is_remove(uevent) == 0) {
-        var info_r = device_info_from_udev(uevent);
-        if (is_ok(info_r)) {
-            de_set_device_info(event, payload(info_r));
+        var info_r_tag, info_r = device_info_from_udev(uevent);
+        if (is_ok(info_r_tag)) {
+            de_set_device_info(event, info_r);
         }
     }
 
@@ -817,9 +817,9 @@ fn _udev_handle_event(mon, listener_fn, uevent) {
 pub fn udev_monitor_run(mon, listener_fn) {
     sakshi_span_enter("udev_monitor", 12);
     while (udev_monitor_is_running(mon)) {
-        var r = udev_monitor_poll(mon, 500);
-        if (is_ok(r)) {
-            _udev_handle_event(mon, listener_fn, payload(r));
+        var r_tag, r = udev_monitor_poll(mon, 500);
+        if (is_ok(r_tag)) {
+            _udev_handle_event(mon, listener_fn, r);
         }
     }
     sakshi_span_exit();

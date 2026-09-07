@@ -64,13 +64,13 @@ pub fn linux_dm_enumerate(mgr) {
     var root = ldm_sysfs_root(mgr);
     sakshi_span_enter("enumerate", 9);
 
-    var r = enumerate_devices(root);
-    if (is_ok(r) == 0) {
+    var r_tag, r = enumerate_devices(root);
+    if (is_ok(r_tag) == 0) {
         sakshi_span_exit();
-        return r;
+        return Err(r);
     }
 
-    var devices = payload(r);
+    var devices = r;
     var cache = load64(mgr + LDM_DEVICES);
 
     # Clear and repopulate cache
@@ -104,10 +104,10 @@ pub fn linux_dm_get(mgr, device_id) {
 # ---------------------------------------------------------------------------
 
 pub fn linux_dm_refresh(mgr, device_id) {
-    var r = linux_dm_enumerate(mgr);
-    if (is_ok(r) == 0) { return r; }
+    var r_tag, r = linux_dm_enumerate(mgr);
+    if (is_ok(r_tag) == 0) { return Err(r); }
 
-    var devices = payload(r);
+    var devices = r;
     var n = vec_len(devices);
     for (var i = 0; i < n; i = i + 1) {
         var info = vec_get(devices, i);
@@ -125,18 +125,18 @@ pub fn linux_dm_refresh(mgr, device_id) {
 
 pub fn linux_dm_mount(mgr, device_id, options) {
     # Look up device
-    var get_r = linux_dm_get(mgr, device_id);
-    if (is_ok(get_r) == 0) { return get_r; }
-    var info = payload(get_r);
+    var get_r_tag, get_r = linux_dm_get(mgr, device_id);
+    if (is_ok(get_r_tag) == 0) { return Err(get_r); }
+    var info = get_r;
     if (info == 0) {
         return err_device_not_found(device_id_str(device_id));
     }
 
     var dev_path = di_dev_path(info);
-    var result = storage_mount(str_cstr(dev_path), options);
-    if (is_ok(result) == 0) { return result; }
+    var result_tag, result = storage_mount(str_cstr(dev_path), options);
+    if (is_ok(result_tag) == 0) { return Err(result); }
 
-    var mr = payload(result);
+    var mr = result;
 
     # Update cached state
     di_set_state(info, DS_MOUNTED);
@@ -150,9 +150,9 @@ pub fn linux_dm_mount(mgr, device_id, options) {
 # ---------------------------------------------------------------------------
 
 pub fn linux_dm_unmount(mgr, device_id) {
-    var get_r = linux_dm_get(mgr, device_id);
-    if (is_ok(get_r) == 0) { return get_r; }
-    var info = payload(get_r);
+    var get_r_tag, get_r = linux_dm_get(mgr, device_id);
+    if (is_ok(get_r_tag) == 0) { return Err(get_r); }
+    var info = get_r;
     if (info == 0) {
         return err_device_not_found(device_id_str(device_id));
     }
@@ -162,8 +162,8 @@ pub fn linux_dm_unmount(mgr, device_id) {
         return err_unmount_failed(di_dev_path(info), str_from("device is not mounted"));
     }
 
-    var r = storage_unmount(str_cstr(mp));
-    if (is_ok(r) == 0) { return r; }
+    var r_tag, r = storage_unmount(str_cstr(mp));
+    if (is_ok(r_tag) == 0) { return Err(r); }
 
     # Update cached state
     di_set_state(info, DS_READY);
@@ -177,16 +177,16 @@ pub fn linux_dm_unmount(mgr, device_id) {
 # ---------------------------------------------------------------------------
 
 pub fn linux_dm_eject(mgr, device_id) {
-    var get_r = linux_dm_get(mgr, device_id);
-    if (is_ok(get_r) == 0) { return get_r; }
-    var info = payload(get_r);
+    var get_r_tag, get_r = linux_dm_get(mgr, device_id);
+    if (is_ok(get_r_tag) == 0) { return Err(get_r); }
+    var info = get_r;
     if (info == 0) {
         return err_device_not_found(device_id_str(device_id));
     }
 
     var dev_path = di_dev_path(info);
-    var r = storage_eject(str_cstr(dev_path));
-    if (is_ok(r) == 0) { return r; }
+    var r_tag, r = storage_eject(str_cstr(dev_path));
+    if (is_ok(r_tag) == 0) { return Err(r); }
 
     # Update cached state
     di_set_state(info, DS_EJECTING);
@@ -205,10 +205,10 @@ pub fn linux_dm_start_monitor(mgr) {
     }
 
     sakshi_info("starting udev hotplug monitor", 29);
-    var r = udev_monitor_new();
-    if (is_ok(r) == 0) { return r; }
+    var r_tag, r = udev_monitor_new();
+    if (is_ok(r_tag) == 0) { return Err(r); }
 
-    var mon = payload(r);
+    var mon = r;
     store64(mgr + LDM_MONITOR, mon);
 
     return Ok(mon);

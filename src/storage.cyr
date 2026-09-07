@@ -604,8 +604,8 @@ pub fn storage_mount(dev_path_cstr, options) {
     }
 
     # Validate mount point
-    var val_r = validate_mount_point(mount_cstr);
-    if (is_ok(val_r) == 0) { return val_r; }
+    var val_r_tag, val_r = validate_mount_point(mount_cstr);
+    if (is_ok(val_r_tag) == 0) { return Err(val_r); }
 
     sakshi_span_enter("mount", 5);
 
@@ -738,10 +738,10 @@ pub fn storage_eject(dev_path_cstr) {
     # Unmount first if mounted
     var mp = find_mount_point(dev_path_cstr);
     if (mp != 0) {
-        var um_r = storage_unmount(str_cstr(mp));
-        if (is_ok(um_r) == 0) {
+        var um_r_tag, um_r = storage_unmount(str_cstr(mp));
+        if (is_ok(um_r_tag) == 0) {
             sakshi_span_exit();
-            return um_r;
+            return Err(um_r);
         }
     }
 

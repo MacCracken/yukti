@@ -41,7 +41,7 @@ fn _inv(cond, msg, code) {
 
 fn fuzz_one(buf, n) {
     _write_fixture(buf, n);
-    var r = read_partition_table(_tmp_path);
+    var r_tag, r = read_partition_table(_tmp_path);
     # Either is_ok → Result(pt) or Err — both are valid outcomes for
     # arbitrary bytes. What is NOT valid is an Ok carrying a table that
     # violates its own contract.
@@ -50,8 +50,8 @@ fn fuzz_one(buf, n) {
     # harness only proved "does not segfault". A hostile GPT that yielded
     # a negative size, an out-of-range index, or a bogus table type passed
     # cleanly. Every check below must hold for EVERY input, valid or not.
-    if (is_ok(r)) {
-        var pt = payload(r);
+    if (is_ok(r_tag)) {
+        var pt = r;
         var t = pt_type(pt);
         _inv(t >= PT_NONE, "pt_type below PT_NONE", 20);
         _inv(t <= PT_GPT, "pt_type above PT_GPT", 21);
@@ -170,8 +170,8 @@ fn main() {
     store8(&pgpt + 512 + 85, 0x04);   # 1024 little-endian
     store8(&pgpt + 512 + 80, 1);      # num_entries = 1
     _write_fixture(&pgpt, 1024);
-    var r_bad = read_partition_table(_tmp_path);
-    if (is_ok(r_bad)) {
+    var r_bad_tag, r_bad = read_partition_table(_tmp_path);
+    if (is_ok(r_bad_tag)) {
         sys_write(2, "FUZZ FAIL: GPT entry_size > 128 accepted\n", 41);
         sys_exit(1);
     }

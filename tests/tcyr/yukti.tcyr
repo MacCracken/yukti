@@ -139,25 +139,25 @@ fn test_error_kind_str_all() {
 }
 
 fn test_error_result() {
-    var ok_r = Ok(42);
-    assert(is_ok(ok_r), "result ok");
-    assert_eq(payload(ok_r), 42, "result payload");
-    var err_r = err_device_not_found(str_from("test"));
-    assert(is_ok(err_r) == 0, "result err");
+    var ok_r_tag, ok_r = Ok(42);
+    assert(is_ok(ok_r_tag), "result ok");
+    assert_eq(ok_r, 42, "result payload");
+    var err_r_tag, err_r = err_device_not_found(str_from("test"));
+    assert(is_ok(err_r_tag) == 0, "result err");
     return 0;
 }
 
 fn test_error_errno_mapping() {
-    var r1 = map_errno_to_err(1, "mount", str_from("/dev/sda"));
-    assert(is_ok(r1) == 0, "errno 1 is err");
-    var r2 = map_errno_to_err(13, "mount", str_from("/dev/sda"));
-    assert(is_ok(r2) == 0, "errno 13 is err");
-    var r3 = map_errno_to_err(16, "mount", str_from("/dev/sda"));
-    assert(is_ok(r3) == 0, "errno 16 is err");
-    var r4 = map_errno_to_err(123, "open", str_from("/dev/sr0"));
-    assert(is_ok(r4) == 0, "errno 123 is err");
-    var r5 = map_errno_to_err(999, "op", str_from("/dev/x"));
-    assert(is_ok(r5) == 0, "errno 999 is err");
+    var r1_tag, r1 = map_errno_to_err(1, "mount", str_from("/dev/sda"));
+    assert(is_ok(r1_tag) == 0, "errno 1 is err");
+    var r2_tag, r2 = map_errno_to_err(13, "mount", str_from("/dev/sda"));
+    assert(is_ok(r2_tag) == 0, "errno 13 is err");
+    var r3_tag, r3 = map_errno_to_err(16, "mount", str_from("/dev/sda"));
+    assert(is_ok(r3_tag) == 0, "errno 16 is err");
+    var r4_tag, r4 = map_errno_to_err(123, "open", str_from("/dev/sr0"));
+    assert(is_ok(r4_tag) == 0, "errno 123 is err");
+    var r5_tag, r5 = map_errno_to_err(999, "op", str_from("/dev/x"));
+    assert(is_ok(r5_tag) == 0, "errno 999 is err");
     return 0;
 }
 
@@ -765,17 +765,17 @@ fn test_mount_options_new() {
 }
 
 fn test_filesystem_usage_root() {
-    var r = filesystem_usage("/");
-    assert(is_ok(r), "fs usage root ok");
-    var u = payload(r);
+    var r_tag, r = filesystem_usage("/");
+    assert(is_ok(r_tag), "fs usage root ok");
+    var u = r;
     assert(load64(u) > 0, "total > 0");
     assert(load64(u + 16) > 0, "avail > 0");
     return 0;
 }
 
 fn test_filesystem_usage_nonexistent() {
-    var r = filesystem_usage("/nonexistent_yukti_path");
-    assert(is_ok(r) == 0, "fs usage nonexistent err");
+    var r_tag, r = filesystem_usage("/nonexistent_yukti_path");
+    assert(is_ok(r_tag) == 0, "fs usage nonexistent err");
     return 0;
 }
 
@@ -914,9 +914,9 @@ fn test_read_audio_track_rejects_data_track() {
       "data track rejected");
     # Zero-length audio track returns Ok(0) without any ioctl
     var empty_entry = toc_entry_new(1, TT_AUDIO, 0, 0, 0);
-    var r = read_audio_track("/dev/sr0", empty_entry, &buf, 4096);
-    assert(is_ok(r), "empty audio track ok");
-    assert(payload(r) == 0, "empty audio track read 0 bytes");
+    var r_tag, r = read_audio_track("/dev/sr0", empty_entry, &buf, 4096);
+    assert(is_ok(r_tag), "empty audio track ok");
+    assert(r == 0, "empty audio track read 0 bytes");
     return 0;
 }
 
@@ -1101,9 +1101,9 @@ fn test_classify_and_extract() {
 
 fn test_device_info_from_udev() {
     var usb = make_usb_udev_event();
-    var r = device_info_from_udev(usb);
-    assert(is_ok(r), "udev info ok");
-    var info = payload(r);
+    var r_tag, r = device_info_from_udev(usb);
+    assert(is_ok(r_tag), "udev info ok");
+    var info = r;
     assert_eq(di_class(info), DC_USB_STORAGE, "udev cls");
     assert(str_eq_cstr(di_vendor(info), "SanDisk"), "udev vendor");
     assert(str_eq_cstr(di_model(info), "Cruzer_Blade"), "udev model");
@@ -1116,9 +1116,9 @@ fn test_device_info_from_udev() {
 
 fn test_device_info_from_udev_optical() {
     var opt = make_optical_udev_event();
-    var r = device_info_from_udev(opt);
-    assert(is_ok(r), "udev opt ok");
-    var info = payload(r);
+    var r_tag, r = device_info_from_udev(opt);
+    assert(is_ok(r_tag), "udev opt ok");
+    var info = r;
     assert_eq(di_class(info), DC_OPTICAL, "udev opt cls");
     assert(str_eq_cstr(di_label(info), "MOVIE_DISC"), "udev opt label");
     return 0;
@@ -1127,8 +1127,8 @@ fn test_device_info_from_udev_optical() {
 fn test_no_dev_path_error() {
     var e = udev_event_new(str_from("add"), str_from("/sys/x"), 0,
       str_from("block"), 0, map_new());
-    var r = device_info_from_udev(e);
-    assert(is_ok(r) == 0, "no devpath err");
+    var r_tag, r = device_info_from_udev(e);
+    assert(is_ok(r_tag) == 0, "no devpath err");
     return 0;
 }
 
@@ -1745,8 +1745,8 @@ fn test_db_reopen_does_not_leak_fds() {
     xunlink("/tmp/yukti_reopen_a.patra");
     xunlink("/tmp/yukti_reopen_a.patra.wal");
     fl_init();
-    var r = device_db_open("/tmp/yukti_reopen_a.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_reopen_a.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     var base = _open_fd_count();
     assert(base > 0, "/proc/self/fd readable");
@@ -1766,15 +1766,15 @@ fn test_db_failed_reopen_reports_and_leaks_nothing() {
     xunlink("/tmp/yukti_reopen_b.patra");
     xunlink("/tmp/yukti_reopen_b.patra.wal");
     fl_init();
-    var r = device_db_open("/tmp/yukti_reopen_b.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_reopen_b.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
     var base = _open_fd_count();
 
     # A reopen is close-then-open. A FAILED one therefore leaves no handle —
     # deliberately, and it says so by returning an Err rather than leaving the
     # caller to discover that every later call silently returns 0.
-    var bad = device_db_open("/yukti-no-such-dir/nope.patra");
-    assert(is_ok(bad) == 0, "failed reopen returns an error");
+    var bad_tag, bad = device_db_open("/yukti-no-such-dir/nope.patra");
+    assert(is_ok(bad_tag) == 0, "failed reopen returns an error");
     assert_eq(device_db_handle(), 0, "failed reopen leaves no handle");
     assert(_open_fd_count() < base, "the previous handle's fd was released, not orphaned");
 
@@ -1954,9 +1954,9 @@ fn test_mock_sysfs_enumerate_finds_device() {
     _mock_sysfs_build(root);
 
     var mgr = linux_dm_with_root(str_from(root));
-    var r = linux_dm_enumerate(mgr);
-    assert(is_ok(r), "enumerate ok over mock root");
-    var devices = payload(r);
+    var r_tag, r = linux_dm_enumerate(mgr);
+    assert(is_ok(r_tag), "enumerate ok over mock root");
+    var devices = r;
     assert(vec_len(devices) >= 1, "at least the mock disk");
     assert(_mock_find(devices, "/dev/sdz") != 0, "sdz enumerated");
 
@@ -1968,7 +1968,7 @@ fn test_mock_sysfs_device_fields() {
     var root = "/tmp/yukti_mock_sys_b";
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
-    var devices = payload(linux_dm_enumerate(mgr));
+    var devices_tag, devices = linux_dm_enumerate(mgr);
     var info = _mock_find(devices, "/dev/sdz");
     assert(info != 0, "sdz present");
 
@@ -1984,7 +1984,7 @@ fn test_mock_sysfs_removable_and_ro() {
     var root = "/tmp/yukti_mock_sys_c";
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
-    var devices = payload(linux_dm_enumerate(mgr));
+    var devices_tag, devices = linux_dm_enumerate(mgr);
     var info = _mock_find(devices, "/dev/sdz");
     assert(info != 0, "sdz present");
 
@@ -1999,7 +1999,7 @@ fn test_mock_sysfs_size_parsed() {
     var root = "/tmp/yukti_mock_sys_d";
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
-    var devices = payload(linux_dm_enumerate(mgr));
+    var devices_tag, devices = linux_dm_enumerate(mgr);
     var info = _mock_find(devices, "/dev/sdz");
     assert(info != 0, "sdz present");
 
@@ -2014,7 +2014,7 @@ fn test_mock_sysfs_partitions() {
     var root = "/tmp/yukti_mock_sys_e";
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
-    var devices = payload(linux_dm_enumerate(mgr));
+    var devices_tag, devices = linux_dm_enumerate(mgr);
 
     # sdz1 is a subdirectory of sdz whose name extends it — the partition
     # branch of enumerate_devices.
@@ -2029,14 +2029,14 @@ fn test_mock_sysfs_dm_get_by_id() {
     var root = "/tmp/yukti_mock_sys_f";
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
-    var devices = payload(linux_dm_enumerate(mgr));
+    var devices_tag, devices = linux_dm_enumerate(mgr);
     var info = _mock_find(devices, "/dev/sdz");
     assert(info != 0, "sdz present");
 
     # enumerate populates the manager cache keyed by device id.
-    var got = linux_dm_get(mgr, di_id(info));
-    assert(is_ok(got), "get ok");
-    assert(payload(got) != 0, "cached device found by id");
+    var got_tag, got = linux_dm_get(mgr, di_id(info));
+    assert(is_ok(got_tag), "get ok");
+    assert(got != 0, "cached device found by id");
 
     _mock_sysfs_teardown(root);
     return 0;
@@ -2046,14 +2046,14 @@ fn test_mock_sysfs_dm_refresh() {
     var root = "/tmp/yukti_mock_sys_g";
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
-    var devices = payload(linux_dm_enumerate(mgr));
+    var devices_tag, devices = linux_dm_enumerate(mgr);
     var info = _mock_find(devices, "/dev/sdz");
     assert(info != 0, "sdz present");
 
     # refresh of a device that DOES exist must succeed — the existing
     # test_linux_dm_refresh_nonexistent only covers the failure path.
-    var r = linux_dm_refresh(mgr, di_id(info));
-    assert(is_ok(r), "refresh of existing device ok");
+    var r_tag, r = linux_dm_refresh(mgr, di_id(info));
+    assert(is_ok(r_tag), "refresh of existing device ok");
 
     _mock_sysfs_teardown(root);
     return 0;
@@ -2064,13 +2064,13 @@ fn test_mock_sysfs_reenumerate_rebuilds_cache() {
     _mock_sysfs_build(root);
     var mgr = linux_dm_with_root(str_from(root));
 
-    var first = payload(linux_dm_enumerate(mgr));
+    var first_tag, first = linux_dm_enumerate(mgr);
     var n1 = vec_len(first);
     assert(n1 >= 2, "first enumerate found devices");
 
     # linux_dm_enumerate replaces the cache with a fresh map each call.
     # Re-enumerating the same tree must yield the same count, not double it.
-    var second = payload(linux_dm_enumerate(mgr));
+    var second_tag, second = linux_dm_enumerate(mgr);
     assert_eq(vec_len(second), n1, "re-enumerate is stable, not cumulative");
     assert(_mock_find(second, "/dev/sdz") != 0, "sdz still found after re-enumerate");
 
@@ -2093,16 +2093,16 @@ fn test_linux_dm_custom_root() {
 
 fn test_linux_dm_get_nonexistent() {
     var mgr = linux_dm_new();
-    var r = linux_dm_get(mgr, device_id_new_cstr("nonexistent"));
-    assert(is_ok(r), "get ok");
-    assert_eq(payload(r), 0, "get none");
+    var r_tag, r = linux_dm_get(mgr, device_id_new_cstr("nonexistent"));
+    assert(is_ok(r_tag), "get ok");
+    assert_eq(r, 0, "get none");
     return 0;
 }
 
 fn test_linux_dm_refresh_nonexistent() {
     var mgr = linux_dm_with_root(str_from("/tmp/empty_yukti_sysfs"));
-    var r = linux_dm_refresh(mgr, device_id_new_cstr("nonexistent"));
-    assert(is_ok(r) == 0, "refresh err");
+    var r_tag, r = linux_dm_refresh(mgr, device_id_new_cstr("nonexistent"));
+    assert(is_ok(r_tag) == 0, "refresh err");
     return 0;
 }
 
@@ -2513,9 +2513,9 @@ fn test_guid_helpers() {
 fn test_read_partition_table_real() {
     # Read partition table from the first real disk
     # This test is system-dependent but should not crash
-    var r = read_partition_table("/dev/sda");
-    if (is_ok(r)) {
-        var pt = payload(r);
+    var r_tag, r = read_partition_table("/dev/sda");
+    if (is_ok(r_tag)) {
+        var pt = r;
         var t = pt_type(pt);
         assert(t == PT_MBR || t == PT_GPT || t == PT_NONE, "valid pt type");
         var n = partition_count(pt);
@@ -2532,8 +2532,8 @@ fn test_read_partition_table_real() {
 fn test_device_db_open_close() {
     test_group("device_db");
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_db.patra");
-    assert(is_ok(r), "db open");
+    var r_tag, r = device_db_open("/tmp/yukti_test_db.patra");
+    assert(is_ok(r_tag), "db open");
     assert(device_db_handle() != 0, "db handle");
     device_db_close();
     assert_eq(device_db_handle(), 0, "db closed");
@@ -2545,8 +2545,8 @@ fn test_device_db_open_close() {
 
 fn test_device_db_record_seen() {
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_db2.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_db2.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     var info = device_info_new(device_id_new_cstr("block:sdb1"), str_from("/dev/sdb1"), DC_USB_STORAGE);
     di_set_serial(info, str_from("SN12345"));
@@ -2567,8 +2567,8 @@ fn test_device_db_record_seen() {
 
 fn test_device_db_preferences() {
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_db3.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_db3.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     device_db_set_preference(str_from("SN999"), str_from("/mnt/myusb"), 0, str_from("vfat"), 1);
 
@@ -2715,8 +2715,8 @@ fn test_get_preference_owns_its_strings() {
     xunlink("/tmp/yukti_pref_own.patra");
     xunlink("/tmp/yukti_pref_own.patra.wal");
     fl_init();
-    var r = device_db_open("/tmp/yukti_pref_own.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_pref_own.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     device_db_set_preference(str_from("OWN01"), str_from("/run/media/alice/BACKUP"),
       0, str_from("ext4"), 1);
@@ -2761,9 +2761,9 @@ fn test_get_preference_owns_its_strings() {
 
 fn test_filesystem_usage_overflow_guards() {
     # A real mount must still produce a plausible answer.
-    var r = filesystem_usage("/");
-    if (is_ok(r)) {
-        var u = payload(r);
+    var r_tag, r = filesystem_usage("/");
+    if (is_ok(r_tag)) {
+        var u = r;
         var total = load64(u);
         var used = load64(u + 8);
         var avail = load64(u + 16);
@@ -3238,8 +3238,8 @@ fn _make_audio_info(card, device, direction, name_cstr, driver_cstr, hw_id_cstr)
 fn test_audio_db_open_creates_table() {
     test_group("audio_db open creates table");
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_audio_db1.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_audio_db1.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
     # Empty audio table on fresh db — count is 0, not an error.
     assert_eq(device_db_audio_count(), 0, "fresh audio_devices empty");
     device_db_close();
@@ -3251,8 +3251,8 @@ fn test_audio_db_open_creates_table() {
 fn test_audio_db_record_seen() {
     test_group("audio_db record_audio_seen");
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_audio_db2.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_audio_db2.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     var d = _make_audio_info(0, 3, YUKTI_AUDIO_PLAYBACK,
       "HDMI 0", "HDA-Intel", "pci:0000:04:00.1:dev3:p");
@@ -3270,8 +3270,8 @@ fn test_audio_db_record_seen() {
 fn test_audio_db_record_seen_upsert() {
     test_group("audio_db UPSERT on same hw_id");
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_audio_db3.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_audio_db3.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     # Plug a USB DAC, record it.
     var d1 = _make_audio_info(2, 0, YUKTI_AUDIO_PLAYBACK,
@@ -3297,8 +3297,8 @@ fn test_audio_db_record_seen_upsert() {
 fn test_audio_db_known_lookup() {
     test_group("audio_db known lookup");
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_audio_db4.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_audio_db4.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     # Unknown before any record
     assert_eq(device_db_audio_known(str_from("pci:NEVER:dev0:p")), 0, "unknown before record");
@@ -3319,8 +3319,8 @@ fn test_audio_db_known_lookup() {
 fn test_audio_db_last_seen() {
     test_group("audio_db last_seen returns timestamp");
     fl_init();
-    var r = device_db_open("/tmp/yukti_test_audio_db5.patra");
-    if (is_ok(r) == 0) { return 0; }
+    var r_tag, r = device_db_open("/tmp/yukti_test_audio_db5.patra");
+    if (is_ok(r_tag) == 0) { return 0; }
 
     # Unknown hw_id returns 0 (no row).
     assert_eq(device_db_audio_last_seen(str_from("pci:NEVER:dev0:p")), 0, "unknown last_seen=0");

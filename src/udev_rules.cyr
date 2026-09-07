@@ -213,8 +213,8 @@ pub fn validate_rule(rule) {
 # ---------------------------------------------------------------------------
 
 pub fn write_rule(rule, rules_dir_cstr) {
-    var val_r = validate_rule(rule);
-    if (is_ok(val_r) == 0) { return val_r; }
+    var val_r_tag, val_r = validate_rule(rule);
+    if (is_ok(val_r_tag) == 0) { return Err(val_r); }
 
     var rendered = render_rule(rule);
 

@@ -5,7 +5,125 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.10] — 2026-09-06
+
+### Fixed
+
+- ⛔ **19 error-propagation sites returned the payload without its tag — an error that read as
+  SUCCESS.** The 2.3.9 migration to cyrius 6.6.0's Result value form rewrote the declaration and
+  the predicate of the standard idiom but not its `return`:
+
+  ```
+  var res_tag, res = f();
+  if (is_ok(res_tag) == 0) { return res; }   # ← the payload ALONE; the Err tag is gone
+  ```
+
+  A propagated `Err(77)` arrived at the caller as `tag=77, is_err=0`. Every site is now
+  `return Err(res);`. Affected `linux.cyr` (9), `optical.cyr` (6), `storage.cyr` (2),
+  `network.cyr` (1) and `udev_rules.cyr` (1) — device enumeration, mount, and optical/network
+  query paths, i.e. precisely the calls whose only job is to report failure.
+
+  ⚠ **Neither spelling is a type error** — both are `return <i64>;` — which is why this survived
+  a green build and a green test suite. cyrius 6.6.0 now WARNS on it (a fn that returns a pair on
+  one path and a single value on another), and that diagnostic is what found these.
+
 ## [Unreleased]
+
+## [2.3.9] — 2026-09-06
+
+**Cyrius 6.6.0 `Result` value-form migration.** The pin moves 6.5.29 → 6.6.0,
+where `enum Result<T, E>: stack` returns a REGISTER PAIR (tag in `rax`, payload
+in `rdx`) and allocates nothing. There is no 16-byte box any more, so there is
+no `tag at +0 / payload at +8` layout, `payload()` is gone, and every helper
+that used to take the box now takes both halves.
+
+790 of 797 assertions pass, 2/3 fuzz harnesses pass, `core_smoke` passes, lint 0
+warnings, 0 untracked deferrals, `vet` 33 deps clean, x86_64 and aarch64 both
+build. The 7 missing assertions and the third fuzz harness are blocked on a
+cycc codegen regression that is NOT part of this migration — see
+"Known-red on 6.6.0" below.
+
+### Changed — every `Result` receive site moved to the value form
+
+23 declarations in `src/` and 42 in `tests/` + `fuzz/` were rewritten from
+
+```
+var r = f();
+if (is_ok(r) == 0) { return r; }
+var v = payload(r);
+```
+
+to
+
+```
+var r_tag, r = f();
+if (is_ok(r_tag) == 0) { return r; }
+var v = r;
+```
+
+The payload deliberately keeps the ORIGINAL variable name, so every downstream
+use of the value is untouched and the diff stays confined to the declaration
+and the tag-reading call.
+
+Files touched: `src/linux.cyr` (9), `src/optical.cyr` (6), `src/udev.cyr` (3),
+`src/storage.cyr` (2), `src/main.cyr`, `src/network.cyr`, `src/udev_rules.cyr`
+(1 each); `tests/tcyr/yukti.tcyr` (40); `fuzz/fuzz_partition_table.fcyr` (2).
+
+Two shapes the mechanical rule does not cover, fixed by hand:
+
+- **`payload(f(...))` on a direct call** — 8 sites in `tests/tcyr/yukti.tcyr`
+  read `var devices = payload(linux_dm_enumerate(mgr));`. `payload` has no
+  1-argument replacement, so these became
+  `var devices_tag, devices = linux_dm_enumerate(mgr);`.
+- **`is_ok(f(...))` on a direct call** — 57 assertion sites such as
+  `assert(is_ok(validate_mount_point("/mnt/usb")), ...)` needed NO change.
+  `is_ok` takes the tag, which is exactly what `rax` carries, so the direct
+  form still reads the tag under the value form. Verified with a standalone
+  probe against the 6.6.0 compiler rather than assumed.
+
+No test was deleted or weakened. `test_error_result` still asserts the payload
+is 42 and `test_linux_dm_get_nonexistent` still asserts it is 0 — both now read
+the bound payload variable instead of calling `payload()`.
+
+### Checked — no hand-rolled box reads
+
+`payload()` failing to compile is loud; a hand-rolled `load64(r)` / `load64(r + 8)`
+against a register pair is not — it dereferences a plausible-looking address and
+reads garbage. Every `load64(x)` and `load64(x + 8)` in `src/`, `tests/`,
+`fuzz/` and `programs/` was checked against what produces `x` — 18 of the
+`+ 8` shape and 27 bare. All 45 are yukti's own struct accessors
+(`yukti_err_kind`, `mr_dev_path`, `pt_entries`, `toc_tracks`, the
+`filesystem_usage` struct, …). Zero were Result box reads.
+
+### Known-red on 6.6.0 — a cycc stack-slot regression, NOT this migration
+
+Three assertions-bearing tests and one fuzz harness SIGSEGV under cycc 6.6.0:
+
+- `test_parse_uevent_usb_add`
+- `test_parse_uevent_remove`
+- `test_parse_uevent_no_header`
+- `fuzz/fuzz_parse_uevent.fcyr`
+
+All four go through `parse_uevent` (`src/udev.cyr:479`), and none of them touch
+`Result` at all. The crash reproduces on the **unmigrated 2.3.8 tree** compiled
+with cycc 6.6.0, and the same tree compiled with cycc 6.5.29 passes 797/797 — so
+it is a compiler regression, not a migration defect.
+
+The mechanism: inside `parse_uevent`, the `len` PARAMETER is overwritten with a
+`Str` data pointer partway through the split loop, so `for (var i = 0; i <= len; …)`
+never terminates and walks off the buffer. Bisected across installed toolchains
+to **cycc 6.5.57** (6.5.56 good, 6.5.57 bad) — the release that added
+`_try_aggregate_copy_assign`, the multi-word copy for `dst = src` on aggregates.
+`Str` is `struct Str { data; len; }`, so `action = val;` where `action` was
+declared `var action = str_from("");` now copies two words into a slot the
+declaration path sized for one, clobbering the neighbouring stack slot.
+
+Reduced to a 20-line stdlib-only repro; no `CYRIUS_IR` / `CYRIUS_RELOADELIM` /
+`CYRIUS_FRAMETRIM` / `CYRIUS_MONOMORPH` / `CYRIUS_STACK_ARRAYS` setting avoids
+it. The repro and the bisect are recorded in
+`docs/development/issues/2026-09-06-cycc-660-parse-uevent-param-clobber.md`; the
+four tests stay in the tree unmodified so they go green the moment the compiler
+is fixed.
 
 ## [2.3.8] — 2026-08-19
 

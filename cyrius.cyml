@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "6.6.0"
+cyrius = "6.6.2"
 
 [build]
 entry = "src/main.cyr"
@@ -74,7 +74,7 @@ stdlib = [
 
 [deps.sakshi]
 git = "https://github.com/MacCracken/sakshi.git"
-tag = "2.4.10"
+tag = "2.5.1"
 modules = ["dist/sakshi.cyr"]
 
 # patra backs device_db (the persistent device-history store) ONLY. patra 1.13.8
@@ -91,6 +91,6 @@ modules = ["dist/sakshi.cyr"]
 # makes `cyrius build` warn that ./lib/ shadows the version-pinned lib.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.13.8"
+tag = "1.14.1"
 modules = ["dist/patra.cyr"]
 target = "linux"

@@ -173,9 +173,9 @@ pub fn network_mount(share, mount_point_cstr) {
         return Err(val_r);
     }
 
-    # Create mount point directory, mode 0755. Routed through _yk_mkdir:
-    # agnos's sys_mkdir takes (path, pathlen), not (path, mode). See src/syscalls.cyr.
-    _yk_mkdir(mount_point_cstr, 493);
+    # Create mount point directory, mode 0755. xmkdir (lib/io.cyr), not
+    # sys_mkdir: agnos's sys_mkdir takes (path, pathlen), not (path, mode).
+    xmkdir(mount_point_cstr, 493);
 
     # Build options
     var options = 0;
@@ -361,8 +361,8 @@ fn _parse_dotted_quad(host_cstr): i64 {
 }
 
 pub fn network_probe_host(host_cstr, port) {
-    # Create TCP socket
-    var fd = syscall(SYS_SOCKET, 2, 1, 0);
+    # Create TCP socket: AF_INET = 2, SOCK_STREAM = 1
+    var fd = _yk_socket(2, 1, 0);
     if (fd < 0) { return 0; }
 
     # Build sockaddr_in
@@ -395,7 +395,7 @@ pub fn network_probe_host(host_cstr, port) {
     store32(&addr + 4, ip);
 
     # Non-blocking connect would be better, but simple blocking test works
-    var r = syscall(SYS_CONNECT, fd, &addr, 16);
+    var r = _yk_connect(fd, &addr, 16);
     sys_close(fd);
 
     if (r == 0) { return 1; }

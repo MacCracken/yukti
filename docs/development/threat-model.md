@@ -98,9 +98,9 @@ surfaces that matter:
    individually. Returns are deliberately discarded in four places, none
    of which gate a security decision: `sys_close` on a descriptor about
    to go out of scope (26 sites), `sys_write`/`sys_exit` on stdout and
-   stderr in `main.cyr`, `_yk_mkdir`/`xrmdir` on mount points where
+   stderr in `main.cyr`, `xmkdir`/`xrmdir` on mount points where
    `EEXIST`/`ENOENT` is the expected case, and the best-effort
-   `SO_RCVBUF` hint at `udev.cyr:646`. The three file-descriptor writes
+   `SO_RCVBUF` hint (`_yk_setsockopt`) in `udev_monitor_with_filter`. The three file-descriptor writes
    that *do* discard a return (`udev_rules.cyr:147-148`,
    `storage.cyr:773`) are a known gap, tracked for the 2.3.2 syscall
    review — a short write there would be silent.
@@ -139,11 +139,11 @@ surfaces that matter:
   link surface.
 - `cyrius.lock` records SHA-256 hashes of every resolved
   `lib/*.cyr`. CI runs `cyrius deps --verify` on every build.
-- First-party deps only — `sakshi 2.4.10` (logging), `patra 1.13.8`
-  (embedded store). Both share the Yukti threat model and are
+- First-party deps only — `sakshi 2.5.2` (logging), `patra 1.14.3`
+  (embedded store), pinned in lockstep with what the toolchain bundles. Both share the Yukti threat model and are
   audited on the same cadence.
 - Cyrius stdlib (`alloc`, `str`, `vec`, `hashmap`, `io`, `fs`,
-  `process`, etc.) ships with the toolchain release (6.5.29) and
+  `process`, etc.) ships with the toolchain release (6.6.6) and
   is SHA-pinned by the toolchain installer, not by yukti.
 
 ## Audit Cadence

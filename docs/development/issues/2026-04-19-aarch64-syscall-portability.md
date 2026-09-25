@@ -1,6 +1,21 @@
 # aarch64 Syscall Portability — x86_64 numbers hardcoded throughout
 
-**Status**: open. With Cyrius 5.4.8's `cc5_aarch64` codegen fix, the
+**Status (2026-09-25, yukti 2.3.12)**: the source side is resolved.
+
+- Remediation steps 1–4 below are done: 2.1.3, 2.1.4, 2.3.4 and 2.3.12.
+- Every kernel call now goes through a stdlib wrapper. The one exception is
+  `_yk_ppoll`, for which the stdlib has no wrapper yet.
+- The tcyr suite passes 797/797 under `qemu-aarch64`.
+
+Still open are steps 5–6: the real-hardware retest (`scripts/retest-aarch64.sh
+pi`), and then flipping aarch64 from held to shipped.
+
+⚠ The local per-arch enum that 2.1.4 did add, against the "Do not fix this
+locally" advice at the end of this file, went wrong exactly as that advice
+predicted. See the correction under "Struct layouts that also differ" and
+CHANGELOG [2.3.12].
+
+**Original status (2026-04-19)**: open. With Cyrius 5.4.8's `cc5_aarch64` codegen fix, the
 aarch64 cross-build now produces executable binaries (see
 [2026-04-19-cc5-aarch64-repro.md](2026-04-19-cc5-aarch64-repro.md)),
 but yukti's test binary segfaults on real aarch64 hardware because
@@ -150,6 +165,14 @@ be replaced with a yukti-owned per-arch constant block.
   but `storage.cyr:126` calls syscall 137 directly — that's
   `statfs` on x86_64, `pkey_mprotect` on aarch64. aarch64 wants
   syscall 43 (`statfs`) with the identical argument layout.
+
+  ⚠ **Correction (2.3.12).** 43 is aarch64's native statfs, but cycc
+  reads a syscall number as an x86 number and renumbers it through
+  ESYSXLAT, whose x86-compat `accept 43 -> 202` row turns it into
+  accept(2). 2.1.4 followed this line, so `filesystem_usage` ran
+  accept(2) on every ARM host until 2.3.12. The fix is the stdlib's
+  `sys_statfs` (cyrius 6.6.6, x86 137 renumbered to 43). Never issue a
+  native aarch64 number yourself.
 - `struct sockaddr_in` / `sockaddr_nl` — arch-independent.
 - `ioctl` request numbers (`CDROMEJECT`, `BLKGETSIZE64`, etc.) —
   defined in `include/uapi/linux/...`, same values across archs.

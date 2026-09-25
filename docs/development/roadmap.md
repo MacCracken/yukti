@@ -3,6 +3,38 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
+## Cyrius 6.6.6 pin — what 2.3.12 did not close
+
+The pin is `cyrius = "6.6.6"`. 2.3.12 carried out the 6.6.5 and 6.6.6
+bump plans, so these three items are closed; the details are in
+`CHANGELOG.md` [2.3.12]:
+
+- The aarch64 statfs → accept(2) defect.
+- `filesystem_usage` reading through `STATFS_*` / `statfs_bsize`.
+- `lib/` re-resolved for the `SYS_UNLINKAT` 35 → 263 peer move.
+
+What is left needs hardware or a macOS host:
+
+- [ ] **Run `filesystem_usage` on pi (real aarch64).** Under
+      `qemu-aarch64` it now issues `statfs(…) = 0`, and the suite passes
+      797/797, including `fs usage root ok` / `avail > 0`, which failed
+      from 2.3.2 to 2.3.11. A qemu pass is not a hardware pass; see the
+      Cortex-A72 retest under "Held — hardware-bound".
+- [ ] **Run it on ecb (macOS-arm64).** The raw 8/16/24/32 offsets that
+      broke Darwin are gone, but no yukti build has ever run on macOS.
+      Both Mach-O builds compile (`CYRIUS_MACHO_ARM=1 cyrius build
+      --aarch64`, `CYRIUS_MACHO=1 cyrius build`) and still warn about two
+      pre-existing items:
+      - The `O_NONBLOCK` shadow under "Hardening".
+      - The ppoll number, which is unrouted on Darwin (1073 on arm64,
+        271 on x86_64). The udev netlink monitor is Linux-only anyway;
+        a stdlib ppoll wrapper would route or decline it (see
+        "Upstream").
+- [ ] **agnos: run the statfs / lstat bridges on a real kernel.**
+      Disassembly shows `_yk_statfs` reaching statfs #103 and `_yk_lstat`
+      reaching lstat #102, and the 9001–9010 stub band is gone. Neither has
+      been run on agnos.
+
 ## Next patch — 2.3.9: audit follow-through
 
 2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
@@ -76,7 +108,7 @@ ownership questions it deliberately did NOT settle:
       been shown to be reachable as a bug, but it is the same shape and has
       not been checked.
 
-### Hardening (defence-in-depth)### Hardening (defence-in-depth)
+### Hardening (defence-in-depth)
 
 - [ ] **ANSI escape injection to the terminal.** `src/main.cyr:49` writes
       device-controlled sysfs/uevent strings verbatim.
@@ -105,6 +137,19 @@ ownership questions it deliberately did NOT settle:
       matters for exactly the long-running consumers above. Recorded so the
       lost guarantee is a known constraint — verify before any nested or
       threaded enumeration lands.
+- [ ] **`enum EjectConst` re-declares the stdlib's `O_RDONLY` and
+      `O_NONBLOCK`** (`src/storage.cyr`), with Linux values.
+      - **Linux:** harmless, because the values agree.
+      - **Darwin:** `O_NONBLOCK` is 4, and 2048 is Darwin's `O_EXCL`. Last
+        definition wins program-wide, so on a Mach-O build every
+        `O_NONBLOCK` (stdlib code included) becomes `O_EXCL`. Both Mach-O
+        builds warn at this line.
+
+      This is the same shadowing class as the `SYS_STATFS` copies 2.3.12
+      removed. The fix is to drop both names from the enum. agnos needs care:
+      its neutral `O_*` set in `lib/io.cyr` has no `O_NONBLOCK`, so either
+      keep an agnos-only definition or get one added upstream (see
+      "Upstream").
 
 ### Structural / test quality
 
@@ -133,9 +178,6 @@ ownership questions it deliberately did NOT settle:
       at `:708` are byte-identical.
 - [ ] **`LDM_MONITOR_THREAD` is written once and never read.**
       `src/linux.cyr:22`.
-- [ ] **4 raw `sys_open` sites with literal flags remain** (`audio.cyr` ×2,
-      `storage.cyr`, `udev_rules.cyr`) — agnos's `sys_open` is
-      `(name, namelen, flags)`. 2.3.4 cleared one via `read_procfs_text`.
 - [ ] **`continue`-as-`break` sweep.** 2.3.5 measured `enumerate_devices`'
       partition loop running 1 of 5 iterations because `continue` aborted
       it, and fixed that loop by restructuring to nested `if`. **The
@@ -149,6 +191,16 @@ ownership questions it deliberately did NOT settle:
       than by inspection. Worth an upstream cyrius report once a minimal
       repro exists.
 
+      **Lead:** cyrius 6.6.3 fixed a `continue` that bound one loop too far
+      out (CHANGELOG [6.6.3]).
+      - A nested loop reset the shared continue-patch index, so an inner
+        `continue` could be patched to the OUTER loop's latch.
+      - A `while` nested in a `for` sent its `continue` to the `for`'s step.
+
+      Either would end an inner loop after one iteration, which matches the
+      2.3.5 symptom. Rebuild the pre-2.3.5 partition loop under 6.6.6 and
+      check it iterates 5 of 5 before sweeping the other 27 sites.
+
 ### Upstream
 
 - [ ] **`dist/yukti-core.deps` falsely lists `alloc`.** The kernel-safe
@@ -157,24 +209,23 @@ ownership questions it deliberately did NOT settle:
       rewording the two comments in `core.cyr` empties the sidecar. Not
       hand-correctable: `cyrius distlib` regenerates it and CI's dist-sync
       gate would fail. File upstream.
-
-## Blocked on an upstream tag
-
-- [ ] **Bump `[deps.sakshi]` 2.4.10 → 2.4.11.** The 2.3.4 span-leak work
-      found a defect on sakshi's side too: `sakshi_span_enter` returned 0
-      on overflow — the same value it returns on success — and emitted
-      nothing, so a saturated span stack stopped ALL tracing with no
-      diagnostic anywhere. Fixed in sakshi 2.4.11: the enter now returns a
-      non-zero cumulative drop count when refused, and the first drop emits
-      a one-shot `sakshi_warn`. Pairing semantics are deliberately
-      unchanged (that is a 2.5.0 minor — it alters observable behaviour for
-      unbalanced callers, and sakshi is included by every AGNOS Cyrius
-      project). sakshi's own pin also moved 6.5.15 → 6.5.29.
-
-      **The change is committed locally but not tagged.** Bump the tag here
-      once 2.4.11 is pushed, then regenerate `cyrius.lock`. Keep it in
-      lockstep with whatever cyrius bundles, or `cyrius build` warns that
-      `./lib/` shadows the version-pinned lib.
+- [ ] **Ask for a stdlib ppoll wrapper.** Neither Linux peer wraps ppoll,
+      so `_yk_ppoll` (`src/syscalls.cyr`) is the one raw `syscall()` left in
+      yukti, and it keeps a private x86_64 number (271). A wrapper would
+      carry the per-target number: aarch64 already names 1073. It would also
+      carry a Darwin route or decline, where both numbers are unrouted
+      today. Once it exists:
+      - `_yk_ppoll`'s Linux arm calls it.
+      - The local enum goes.
+      - CI's raw-syscall gate drops `want` to 0.
+- [ ] **Ask for agnos declining stubs** for `sys_socket`, `sys_bind`,
+      `sys_connect`, `sys_setsockopt`, `sys_recvfrom`, `sys_ioctl` and
+      `sys_fstatat`. These are the same -ENOSYS stubs 6.6.5 / 6.6.6 gave
+      agnos for `sys_sendto`, `sys_ftruncate` and `sys_fstatfs`. Until then
+      each one needs a fail-closed `_yk_*` bridge. With the stubs, the call
+      sites could call the wrappers directly. Also ask for `O_NONBLOCK` in
+      agnos's neutral `O_*` set in `lib/io.cyr` (see the `EjectConst` item
+      above).
 
 ## Resolved in 2.3.4
 
@@ -232,27 +283,15 @@ opportunity).
 
 ## Held — hardware-bound
 
-- [ ] **`filesystem_usage()` returns EFAULT on aarch64.** Opened by
-      2.3.2, which made the aarch64 suite report honestly for the
-      first time. `statfs` fails with `-14` where `newfstatat` on
-      the *same* static buffer returns 0 — so the buffer is valid
-      and the fault is specific to `SYS_STATFS` (43, the correct
-      aarch64 number). Two assertions fail: `fs usage root ok` and
-      `avail > 0`; the other 656 pass.
-
-      Observed under `qemu-aarch64` only and **not confirmed on real
-      hardware** — qemu-user's statfs emulation is a plausible
-      culprit, so reproduce on a Cortex-A72 before treating it as a
-      yukti bug. Fold into the retest below.
 - [ ] **aarch64 native build — runtime SIGILL retest on
-      Cortex-A72** against the current **6.5.29** toolchain.
+      Cortex-A72** against the current **6.6.6** toolchain.
       `src/` is cross-build-clean and runtime-correct as of 2.1.4
       (33 raw-number arch-divergent syscalls migrated to wrappers
       / `SYS_*` constants; `src/syscalls.cyr` arch-conditional
       layer + ppoll-uniform poll path; udev local-enum
       shadowing dropped). The Cortex-A72 Linux SIGILL repro from
       Cyrius 5.4.6 has still not been re-run — it has now gone
-      un-retested across the whole 5.5.x → 6.5.x arc.
+      un-retested across the whole 5.5.x → 6.6.x arc.
       Hardware-bound, not a code change.
 
       Two prerequisites moved since this was written:

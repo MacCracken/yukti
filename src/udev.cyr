@@ -630,8 +630,9 @@ enum NetlinkConst {
     SO_RCVBUF = 8;
     RECV_BUF_SIZE = 262144;
 }
-# Syscall numbers for socket/bind/setsockopt/recvfrom/ppoll come from
-# src/syscalls.cyr (arch-conditional; was hardcoded x86_64 here pre-2.1.4).
+# socket/bind/setsockopt/recvfrom/ppoll go through the _yk_* bridges in
+# src/syscalls.cyr: stdlib wrappers on Linux, fail-closed on agnos (2.3.12;
+# raw syscall(SYS_*, …) before that, hardcoded x86_64 numbers pre-2.1.4).
 
 pub fn udev_monitor_new() {
     return udev_monitor_with_filter(0);
@@ -639,7 +640,7 @@ pub fn udev_monitor_new() {
 
 pub fn udev_monitor_with_filter(filter_vec) {
     # Create netlink socket
-    var fd = syscall(SYS_SOCKET, AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    var fd = _yk_socket(AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
     if (fd < 0) {
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "socket() failed: errno ");
@@ -655,7 +656,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
     store32(&addr + 4, 0);
     store32(&addr + 8, 1);
 
-    var rc = syscall(SYS_BIND, fd, &addr, 12);
+    var rc = _yk_bind(fd, &addr, 12);
     if (rc < 0) {
         sys_close(fd);
         return err_udev_socket(str_from("bind() failed"));
@@ -664,7 +665,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
     # Set receive buffer size
     var bufsize[4];
     store32(&bufsize, RECV_BUF_SIZE);
-    syscall(SYS_SETSOCKOPT, fd, SOL_SOCKET, SO_RCVBUF, &bufsize, 4);
+    _yk_setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, 4);
 
     var mon = alloc(24);
     store64(mon, fd);
@@ -687,7 +688,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
     # ppoll(2) instead of poll(2) — aarch64's syscall table has no
     # SYS_POLL, only SYS_PPOLL. ppoll takes a timespec* (not int ms)
     # and an extra (sigmask, sigsetsize) pair. We drive both arches
-    # through ppoll uniformly via SYS_PPOLL (defined in src/syscalls.cyr).
+    # through ppoll uniformly via _yk_ppoll (src/syscalls.cyr).
     # A NEGATIVE timeout means "block indefinitely" in poll(2) terms. ppoll
     # spells that as a NULL timespec, not as a negative one.
     #
@@ -705,7 +706,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
         store64(&ts + 8, (timeout_ms - (timeout_ms / 1000) * 1000) * 1000000);
         tsp = &ts;
     }
-    var ret = syscall(SYS_PPOLL, &pfd, 1, tsp, 0, 8);
+    var ret = _yk_ppoll(&pfd, 1, tsp);
     if (ret < 0) {
         return err_udev_socket(str_from("ppoll() failed"));
     }
@@ -719,7 +720,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
     var src_addr[12];
     var src_len[4];   # socklen_t out-param (was [1]; both round to 8B so benign, but [4] states intent)
     store32(&src_len, 12);
-    var n = syscall(SYS_RECVFROM, fd, &buf, 8192, 0, &src_addr, &src_len);
+    var n = _yk_recvfrom(fd, &buf, 8192, 0, &src_addr, &src_len);
     if (n <= 0) { return Ok(0); }
 
     # Reject non-kernel senders — the kernel always sends with pid=0.

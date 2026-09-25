@@ -1,7 +1,8 @@
 # yukti/storage.cyr — USB/block device storage operations
 #
 # Mount, unmount, eject, filesystem detection, /proc/mounts parsing.
-# All syscalls direct — no libc dependency.
+# Kernel calls go through stdlib wrappers and the src/syscalls.cyr bridges —
+# no libc dependency.
 
 # ---------------------------------------------------------------------------
 # Filesystem enum — 17 known types + unknown
@@ -120,10 +121,15 @@ pub fn filesystem_is_optical(fs) {
 # ---------------------------------------------------------------------------
 
 pub fn filesystem_usage(mount_point_cstr) {
-    # SYS_STATFS = 137
-    # struct statfs is 120 bytes on x86_64
-    var buf[120];
-    var r = syscall(SYS_STATFS, mount_point_cstr, &buf);
+    # 2.3.12: buffer size and field offsets come from the stdlib (cyrius 6.6.6),
+    # not literals. The old `var buf[120]` + `load64(&buf + 8/16/24/32)` was the
+    # x86_64-Linux layout only. Linux puts an 8-byte f_type first; Darwin's
+    # statfs64 is 2168 bytes with a 32-bit f_bsize at 0; agnos fills a 32-byte
+    # record with f_bsize at 0. STATFS_BUFSZ is the max over every target, and
+    # statfs_bsize() reads f_bsize at the right WIDTH, which a load64 on Darwin
+    # does not.
+    var buf[STATFS_BUFSZ];
+    var r = _yk_statfs(mount_point_cstr, &buf);
     if (r < 0) {
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "statfs failed: errno ");
@@ -131,18 +137,10 @@ pub fn filesystem_usage(mount_point_cstr) {
         return err_io(str_builder_build(sb));
     }
 
-    # statfs layout (x86_64):
-    #  0: f_type (8)
-    #  8: f_bsize (8)
-    # 16: f_blocks (8)
-    # 24: f_bfree (8)
-    # 32: f_bavail (8)
-    # 40: f_files (8)  ... etc
-
-    var bsize = load64(&buf + 8);
-    var blocks = load64(&buf + 16);
-    var bfree = load64(&buf + 24);
-    var bavail = load64(&buf + 32);
+    var bsize = statfs_bsize(&buf);
+    var blocks = load64(&buf + STATFS_BLOCKS);
+    var bfree = load64(&buf + STATFS_BFREE);
+    var bavail = load64(&buf + STATFS_BAVAIL);
 
     # 2.3.8: every field here is attacker-influenceable. statfs is a kernel
     # call, but a FUSE or network filesystem supplies these numbers itself, so
@@ -572,7 +570,7 @@ enum AutoFs {
 }
 
 # ---------------------------------------------------------------------------
-# mount — mount a device via SYS_MOUNT (165)
+# mount — mount a device via mount(2) (_yk_mount)
 # ---------------------------------------------------------------------------
 
 pub fn storage_mount(dev_path_cstr, options) {
@@ -609,20 +607,19 @@ pub fn storage_mount(dev_path_cstr, options) {
 
     sakshi_span_enter("mount", 5);
 
-    # Create mount point directory, mode 0755. Routed through _yk_mkdir:
-    # agnos's sys_mkdir takes (path, pathlen), not (path, mode). See src/syscalls.cyr.
-    _yk_mkdir(mount_cstr, 493);
+    # Create mount point directory, mode 0755. xmkdir (lib/io.cyr), not
+    # sys_mkdir: agnos's sys_mkdir takes (path, pathlen), not (path, mode).
+    xmkdir(mount_cstr, 493);
 
     # TOCTOU guard (audit finding MED-2, CVE-2026-27456 class):
     # between validate_mount_point and mount(2) an attacker with write
     # access to the mount parent could symlink the target at /etc or
     # similar. lstat via newfstatat(AT_SYMLINK_NOFOLLOW) refuses to
     # follow the final component — if it's a symlink we abort.
-    #   newfstatat = 262, AT_FDCWD = -100, AT_SYMLINK_NOFOLLOW = 256
-    #   struct stat: st_mode is u32 at offset 24
+    # _yk_lstat (src/syscalls.cyr) issues it through the stdlib wrapper.
     #   S_IFMT = 0xF000, S_IFLNK = 0xA000, S_IFDIR = 0x4000
-    var stbuf[144];
-    var st_rc = syscall(SYS_NEWFSTATAT, 0 - 100, mount_cstr, &stbuf, 256);
+    var stbuf[STAT_BUFSZ];
+    var st_rc = _yk_lstat(mount_cstr, &stbuf);
     if (st_rc < 0) {
         sakshi_span_exit();
         return err_mount_failed(str_from(dev_path_cstr),
@@ -685,7 +682,7 @@ pub fn storage_mount(dev_path_cstr, options) {
 }
 
 # ---------------------------------------------------------------------------
-# unmount — unmount via SYS_UMOUNT2 (166)
+# unmount — unmount via umount2(2) (_yk_umount2)
 # ---------------------------------------------------------------------------
 
 pub fn storage_unmount(mount_point_cstr) {
@@ -756,12 +753,12 @@ pub fn storage_eject(dev_path_cstr) {
     # Check if optical drive (starts with "sr")
     if (_yk_starts_with_cstr(dev_name, "sr")) {
         # Optical: open device and CDROMEJECT ioctl
-        var fd = sys_open(dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
+        var fd = xopen(dev_path_cstr, O_RDONLY | O_NONBLOCK);
         if (fd < 0) {
             sakshi_span_exit();
             return err_eject_failed(dev_s, str_from("failed to open device"));
         }
-        var r = syscall(SYS_IOCTL, fd, CDROMEJECT_IOCTL, 0);
+        var r = _yk_ioctl(fd, CDROMEJECT_IOCTL, 0);
         sys_close(fd);
         if (r < 0) {
             sakshi_span_exit();
@@ -835,7 +832,7 @@ pub fn storage_eject(dev_path_cstr) {
         str_builder_add_cstr(sb, "/device/delete");
         var delete_path = str_builder_build(sb);
 
-        var fd = sys_open(str_cstr(delete_path), 1, 0);
+        var fd = xopen(str_cstr(delete_path), O_WRONLY);
         if (fd < 0) {
             sakshi_span_exit();
             return err_eject_failed(dev_s, str_from("failed to open sysfs delete"));

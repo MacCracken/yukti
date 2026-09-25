@@ -1,82 +1,60 @@
-# yukti/syscalls.cyr — arch-conditional SYS_* constants + shims for
-# syscalls that lib/syscalls_{x86_64,aarch64}_linux.cyr doesn't expose.
+# yukti/syscalls.cyr — agnos ABI bridges, and the one syscall the stdlib
+# does not wrap.
 #
-# Centralises the arch divergence so the rest of yukti src/ can call
-# `syscall(SYS_NAME, ...)` portably and the value resolves correctly
-# at compile time per `CYRIUS_ARCH_*`. Mirrors the
-# `lib/syscalls.cyr` dispatch pattern.
+# Every kernel call in yukti goes through a stdlib wrapper: the `sys_*`
+# family in lib/syscalls*.cyr or the portable `x*` family in lib/io.cyr.
+# Those resolve the syscall number per target at compile time. yukti
+# declares no `SYS_*` number of its own, apart from the x86_64 ppoll
+# below, which no stdlib peer declares.
 #
-# Scope: socket family (socket / bind / connect / setsockopt /
-# recvfrom / ppoll) and filesystem (statfs / newfstatat). Items live
-# here and not in the upstream stdlib because they haven't been
-# promoted yet — track in
-# `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`.
-# clock_gettime was removed here at 2.2.6 — timestamps now go through
-# stdlib `chrono.clock_epoch_secs()`, which routes correctly on
-# macOS/Windows (a `var` syscall NUMBER does not trigger the macho/PE
-# reroute — cyrius issue 2026-06-16-var-syscall-number-defeats-macho-pe-reroute).
+# 2.3.12 (cyrius 6.6.6) removed the arch-conditional `enum YkSyscalls`
+# blocks that used to sit here. They hand-carried numbers the stdlib
+# had not named yet, and one of them was wrong: the aarch64 statfs
+# entry held 43, aarch64's native statfs number, but cycc reads a
+# syscall number as an x86 number and renumbers it through ESYSXLAT.
+# ESYSXLAT's x86-compat `accept 43 -> 202` row turned it into
+# accept(2). So `filesystem_usage` failed with "statfs failed:
+# errno 14" on every ARM host from cyrius 6.2.10 until this release.
+# Traced under `qemu-aarch64 -strace` as `accept(<path>, <buf>, …) =
+# -1 errno=14`. 6.6.6 names statfs in both Linux peers (x86 137,
+# renumbered 137 -> 43 on aarch64), and the socket family, ioctl,
+# lseek and newfstatat already had names. So the local numbers could
+# only ever shadow the stdlib's, and 6.6.6 warns that they do.
+#
+# The agnos half: agnos IS an x86_64 target, so cycc defines
+# CYRIUS_ARCH_X86 *and* CYRIUS_TARGET_AGNOS on an agnos build. The
+# agnos peer (lib/syscalls_x86_64_agnos.cyr) is standalone. It does
+# not include lib/syscalls_linux_common.cyr, so the socket family,
+# ioctl and fstatat have no wrapper there, and statfs / lstat take an
+# explicit path length. The `_yk_*` bridges below keep yukti's
+# Linux-only modules (optical / storage / network / udev) COMPILING on
+# agnos. The rule, per bridge:
+#
+#   - agnos has the real syscall: call through to it (mkdir, statfs,
+#     lstat).
+#   - agnos lacks the call, or only has a stub that returns 0: fail
+#     closed with -ENOSYS (mount, umount2, the socket family, ioctl,
+#     ppoll). Fabricating success is the one outcome never acceptable.
+#
+# Before 2.3.12 the fail-closed half was a band of fake `SYS_*`
+# numbers (9001-9010) handed to raw `syscall()`. That band is retired.
+# Its statfs stub (9009) shadowed agnos's real statfs number, 103
+# (6.6.6 warns on that too), and "an unknown syscall number fails" was
+# an assumption about the kernel rather than code yukti owns.
 
-# The `#ifndef CYRIUS_TARGET_AGNOS` is load-bearing, not belt-and-braces:
-# agnos IS an x86_64 target, so cycc defines CYRIUS_ARCH_X86 *and*
-# CYRIUS_TARGET_AGNOS on an agnos build. Without this guard, this block and the
-# YkSyscallsAgnos block below both emit, redefining 8 names (SYS_SOCKET,
-# SYS_CONNECT, SYS_BIND, SYS_RECVFROM, SYS_SETSOCKOPT, SYS_PPOLL, SYS_STATFS,
-# SYS_NEWFSTATAT) with conflicting values. cyrius resolves that as "last
-# definition wins", so the fail-closed 9001+ stubs won only because they happen
-# to sit textually lower in this file — reordering the two blocks would have
-# silently substituted real Linux syscall numbers into agnos builds, which is
-# precisely what the stub band exists to prevent. Guard it; don't trust order.
+# x86_64 ppoll. Neither Linux peer wraps ppoll, and only the aarch64
+# peer names it, as 1073: a private alias that ESYSXLAT routes to
+# aarch64's native 73. Native 73 cannot be issued directly
+# on aarch64, because the x86-compat `flock 73 -> 32` row claims it.
+# So x86_64 is the one target that needs a local number. Guarded
+# `#ifndef CYRIUS_TARGET_AGNOS` because an agnos build also defines
+# CYRIUS_ARCH_X86. See `_yk_ppoll` at the end of this file.
 #ifndef CYRIUS_TARGET_AGNOS
 #ifdef CYRIUS_ARCH_X86
 enum YkSyscalls {
-    SYS_SOCKET = 41;
-    SYS_CONNECT = 42;
-    SYS_BIND = 49;
-    SYS_RECVFROM = 45;
-    SYS_SETSOCKOPT = 54;
     SYS_PPOLL = 271;
-    SYS_STATFS = 137;
-    SYS_NEWFSTATAT = 262;
 }
 #endif
-#endif
-
-#ifdef CYRIUS_ARCH_AARCH64
-enum YkSyscalls {
-    SYS_SOCKET = 198;
-    SYS_CONNECT = 203;
-    SYS_BIND = 200;
-    SYS_RECVFROM = 207;
-    SYS_SETSOCKOPT = 208;
-    SYS_STATFS = 43;
-}
-# Stdlib aarch64 already defines SYS_PPOLL = 73 and SYS_NEWFSTATAT = 262 — the
-# latter is the x86 number on purpose: cyrius's ESYSXLAT renumbers 262 → 79 at
-# emit time (identical arg layouts, collision-free). Do not redefine either.
-#endif
-
-# AGNOS has no ioctl / BSD-socket / statfs / poll surface. These constants
-# exist ONLY so the Linux-only enumerator modules (optical / storage /
-# network / device) COMPILE on the agnos target — those code paths are never
-# reached at runtime, because the sole agnos consumer (vani) drives only the
-# `yukti_audio_*` path, which has its own agnos branch (audio.cyr). agnos also
-# already defines SYS_LSEEK/STAT/UNLINK/RMDIR/MOUNT/MKDIR/UMOUNT in its stdlib
-# (do NOT redefine those). The stub numbers sit in a high, deliberately-invalid
-# band so an accidental call fails closed (unknown syscall → error) rather than
-# aliasing a real low-numbered agnos syscall (e.g. Linux ioctl=16 == agnos kill).
-#ifdef CYRIUS_TARGET_AGNOS
-enum YkSyscallsAgnos {
-    SYS_IOCTL = 9001;
-    SYS_SOCKET = 9002;
-    SYS_CONNECT = 9003;
-    SYS_BIND = 9004;
-    SYS_RECVFROM = 9005;
-    SYS_SETSOCKOPT = 9006;
-    SYS_PPOLL = 9007;
-    SYS_POLL = 9008;
-    SYS_STATFS = 9009;
-    SYS_NEWFSTATAT = 9010;
-}
 #endif
 
 # ---------------------------------------------------------------------------
@@ -131,10 +109,10 @@ fn _yk_starts_with_cstr(s, prefix_cstr): i64 {
 # (storage.cyr x2, network.cyr x1). It went unnoticed because an arity mismatch was
 # only a WARNING until cyrius 6.5.1 made it an error.
 #
-# This bridge keeps the Linux-only modules COMPILING on agnos — the same reason the
-# 9001+ stub numbers above exist — while making the call FAIL CLOSED there, which is
-# the stated philosophy of that block. Fabricating success is the one outcome that is
-# never acceptable: every caller downstream then believes it has a mounted filesystem.
+# This bridge keeps the Linux-only modules COMPILING on agnos while making the call
+# FAIL CLOSED there, per the rule at the top of this file. Fabricating success is the
+# one outcome that is never acceptable: every caller downstream then believes it has a
+# mounted filesystem.
 #
 # NOT "fixed" by giving agnos a real 5-arg sys_mount: that is an agnos-side kernel ABI
 # commitment, not yukti's call to make. If agnos later gains real mount support, delete
@@ -179,35 +157,134 @@ fn _yk_umount2(target, flags): i64 {
 }
 
 # ---------------------------------------------------------------------------
-# mkdir bridge (yukti 2.3.1)
+# mkdir — no bridge since 2.3.12
 # ---------------------------------------------------------------------------
-# `sys_mkdir` is LENGTH-carrying on agnos and MODE-carrying on POSIX, at the
-# SAME 2-arity — so the mismatch produces no compiler diagnostic. That is how it
-# survived the 2.3.0 sweep of this exact bug class, which only caught the sites
-# where the arity also differed:
-#
-#     lib/syscalls_x86_64_agnos.cyr:   fn sys_mkdir(path, pathlen)
-#     lib/syscalls_x86_64_linux.cyr:   fn sys_mkdir(path, mode)
-#     lib/syscalls_aarch64_linux.cyr:  fn sys_mkdir(path, mode)   # via mkdirat
-#
-# yukti called `sys_mkdir(path, 493)` (0755) at two sites (storage.cyr and
-# network.cyr). On agnos the 493 bound to `pathlen`, so the kernel was told
-# to read 493 bytes from a path whose string is far shorter — an over-read past
-# the NUL into whatever trailing bytes followed the buffer.
-#
-# Unlike `sys_mount` above, agnos's `sys_mkdir` is a REAL syscall, not a no-op
-# stub, so this bridge calls THROUGH correctly instead of failing closed. That
-# mirrors the stdlib's own `xrmdir` (lib/io.cyr), which resolves the identical
-# length-vs-pointer split for the sibling rmdir call, and which storage.cyr
-# already uses.
-#
-# `mode` is necessarily dropped on agnos: its mkdir ABI carries no mode
-# argument. Callers wanting a specific mode there must chmod separately.
-fn _yk_mkdir(path, mode): i64 {
+# `_yk_mkdir` (2.3.1) existed because agnos's `sys_mkdir` is (path, pathlen) and
+# POSIX's is (path, mode), at the SAME arity, so the mismatch drew no compiler
+# diagnostic and the 0755 bound to `pathlen` on agnos. lib/io.cyr's `xmkdir`
+# (cyrius 6.5.7) now does exactly what that bridge did: it computes the length
+# on agnos, where the mode is necessarily dropped, and passes through elsewhere.
+# The two call sites (storage.cyr, network.cyr) call `xmkdir` directly.
+
+# ---------------------------------------------------------------------------
+# statfs bridge (yukti 2.3.12)
+# ---------------------------------------------------------------------------
+# `buf` must be STATFS_BUFSZ bytes. Read the fields through the stdlib's
+# STATFS_* offsets and `statfs_bsize()`, never literal offsets: the record's
+# layout differs per target. Linux is `sys_statfs(path, buf)`, new in 6.6.6.
+# agnos makes its REAL statfs #103, which takes an explicit path length and
+# fills a frozen 32-byte record. The stdlib publishes that record's offsets
+# under the same STATFS_* names. This replaces the 9009 fail-closed stub, which
+# shadowed the real number.
+fn _yk_statfs(path, buf): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
-    return sys_mkdir(path, strlen(path));
+    return sys_statfs(path, strlen(path), buf);
     #endif
     #ifndef CYRIUS_TARGET_AGNOS
-    return sys_mkdir(path, mode);
+    return sys_statfs(path, buf);
+    #endif
+}
+
+# ---------------------------------------------------------------------------
+# lstat bridge (yukti 2.3.12)
+# ---------------------------------------------------------------------------
+# stat that does NOT follow a trailing symlink, for storage_mount's TOCTOU
+# guard. `buf` must be STAT_BUFSZ bytes; read st_mode through STAT_MODE.
+#
+# Linux issues newfstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW), the same
+# syscall the guard has always made, so a seccomp allowlist that admitted it
+# still does. It is now spelled with the stdlib wrapper and its per-target AT_*
+# constants instead of 262 / -100 / 256.
+#
+# agnos makes its REAL lstat #102. It is length-carrying, and its st_mode
+# (STAT_MODE = 0) carries the POSIX type bits the guard tests. This replaces
+# the 9010 fail-closed stub.
+fn _yk_lstat(path, buf): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return sys_lstat(path, strlen(path), buf);
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_fstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW);
+    #endif
+}
+
+# ---------------------------------------------------------------------------
+# ioctl + socket-family bridges (yukti 2.3.12)
+# ---------------------------------------------------------------------------
+# agnos has no ioctl and no BSD-socket surface, and its stdlib peer defines
+# none of these wrappers, so each one fails closed there. The callers are the
+# optical, eject, netlink-monitor and network-probe paths. agnos never reaches
+# them at runtime: vani, the sole agnos consumer, drives only `yukti_audio_*`.
+# Each Linux arm is the stdlib wrapper with the same arguments, so it issues
+# the same syscall the raw `syscall(SYS_*, …)` call did.
+fn _yk_ioctl(fd, request, argp): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_ioctl(fd, request, argp);
+    #endif
+}
+
+fn _yk_socket(domain, type, protocol): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_socket(domain, type, protocol);
+    #endif
+}
+
+fn _yk_bind(fd, addr, addrlen): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_bind(fd, addr, addrlen);
+    #endif
+}
+
+fn _yk_connect(fd, addr, addrlen): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_connect(fd, addr, addrlen);
+    #endif
+}
+
+fn _yk_setsockopt(fd, level, optname, val, vallen): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_setsockopt(fd, level, optname, val, vallen);
+    #endif
+}
+
+fn _yk_recvfrom(fd, buf, len, flags, srcaddr, srcaddrlen): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return sys_recvfrom(fd, buf, len, flags, srcaddr, srcaddrlen);
+    #endif
+}
+
+# ---------------------------------------------------------------------------
+# ppoll bridge (yukti 2.3.12): the one raw syscall in yukti
+# ---------------------------------------------------------------------------
+# No stdlib peer wraps ppoll, so this is the one place yukti spells `syscall()`
+# itself, and CI allows it here and nowhere else. aarch64 has no poll(2), only
+# ppoll, so both Linux arches use ppoll. SYS_PPOLL is the local 271 on x86_64
+# and the stdlib's 1073 alias on aarch64 (top of this file). `tsp` is a
+# struct timespec*, or 0 to block indefinitely; the signal mask is NULL with
+# sigsetsize 8. Switch to the stdlib wrapper once one exists (see roadmap.md).
+fn _yk_ppoll(fds, nfds, tsp): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - YK_ENOSYS;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return syscall(SYS_PPOLL, fds, nfds, tsp, 0, 8);
     #endif
 }

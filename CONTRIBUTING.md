@@ -4,7 +4,7 @@ Thanks for taking the time to dig in.
 
 ## Prerequisites
 
-- Cyrius toolchain 6.5.29+ (`cyrius` on `$PATH`) —
+- Cyrius toolchain 6.6.6 (`cyrius` on `$PATH`; the `cyrius.cyml` pin) —
   <https://github.com/MacCracken/cyrius>
 - A Linux host for udev/mount behaviour to actually do anything useful
 
@@ -54,12 +54,13 @@ Never shell out to `cc5` directly; always go through `cyrius <subcommand>`.
 - Manual struct layout — `alloc` + `store64/load64` with named offsets
 - Accessor functions — `fn type_field(ptr) { return load64(ptr + F); }`
 - `str_builder` for formatting, not temp allocations
-- Direct syscalls only — no libc, no external deps
+- Kernel calls through stdlib wrappers (`sys_*`, `x*`) or a `_yk_*` bridge
+  in `src/syscalls.cyr` — never raw `syscall()`; no libc, no external deps
 - `sakshi_*` for logging; no raw `println` in library code
 
 ## Testing
 
-- 658 assertions is the current floor — do not regress
+- 797 assertions is the current floor — do not regress
 - Hardware-dependent logic must be reachable from mock data (see
   `find_mount_in()` taking a string, not `/proc/mounts`)
 - Parsers get a fuzz target (`fuzz/*.fcyr`) before merge

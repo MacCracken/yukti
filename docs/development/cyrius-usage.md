@@ -4,12 +4,12 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 6.5.29 (`cyrius = "6.5.29"` in `cyrius.cyml`).
+**Toolchain pin**: 6.6.6 (`cyrius = "6.6.6"` in `cyrius.cyml`).
 `cyrius` drives the compiler internally (`cycc`, named `cc5` before
 Cyrius 6.0) — never shell out to it directly.
 
 Upgrade notes — **historical record** (5.5.11 → 5.7.48, a full major
-behind the current 6.5.29 pin; retained for the two language gotchas,
+behind the current 6.6.6 pin; retained for the two language gotchas,
 not as current guidance): that arc was mostly stdlib expansion
 (json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
 HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
@@ -52,13 +52,26 @@ arch-divergent `read`/`write`/`stat`/`exit`/`mkdir`/`rmdir`/
 `mount`/`umount2`/`lseek`/`socket`/`connect`/`statfs`/`newfstatat`/
 `clock_gettime`/`ppoll` syscalls, and switched
 `udev_monitor_poll` from poll(2) to ppoll(2) (aarch64 has no
-SYS_POLL). Constants the stdlib doesn't expose live in
-`src/syscalls.cyr` under arch-conditional `enum YkSyscalls`
-blocks, alongside the `_yk_mount` / `_yk_umount2` / `_yk_mkdir`
-agnos bridges added in 2.3.0/2.3.1. (The yukti-local `sys_stat`
-shim was dropped at the 6.0.1 bump — the stdlib ships `sys_stat`
-on x86_64 too now.) aarch64 cross-build is clean and
-runtime-correct; the remaining held aarch64 thread is
+SYS_POLL). 2.1.4 left the numbers the stdlib did not yet name
+in arch-conditional `enum YkSyscalls` blocks in `src/syscalls.cyr`.
+
+2.3.12 (cyrius 6.6.6) retired them:
+- Every kernel call now goes through a stdlib wrapper (`sys_*`,
+  or the portable `x*` family in `lib/io.cyr`).
+- One of those local numbers was wrong. The aarch64
+  `SYS_STATFS = 43` was renumbered by ESYSXLAT into accept(2),
+  so `filesystem_usage` had never worked on ARM.
+- `src/syscalls.cyr` now holds only the `_yk_*` bridges and one
+  x86_64 number, ppoll's 271. The bridges cover the agnos ABI
+  splits: mount, umount2, statfs, lstat, the socket family and
+  ioctl.
+- `_yk_ppoll` is the single raw `syscall()` in the tree, because
+  no stdlib peer wraps ppoll.
+
+(The yukti-local `sys_stat` shim was dropped at the 6.0.1 bump;
+the stdlib ships `sys_stat` on x86_64 too now.) The aarch64
+cross-build is clean, and the tcyr suite passes 797/797 under
+`qemu-aarch64`. The remaining held aarch64 thread is
 hardware-bound — the full-target retest on real Cortex-A72 has
 not been re-run since the 2.1.4 migration (see
 `docs/development/issues/2026-04-19-aarch64-syscall-portability.md`).
@@ -68,13 +81,19 @@ not been re-run since the 2.1.4 migration (see
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 6.5.29):
+- **Stdlib modules** (ship with Cyrius 6.6.6):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
   `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`,
   `atomic`, `sync`, `thread_local`
 - **First-party deps** (pinned in `[deps.*]`):
-  - `sakshi` 2.4.10 — structured logging
-  - `patra` 1.13.8 — persistent device history
+  - `sakshi` 2.5.2 — structured logging
+  - `patra` 1.14.3 — persistent device history
+
+  Both tags stay in lockstep with the versions the pinned cyrius
+  bundles. Newer local tags are folded into the next cyrius release;
+  pinning ahead of the fold makes `cyrius build` warn that `./lib/`
+  shadows the pinned lib, or lets the bundled copy silently replace
+  the git dep. `cyrius.cyml` has the details.
 
 ```sh
 cyrius deps              # resolve [deps] into lib/
@@ -85,7 +104,7 @@ cyrius deps --verify     # CI gate: fail on hash mismatch
 ## Build
 
 ```sh
-cyrius build src/main.cyr build/yukti     # userland CLI (~424 KB static ELF)
+cyrius build src/main.cyr build/yukti     # userland CLI (~477 KB static ELF; ~157 KB with CYRIUS_DCE=1)
 ```
 
 Zero warnings is the gate. `dead:` lines from DCE are informational —
@@ -98,7 +117,7 @@ verified on real Cortex-A72 for `core_smoke`, the three fuzz
 targets, and the main CLI — but the full-target retest, the tcyr
 suite in particular, has not been re-run on hardware since the
 2.1.4 syscall migration, so aarch64 stays **held** pending a
-retest under the current 6.5.29 toolchain. The backend binary was
+retest under the current 6.6.6 toolchain. The backend binary was
 renamed `cc5_aarch64` → `cycc_aarch64` in Cyrius 6.0.
 See `docs/development/issues/2026-04-19-aarch64-syscall-portability.md`,
 `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`, and
@@ -110,7 +129,7 @@ toolchain install.
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 658 assertions, must be 0 failures
+cyrius test  tests/tcyr/yukti.tcyr        # 797 assertions, must be 0 failures
 cyrius bench tests/bcyr/yukti.bcyr        # 46 benchmarks (batch timing)
 cyrius build fuzz/fuzz_parse_uevent.fcyr    build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent
@@ -123,15 +142,15 @@ cyrius build fuzz/fuzz_partition_table.fcyr build/fuzz_partition_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.5.29)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.6.6)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so
 downstream consumers don't need Yukti's include chain.
 
 ```sh
-cyrius distlib            # → dist/yukti.cyr       (full userland, ~6.3k lines)
-cyrius distlib core       # → dist/yukti-core.cyr  (kernel-safe, ~470 lines)
+cyrius distlib            # → dist/yukti.cyr       (full userland, ~7.0k lines)
+cyrius distlib core       # → dist/yukti-core.cyr  (kernel-safe, ~460 lines)
 ```
 
 Profiles are declared in `cyrius.cyml`:
@@ -160,18 +179,18 @@ cyrius fmt <file> --check            # drift check: diagnostic + exit 1, non-des
 cyrius fmt <file> --dry              # same, plus a "WOULD reformat" summary line
 cyrius fmt <file>                    # REWRITES THE FILE IN PLACE
 cyrius lint <file>                   # static checks; treat warnings as errors
-cyrius vet src/main.cyr              # audit include dependencies
+cyrius vet src/lib.cyr               # audit include deps (lib.cyr, not main.cyr: vet does not recurse)
 cyrius audit                         # project sweep: fmt/lint/docs/tests/bench
 ```
 
 ⚠ **`cyrius fmt <file>` with no flag rewrites the file in place and prints
-nothing.** It did once print the formatted source to stdout; on 6.5.29 it
-does not. Anything that captures its stdout gets an empty string.
+nothing.** It did once print the formatted source to stdout; since 6.5.29
+it does not (re-verified on 6.6.6). Anything that captures its stdout gets an empty string.
 
-Use `--check` for gates. On 6.5.29 it prints the offending file and its
-first differing line, exits 1, and leaves the file untouched; on a clean
-file it is silent and exits 0. Verified both directions during the 2.3.3
-bump. `--dry` is `--check` plus a trailing summary line.
+Use `--check` for gates. It prints the offending file and its first
+differing line, exits 1, and leaves the file untouched; on a clean file it
+is silent and exits 0. Verified both directions during the 2.3.3 bump
+(6.5.29) and again at 2.3.12 (6.6.6). `--dry` is `--check` plus a trailing summary line.
 
 This corrects the pre-2.3.3 guidance here and in CI, which said
 `--check` was "exit-code-only" and told you to diff the no-flag form's
@@ -216,11 +235,14 @@ release yourself.
 - `str_builder` for formatting — avoid temporary allocations.
 - Bump allocator (`alloc`) for long-lived heap data; freelist for
   data with individual lifetimes.
-- Direct syscalls go through stdlib wrappers (`sys_mount`,
-  `sys_umount2`, `sys_read`, …) or `SYS_*` constants (`SYS_IOCTL`,
-  `SYS_SOCKET`, `SYS_PPOLL`) — never bare x86_64 numbers, which are
-  wrong on aarch64 and agnos. Arity mismatches are hard errors
-  since cyrius 6.5.1.
+- Kernel calls go through stdlib wrappers (`sys_read`, `sys_ioctl`,
+  `sys_statfs`, …), the portable `x*` helpers (`xopen`, `xmkdir`,
+  `xlseek`, …), or a `_yk_*` bridge in `src/syscalls.cyr`. Never
+  raw `syscall()`, whether the number is a literal or a `SYS_*`
+  name: both hard-code one target's ABI. The sole exception is
+  `_yk_ppoll`, and CI enforces it (2.3.12). Open flags are spelled
+  as `O_*`, never numbers. Arity mismatches are hard errors since
+  cyrius 6.5.1.
 
 ## Never
 

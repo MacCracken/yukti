@@ -18,7 +18,7 @@ Written in [Cyrius](https://github.com/MacCracken/cyrius) — ported from Rust (
 | **pci** | Kernel-safe PCI class / vendor tables + predicates. Consumed by the AGNOS kernel |
 | **device** | Userland constructors, serializers, sysfs queries over the `core` types |
 | **error** | 16 error kinds, heap-allocated error structs, errno mapping |
-| **syscalls** | Arch-conditional `SYS_*` constants + the `_yk_mount` / `_yk_umount2` / `_yk_mkdir` agnos ABI bridges |
+| **syscalls** | `_yk_*` bridges over the stdlib syscall wrappers: agnos ABI splits (mount, umount2, statfs, lstat, the socket family, ioctl) and the one unwrapped syscall (ppoll) |
 | **event** | `DeviceEvent` pub/sub with function pointer listeners and class-based filtering |
 | **storage** | `mount()` / `unmount()` / `eject()`, filesystem detection (17 types), `/proc/mounts` parsing |
 | **optical** | Tray control, disc TOC reading, DVD Video detection, drive status via ioctl |
@@ -58,7 +58,7 @@ main();
 
 ## Build
 
-Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.5.29 or newer.
+Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.6.6 (the `cyrius.cyml` pin).
 
 ```sh
 # Resolve deps into lib/
@@ -70,7 +70,7 @@ cyrius build src/main.cyr build/yukti
 # Run
 ./build/yukti
 
-# Test (658 assertions)
+# Test (797 assertions)
 cyrius test tests/tcyr/yukti.tcyr
 
 # Benchmark

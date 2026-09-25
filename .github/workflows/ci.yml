@@ -295,25 +295,63 @@ jobs:
           scan "writes to /etc"  '"/etc/'
           scan "writes to /bin"  '"/bin/'
           scan "writes to /sbin" '"/sbin/'
-          # Raw numeric syscall numbers (2.3.2). `syscall(87, path)` is unlink on
-          # x86_64 but timerfd_gettime on aarch64, where the uninitialised second
-          # argument is treated as a pointer the kernel WRITES 32 bytes into. That
-          # silently corrupted the test harness's counters: the aarch64 suite
-          # reported "182 passed, 0 failed" instead of 658, hiding two real
-          # failures. Only a nine-number whitelist (0,1,2,3,9,10,11,60,228) is
-          # renumbered by the backend, and lib/syscalls.cyr documents even that as
-          # macOS-scoped and KNOWN-INCOMPLETE — so no raw number is safe to rely on.
-          # Use the stdlib wrappers (sys_write / sys_exit / xopen / xunlink / …),
-          # which resolve per target at compile time.
-          # Named SYS_* constants are fine and are what this permits.
-          rawsys=$(grep -rEn 'syscall\(\s*[0-9]' src/ programs/ tests/ fuzz/ 2>/dev/null | awk -F: '
-            { line=$0; sub(/^[^:]+:[0-9]+:/,"",line); sub(/^[[:space:]]+/,"",line);
-              if (substr(line,1,1) != "#") print }')
-          if [ -n "$rawsys" ]; then
-            echo "FAIL: raw numeric syscall( — use stdlib wrappers or named SYS_* constants"
-            echo "$rawsys"
+          # No raw syscalls (2.3.12). Every kernel call goes through a stdlib
+          # wrapper (sys_* in lib/syscalls*.cyr, the x* family in lib/io.cyr) or
+          # a _yk_* bridge in src/syscalls.cyr. Those resolve the syscall number
+          # per target at compile time.
+          #
+          # 2.3.2 banned raw NUMBERS: `syscall(87, path)` is unlink on x86_64
+          # but timerfd_gettime on aarch64, which made the aarch64 suite
+          # report "182 passed, 0 failed" instead of 658. 2.3.12 bans the
+          # named form too. A NAMED SYS_* constant hard-codes one target's
+          # ABI just as a number does. yukti's aarch64 `SYS_STATFS = 43` was
+          # the native number, and cycc renumbered it through ESYSXLAT's
+          # x86-compat `accept 43 -> 202` row, so filesystem_usage ran
+          # accept(2) on every ARM host.
+          #
+          # The ONE allowed site is `_yk_ppoll` in src/syscalls.cyr, because
+          # no stdlib peer wraps ppoll. It is matched by file AND spelling,
+          # and it must be found EXACTLY once. A second raw call fails, and a
+          # scan that silently matches nothing fails too instead of passing
+          # vacuously. When the stdlib gains a ppoll wrapper and _yk_ppoll
+          # moves onto it, set `want` to 0.
+          #
+          # Numeric open(2) flags are the same defect one step removed: 577
+          # is O_WRONLY|O_CREAT|O_TRUNC in x86_64/aarch64 bits, but it
+          # decodes differently on Darwin, and agnos maps O_* to AO_* only
+          # through file_open. Spell them as O_* (patra 1.15.0's check).
+          #
+          # Comments are stripped before matching. Known limits: a call split
+          # across lines is not seen, and a `#` inside a string literal hides
+          # the rest of that line.
+          SCAN="src/*.cyr programs/*.cyr tests/tcyr/*.tcyr tests/bcyr/*.bcyr fuzz/*.fcyr"
+          nfiles=$(ls $SCAN | wc -l)
+          [ "$nfiles" -ge 20 ] || { echo "FAIL: raw-syscall scan saw only $nfiles files"; FAIL=1; }
+          rawsys=$(for f in $SCAN; do
+            sed -E 's/#.*$//' "$f" | grep -nE '\bsyscall[[:space:]]*\(' | sed "s|^|$f:|" || true
+          done)
+          allow='^src/syscalls\.cyr:[0-9]+:[[:space:]]*return syscall\(SYS_PPOLL, '
+          want=1
+          allowed=$(echo "$rawsys" | grep -cE "$allow" || true)
+          other=$(echo "$rawsys" | grep -vE "$allow" | grep -v '^$' || true)
+          if [ -n "$other" ]; then
+            echo "FAIL: raw syscall( — call the stdlib wrapper, or bridge it in src/syscalls.cyr"
+            echo "$other"
             FAIL=1
           fi
+          if [ "$allowed" -ne "$want" ]; then
+            echo "FAIL: expected $want raw syscall (_yk_ppoll in src/syscalls.cyr), found $allowed"
+            FAIL=1
+          fi
+          flags=$(for f in $SCAN; do
+            sed -E 's/#.*$//' "$f" | grep -nE '\b(file_open(_r)?|sys_open|xopen)[[:space:]]*\([^,]*,[^,)]*[0-9]' | sed "s|^|$f:|" || true
+          done)
+          if [ -n "$flags" ]; then
+            echo "FAIL: numeric open(2) flags — spell them as O_* symbols"
+            echo "$flags"
+            FAIL=1
+          fi
+          echo "raw syscalls: $allowed at the allowed site (_yk_ppoll, want $want), $(echo "$other" | grep -c . || true) elsewhere, over $nfiles files"
           # Unbounded stack buffers (>= 64KB — force heap review).
           #
           # Two bugs fixed at 2.3.5, both exposed when a comment in

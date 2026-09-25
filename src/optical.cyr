@@ -241,7 +241,7 @@ pub fn toc_total_audio_duration_x100(toc) {
 # ---------------------------------------------------------------------------
 
 fn _open_optical_device(dev_path_cstr): i64 {
-    var fd = sys_open(dev_path_cstr, O_RDONLY | O_NONBLOCK, 0);
+    var fd = xopen(dev_path_cstr, O_RDONLY | O_NONBLOCK);
     if (fd < 0) {
         var errno = 0 - fd;
         if (errno == 13) {
@@ -269,7 +269,7 @@ pub fn open_tray(dev_path_cstr) {
     }
     var fd = fd_r;
 
-    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMEJECT, 0);
+    var ret = _yk_ioctl(fd, IOCTL_CDROMEJECT, 0);
     sys_close(fd);
 
     if (ret < 0) {
@@ -294,7 +294,7 @@ pub fn close_tray(dev_path_cstr) {
     }
     var fd = fd_r;
 
-    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMCLOSETRAY, 0);
+    var ret = _yk_ioctl(fd, IOCTL_CDROMCLOSETRAY, 0);
     sys_close(fd);
 
     if (ret < 0) {
@@ -315,7 +315,7 @@ pub fn drive_status(dev_path_cstr) {
     if (is_ok(fd_r_tag) == 0) { return Err(fd_r); }
     var fd = fd_r;
 
-    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROM_DRIVE_STATUS, 0);
+    var ret = _yk_ioctl(fd, IOCTL_CDROM_DRIVE_STATUS, 0);
     sys_close(fd);
 
     if (ret < 0) {
@@ -377,7 +377,7 @@ pub fn read_toc(dev_path_cstr) {
     var hdr[2];
     store8(&hdr, 0);
     store8(&hdr + 1, 0);
-    var ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCHDR, &hdr);
+    var ret = _yk_ioctl(fd, IOCTL_CDROMREADTOCHDR, &hdr);
     if (ret < 0) {
         sys_close(fd);
         sakshi_span_exit();
@@ -411,7 +411,7 @@ pub fn read_toc(dev_path_cstr) {
         store32(&entry + 4, 0);
         store8(&entry + 8, 0);
 
-        ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &entry);
+        ret = _yk_ioctl(fd, IOCTL_CDROMREADTOCENTRY, &entry);
         if (ret < 0) {
             sys_close(fd);
             sakshi_span_exit();
@@ -433,7 +433,7 @@ pub fn read_toc(dev_path_cstr) {
     store8(&leadout + 2, CDROM_LBA);
     store32(&leadout + 4, 0);
     store8(&leadout + 8, 0);
-    ret = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADTOCENTRY, &leadout);
+    ret = _yk_ioctl(fd, IOCTL_CDROMREADTOCENTRY, &leadout);
     if (ret < 0) {
         sys_close(fd);
         sakshi_span_exit();
@@ -543,7 +543,7 @@ pub fn read_audio_sectors(dev_path_cstr, start_lba, nframes, buf, buflen) {
     store32(&req + 8, nframes);
     store64(&req + 16, buf);
 
-    var rc = syscall(SYS_IOCTL, fd, IOCTL_CDROMREADAUDIO, &req);
+    var rc = _yk_ioctl(fd, IOCTL_CDROMREADAUDIO, &req);
     sys_close(fd);
     if (rc < 0) {
         sakshi_span_exit();

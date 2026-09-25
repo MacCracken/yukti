@@ -5,6 +5,253 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.12] - 2026-09-25
+
+**Cyrius 6.6.2 → 6.6.6, and no raw syscalls.** The deps move with the
+toolchain: sakshi 2.5.1 → 2.5.2 and patra 1.14.1 → 1.14.3, the versions 6.6.6
+folds. Every `syscall(SYS_*, …)` in `src/` now goes through a stdlib wrapper.
+That move fixes `filesystem_usage` on aarch64, which has run accept(2) instead
+of statfs(2) since cyrius 6.2.10.
+
+Verification:
+
+- **Tests:** 797/797 on x86_64, and 797/797 under `qemu-aarch64` (was 789
+  passed, 2 failed, 791 total).
+- **Fuzz and `core_smoke`:** 3/3 fuzz, and `core_smoke` passes, both native and
+  under qemu-aarch64.
+- **Static gates:** lint 0 warnings, 0 untracked deferrals and 0 notes (was 3).
+  fmt clean. vet: 33 deps, 0 untrusted, 0 missing.
+- **Builds:** `src/main.cyr` builds with **0 warnings** for x86_64, aarch64
+  and agnos (was 0 / 1 / 1). The bench, `core_smoke` and all three fuzz
+  harnesses are also warning-free for agnos.
+
+### Fixed — `filesystem_usage` ran accept(2) on every ARM host
+
+`src/syscalls.cyr` declared `SYS_STATFS = 43` for aarch64. 43 is aarch64's
+native statfs number. But cycc reads a syscall number as an x86 number and
+renumbers it through ESYSXLAT, whose x86-compat `accept 43 → 202` row reissued
+the call as **accept(2)**. Traced under `qemu-aarch64 -strace` on the 2.3.11
+source:
+
+```
+accept(6370930,0x00007fab4d70a200,[1937010799]) = -1 errno=14 (Bad address)
+  FAIL: fs usage root ok
+  FAIL: avail > 0
+```
+
+So every aarch64 host answered "statfs failed: errno 14". The suite hid part
+of it:
+
+- `test_filesystem_usage_overflow_guards` wraps its 6 root assertions in
+  `if (is_ok(...))`, so on aarch64 they were skipped. That is why the aarch64
+  run reported 791 total rather than 797.
+- `test_filesystem_usage_nonexistent` passed for the wrong reason: accept
+  failed too.
+
+This is the "`filesystem_usage()` returns EFAULT on aarch64" item that has been
+held as hardware-bound since 2.3.2, with qemu-user's statfs emulation as the
+suspect. It was not qemu. cyrius root-caused it from its side (CHANGELOG
+[6.6.5], "`lib/yukti.cyr` declares `SYS_STATFS = 43`"). 6.6.6 names statfs in
+both Linux peers: x86 137, renumbered 137 → 43 on aarch64.
+
+After the fix, the same run traces `statfs(…) = 0` for `/` and
+`statfs(…) = -1 errno=2` for the nonexistent path, with no `accept`. All 797
+assertions run and pass. **Verified under qemu-aarch64, not on real ARM
+hardware.**
+
+`filesystem_usage` also stopped hardcoding the x86_64-Linux layout. It read
+`var buf[120]` with `load64(&buf + 8/16/24/32)`, and now reads
+`var buf[STATFS_BUFSZ]` through `statfs_bsize(&buf)`, `STATFS_BLOCKS`,
+`STATFS_BFREE` and `STATFS_BAVAIL`. On Linux the offsets are the same. They
+differ elsewhere:
+
+- Darwin's `statfs64` is 2168 bytes, with a 32-bit `f_bsize` at 0.
+- agnos fills a frozen 32-byte record with `f_bsize` at 0.
+
+The 2.3.8 FUSE sanity guards are unchanged; only the reads changed.
+
+### Changed — every kernel call goes through a stdlib wrapper
+
+19 raw call sites in `src/`:
+
+| was | now | sites |
+|---|---|---:|
+| `syscall(SYS_IOCTL, …)` | `_yk_ioctl` → `sys_ioctl` | 8 (`optical.cyr` ×7, `storage_eject`) |
+| `syscall(SYS_SOCKET, …)` | `_yk_socket` → `sys_socket` | 2 (udev monitor, `network_probe_host`) |
+| `syscall(SYS_CONNECT, …)` | `_yk_connect` → `sys_connect` | 1 |
+| `syscall(SYS_BIND, …)` | `_yk_bind` → `sys_bind` | 1 |
+| `syscall(SYS_SETSOCKOPT, …)` | `_yk_setsockopt` → `sys_setsockopt` | 1 |
+| `syscall(SYS_RECVFROM, …)` | `_yk_recvfrom` → `sys_recvfrom` | 1 |
+| `syscall(SYS_PPOLL, …)` | `_yk_ppoll` (still raw inside; see below) | 1 |
+| `syscall(SYS_LSEEK, …)` | `xlseek` | 2 (`partition.cyr`) |
+| `syscall(SYS_STATFS, …)` | `_yk_statfs` → `sys_statfs` | 1 |
+| `syscall(SYS_NEWFSTATAT, 0 - 100, p, &b, 256)` | `_yk_lstat` → `sys_fstatat(AT_FDCWD, p, &b, AT_SYMLINK_NOFOLLOW)` | 1 |
+
+yukti's own `SYS_*` declarations are gone:
+
+- The x86_64 and aarch64 `enum YkSyscalls` blocks. The stdlib now names each
+  of those syscalls per target.
+- The agnos `YkSyscallsAgnos` band of fake numbers 9001–9010. Its statfs stub,
+  9009, shadowed agnos's real 103.
+
+The one survivor is x86_64's ppoll number, 271 (see below).
+
+**The agnos half.** The agnos stdlib peer is standalone. It wraps none of
+socket, bind, connect, setsockopt, recvfrom, ioctl or fstatat, and its statfs
+and lstat take an explicit path length. So each of these gets a `_yk_*` bridge
+in `src/syscalls.cyr`, following `_yk_mount` / `_yk_umount2` (2.3.0 / 2.3.1):
+
+- **agnos has the real syscall:** the bridge calls through. `_yk_statfs` →
+  statfs #103, and `_yk_lstat` → lstat #102.
+- **agnos lacks the call:** the bridge fails closed with -ENOSYS. That covers
+  `_yk_ioctl`, `_yk_socket`, `_yk_bind`, `_yk_connect`, `_yk_setsockopt`,
+  `_yk_recvfrom` and `_yk_ppoll`.
+
+agnos binaries cannot run here, so this was checked by disassembly:
+
+- A probe that calls `_yk_statfs` has exactly one more `mov $0x67,%eax` (103)
+  than a probe that calls neither bridge. The extra site is inside a 3-argument
+  (path, len, buf) call.
+- A probe that calls `_yk_lstat` has exactly one more `mov $0x66,%eax` (102).
+- The 2.3.11 agnos binary carries `mov $0x2331` (9009), `$0x2332` (9010),
+  `$0x2329` (9001) and `$0x232a` (9002). The 2.3.12 one carries none of them.
+
+**Compiled and disassembled for agnos, not run there.**
+
+**x86_64 issues the same syscalls as before.** Each stdlib wrapper uses the
+number the raw call already issued: lseek 8, ioctl 16, socket 41, connect 42,
+recvfrom 45, bind 49, setsockopt 54, statfs 137 and newfstatat 262.
+
+The TOCTOU guard now calls `sys_fstatat` with the named per-target
+`AT_FDCWD` / `AT_SYMLINK_NOFOLLOW`. It deliberately does not use `sys_lstat`:
+on x86_64 that issues lstat(6), which could trip a seccomp allowlist that
+admits only newfstatat. `var stbuf[144]` is now `var stbuf[STAT_BUFSZ]`, which
+is 144 on Linux and 48 for agnos's lstat.
+
+A full x86_64 trace could not be taken: qemu-x86_64's TCG CPU never exposes
+an invariant TSC, and sakshi's clock init refuses to start without one. The
+partial trace up to that point shows the expected `statfs`, `mkdir` and `open`
+calls.
+
+**`_yk_ppoll` is the one raw `syscall()` left in yukti.** Neither Linux peer
+wraps ppoll:
+
+- The aarch64 peer names it 1073, a private alias that ESYSXLAT routes to
+  native 73. Native 73 itself cannot be issued, because the x86-compat
+  `flock 73 → 32` row claims it.
+- The x86_64 peer does not name it at all, so `src/syscalls.cyr` keeps 271 for
+  x86_64 Linux only.
+
+**Also moved onto the portable helpers:**
+
+- **`_yk_mkdir` is deleted.** lib/io.cyr's `xmkdir` (cyrius 6.5.7) does
+  exactly what it did: it computes the length on agnos and passes the mode
+  through elsewhere. `storage_mount` and `network_mount` call it directly.
+  `test_yk_mkdir_creates_directory` is now `test_xmkdir_creates_directory`,
+  with the same 5 assertions.
+- **All 6 `sys_open` sites in `src/` → `xopen` / `file_open`.** Three of them
+  passed numeric flags (`0`, `1`, `577`). Those were cyrlint's three "raw
+  sys_open w/ literal flags" notes, now 0, and they close the roadmap item for
+  them. On Linux it is the same `open(2)`: `xopen(p, f)` is
+  `sys_open(p, f, 0644)`, and the mode is ignored without `O_CREAT`. The udev
+  rule writer keeps its explicit mode with
+  `file_open(p, O_WRONLY | O_CREAT | O_TRUNC, 420)`.
+- **The fuzz harness spells its open flags as `O_*`.**
+  `fuzz/fuzz_partition_table.fcyr` had `xopen(_tmp_path, 577)`.
+- **Stale comments that quoted raw numbers are corrected.** They were:
+  - `SYS_UNLINK = 87` above an `xunlink` call (87 is timerfd_gettime on
+    aarch64).
+  - `SYS_STAT=4` above `query_permissions`.
+  - "via SYS_MOUNT (165)" and "via SYS_UMOUNT2 (166)".
+
+### Changed — toolchain 6.6.2 → 6.6.6; sakshi 2.5.2, patra 1.14.3
+
+The dep tags track what the pinned toolchain folds. 6.6.6 bundles sakshi 2.5.2
+and patra 1.14.3, so those are the pins; newer local tags are folded into the
+next cyrius release.
+
+- **`lib/`** was re-resolved from clean. All 42 files are byte-identical to
+  the 6.6.6 release tarball, which also ships `bin/cycc_aarch64` for the CI
+  aarch64 step.
+- **`cyrius.lock`** goes from 41 to 42 entries (+`alloc_cx.cyr`), 20 hashes
+  change, and it now carries the `cyrius 6.6.6` stamp line.
+- **Lock gate:** on a fresh copy, `cyrius deps --no-lock` then
+  `cyrius deps --verify` passes 42/42 and leaves the lock untouched. With one
+  vendored file tampered, `--verify` fails with exit 1.
+
+Two 6.6.x fixes reach yukti with no source change here:
+
+- patra 1.14.3's WAL `O_NOFOLLOW` fix. The old flag was the x86_64 bit, so on
+  aarch64 a symlink at the WAL path was followed and its target truncated.
+  `device_db` inherits the fix.
+- The aarch64 build's `lib/io.cyr:442: raw syscall 32` warning, from the
+  stdlib's `xflock`, is gone as of 6.6.4.
+
+### CI — the raw-syscall gate now bans named syscalls too
+
+The 2.3.2 gate rejected only `syscall(<digit>`. It now rejects any `syscall(`
+in `src/`, `programs/`, `tests/` and `fuzz/`, with comments stripped. The one
+exception is `_yk_ppoll`'s line. It is matched by file and spelling and must
+appear **exactly once**, so a scan that silently matches nothing fails instead
+of passing. The gate also rejects numeric flags passed to `xopen` /
+`file_open` / `sys_open`, the check patra 1.15.0 added.
+
+Mutation-tested with nine cases:
+
+- **Fails, as it should:**
+  - a named raw call in `src/syscalls.cyr`
+  - `syscall(60, 0)` in a fuzz harness
+  - `syscall(SYS_GETPID)` with a trailing comment in the tests
+  - `xopen(p, 0)`
+  - `file_open(p, O_WRONLY | 64 | 512, 420)`
+  - the allowed site deleted
+  - a scan that sees only 5 files
+- **Passes, as it should:** the clean tree, and `syscall(SYS_GETPID)` inside a
+  comment.
+
+### Performance
+
+Binary sizes, as 2.3.11 on 6.6.2 → 2.3.11 on 6.6.6 → **2.3.12**:
+
+| target | 2.3.11 / 6.6.2 | 2.3.11 / 6.6.6 | 2.3.12 |
+|---|---:|---:|---:|
+| x86_64 (`CYRIUS_DCE=1`) | 161,128 B | 161,312 B | **161,256 B** |
+| aarch64 | 742,600 B | 808,288 B | **808,240 B** |
+| agnos | 152,632 B | 152,688 B | **152,608 B** |
+
+The aarch64 +65.7 KB is the toolchain alone. 6.6.5 grew the ESYSXLAT table to
+58 rows and inlines it at every aarch64 syscall site.
+
+**Benchmarks are flat within code-placement noise.** Three builds were
+interleaved over 3 rounds: 2.3.11 on 6.6.2, 2.3.11 on 6.6.6, and 2.3.12. The
+median |Δ| between the last two is 3.1%. The largest move is
+`storage/filesystem_parse_case`, 44 → 58 ns. No benchmarked function changed,
+so this was tested rather than assumed. Three builds that only append an
+**unused** function to `src/syscalls.cyr` moved the same benchmarks as far or
+further:
+
+| benchmark | 2.3.12 | + unused fn (3 builds) |
+|---|---:|---|
+| `storage/filesystem_parse_case` | 58 ns | 60 / 45 / 44 ns |
+| `optical/detect_disc_type_bluray` | 566 ns | 520 / 515 / 510 ns |
+| `udev/extract_caps_optical` | 434 ns | 514 / 543 / 602 ns |
+
+`src/syscalls.cyr` heads the include chain, so any change there shifts every
+later function's address. No benchmark does more work.
+
+`docs/benchmarks/history.csv` is not appended here, because
+`scripts/bench-history.sh` labels rows with `HEAD`. Run it after this commit.
+
+### Not verified
+
+- **Real ARM hardware (pi).** Everything aarch64 above ran under qemu-aarch64.
+- **agnos runtime.** Compiled and disassembled only.
+- **macOS.** The Mach-O builds compile but have not been run. They still warn
+  about two pre-existing items, both recorded in the roadmap:
+  - The ppoll number is unrouted on Darwin.
+  - `storage.cyr`'s `enum EjectConst` re-declares `O_NONBLOCK = 2048`, which
+    is Darwin's `O_EXCL`.
+
 ## [2.3.11] - 2026-09-12
 
 ### Changed

@@ -4,8 +4,8 @@
 
 ```
 yukti (Cyrius)
-├── syscalls.cyr    — Arch-conditional SYS_* constants + shims for socket family
-│                     and statfs/newfstatat, agnos mount/umount2/mkdir bridges
+├── syscalls.cyr    — _yk_* bridges over the stdlib syscall wrappers (agnos
+│                     ABI splits + fail-closed arms) and the one raw call, ppoll
 ├── error.cyr       — 16 error kinds, heap-allocated error structs, errno mapping
 ├── core.cyr        — Kernel-safe types: DeviceClass (10), DeviceState (6),
 │                     DeviceCapabilities (bitflags), DeviceInfo (168 bytes,
@@ -103,19 +103,40 @@ validate_mount_point() → mkdir(83) → mount(165, source, target, fstype, flag
 
 ## Syscall Map
 
-| Operation | Syscall | Number |
-|-----------|---------|--------|
-| mount | SYS_MOUNT | 165 |
-| unmount | SYS_UMOUNT2 | 166 |
-| ioctl (optical) | SYS_IOCTL | 16 |
-| socket (netlink) | SYS_SOCKET | 41 |
-| bind | SYS_BIND | 49 |
-| ppoll | SYS_PPOLL | 271 |
-| recv | SYS_RECVFROM | 45 |
-| stat (permissions) | SYS_STAT | 4 |
-| statfs (usage) | SYS_STATFS | 137 |
-| mkdir | SYS_MKDIR | 83 |
-| rmdir | SYS_RMDIR | 84 |
-| open/close/read/write | 2/3/0/1 | — |
-| clock_gettime | 228 | — |
-| getdents64 (dir_list) | 217 | — |
+yukti issues no raw syscall numbers. Every kernel call goes through one of
+three routes, and each resolves the number per target at compile time:
+
+- a stdlib `sys_*` wrapper (`lib/syscalls*.cyr`);
+- a portable `x*` / `file_*` helper (`lib/io.cyr`);
+- a `_yk_*` bridge in `src/syscalls.cyr`, used where agnos lacks the
+  wrapper or has a different ABI.
+
+The one exception is `_yk_ppoll`: no stdlib peer wraps ppoll, so it is the
+single `syscall()` in the tree. CI allows it there and nowhere else.
+
+The x86_64 column below is for auditing (strace, seccomp allowlists). On
+aarch64, cycc renumbers each call through ESYSXLAT.
+
+| Operation | yukti calls | Linux wrapper | x86_64 | agnos |
+|-----------|-------------|---------------|--------|-------|
+| mount | `_yk_mount` | `sys_mount` | 165 | -ENOSYS (agnos `sys_mount` is a 0-arg stub) |
+| unmount | `_yk_umount2` | `sys_umount2` | 166 | -ENOSYS |
+| ioctl (optical, eject) | `_yk_ioctl` | `sys_ioctl` | 16 | -ENOSYS |
+| socket (netlink, TCP probe) | `_yk_socket` | `sys_socket` | 41 | -ENOSYS |
+| connect (TCP probe) | `_yk_connect` | `sys_connect` | 42 | -ENOSYS |
+| bind (netlink) | `_yk_bind` | `sys_bind` | 49 | -ENOSYS |
+| setsockopt (netlink) | `_yk_setsockopt` | `sys_setsockopt` | 54 | -ENOSYS |
+| recvfrom (netlink) | `_yk_recvfrom` | `sys_recvfrom` | 45 | -ENOSYS |
+| ppoll (netlink) | `_yk_ppoll` | — (raw; see above) | 271 | -ENOSYS |
+| statfs (usage) | `_yk_statfs` | `sys_statfs` | 137 | statfs #103 |
+| lstat (mount TOCTOU guard) | `_yk_lstat` | `sys_fstatat(AT_FDCWD, …, AT_SYMLINK_NOFOLLOW)` | 262 | lstat #102 |
+| stat (permissions) | `xstat` | `sys_stat` | 4 | stat #33 |
+| mkdir / rmdir / unlink | `xmkdir` / `xrmdir` / `xunlink` | `sys_mkdir` / `sys_rmdir` / `sys_unlink` | 83 / 84 / 87 | #9 / #10 / #30 |
+| lseek (partition tables) | `xlseek` | — | 8 | #58 |
+| open | `xopen` / `file_open` | `sys_open` | 2 | #7 (O_* → AO_*) |
+| close / read / write | `sys_close` / `sys_read` / `sys_write` | same | 3 / 0 / 1 | #6 / #5 / #1 |
+| clock_gettime | `clock_epoch_secs` (`lib/chrono.cyr`) | — | 228 | time_unix #46 |
+| getdents64 | `dir_list` (`lib/fs.cyr`) | — | 217 | getdents #29 |
+
+On agnos, the `x*` helpers and the statfs / lstat bridges pass an explicit
+path length, because agnos path syscalls are `(path, pathlen, …)`.

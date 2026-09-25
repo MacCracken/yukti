@@ -162,9 +162,9 @@ pub fn mbr_type_to_str(type_id) {
 # ---------------------------------------------------------------------------
 
 fn _read_sector(fd, lba, buf): i64 {
-    # lseek to lba * 512: SYS_LSEEK = 8, SEEK_SET = 0
+    # lseek to lba * 512 (whence 0 = SEEK_SET)
     var offset = lba * SECTOR_SIZE;
-    var r = syscall(SYS_LSEEK, fd, offset, 0);
+    var r = xlseek(fd, offset, 0);
     if (r < 0) { return r; }
     # read 512 bytes
     return sys_read(fd, buf, SECTOR_SIZE);
@@ -172,7 +172,7 @@ fn _read_sector(fd, lba, buf): i64 {
 
 # Read N bytes at an exact byte offset
 fn _read_at(fd, byte_offset, buf, count): i64 {
-    var r = syscall(SYS_LSEEK, fd, byte_offset, 0);
+    var r = xlseek(fd, byte_offset, 0);
     if (r < 0) { return r; }
     return sys_read(fd, buf, count);
 }
@@ -464,7 +464,7 @@ fn _parse_gpt_entries(fd, entry_start_lba, num_entries, entry_size): i64 {
 pub fn read_partition_table(dev_path_cstr) {
     sakshi_span_enter("read_pt", 7);
 
-    var fd = sys_open(dev_path_cstr, O_RDONLY, 0);
+    var fd = xopen(dev_path_cstr, O_RDONLY);
     if (fd < 0) {
         sakshi_span_exit();
         return err_io(str_from(dev_path_cstr));

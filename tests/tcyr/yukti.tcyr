@@ -781,6 +781,22 @@ fn test_filesystem_usage_nonexistent() {
     return 0;
 }
 
+# 2.3.13: yukti's open(2) and mount(2) flags carry private `_YK_` names, so
+# they can no longer redefine the stdlib peers' O_* / MS_* globals. On Linux
+# the values must still be the peer's; other targets have no Linux peer to
+# compare against (and Darwin's O_NONBLOCK is 4, which is the point).
+fn test_private_flags_match_linux_peer() {
+    #ifdef CYRIUS_TARGET_LINUX
+    assert_eq(_YK_O_RDONLY, O_RDONLY, "_YK_O_RDONLY == peer");
+    assert_eq(_YK_O_NONBLOCK, O_NONBLOCK, "_YK_O_NONBLOCK == peer");
+    assert_eq(_YK_MS_RDONLY, MS_RDONLY, "_YK_MS_RDONLY == peer");
+    assert_eq(_YK_MS_NOSUID, MS_NOSUID, "_YK_MS_NOSUID == peer");
+    assert_eq(_YK_MS_NODEV, MS_NODEV, "_YK_MS_NODEV == peer");
+    assert_eq(_YK_MS_NOEXEC, MS_NOEXEC, "_YK_MS_NOEXEC == peer");
+    #endif
+    return 0;
+}
+
 # ===================================================================
 # Optical tests (35 in Rust — skip hardware tests)
 # ===================================================================
@@ -2249,6 +2265,7 @@ fn main() {
     test_mount_options_new();
     test_filesystem_usage_root();
     test_filesystem_usage_nonexistent();
+    test_private_flags_match_linux_peer();
 
     # Optical tests (12)
     test_disc_type_audio();

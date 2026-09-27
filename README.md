@@ -70,7 +70,7 @@ cyrius build src/main.cyr build/yukti
 # Run
 ./build/yukti
 
-# Test (797 assertions)
+# Test (803 assertions)
 cyrius test tests/tcyr/yukti.tcyr
 
 # Benchmark

@@ -5,6 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.13] - 2026-09-27
+
+**yukti stops redeclaring stdlib names.** Every enum member and top-level
+`var` in Cyrius is a program-wide global, and the last definition wins. yukti
+declared eight names that the stdlib also declares, so it changed their values
+for every program that included it. They now have private `_YK_` names. The
+toolchain stays on cyrius 6.6.6, and 2.3.12's aarch64 statfs fix is carried
+unchanged. cyrius 6.6.6 bundles 2.3.11, so the cyrius release that folds this
+one is the first to ship that fix.
+
+Verification:
+
+- **Tests:** 803/803 on x86_64, and 803/803 under `qemu-aarch64` (was 797; the
+  6 new assertions are listed below).
+- **Fuzz and `core_smoke`:** 3/3 fuzz, and `core_smoke` passes, both native and
+  under qemu-aarch64.
+- **Static gates:** lint 0 warnings and 0 untracked deferrals, fmt clean, vet
+  33 deps with 0 untrusted and 0 missing. The raw-syscall scan finds 1 call,
+  at the allowed site.
+- **Bundles:** a second run of `cyrius distlib` and `cyrius distlib core`
+  regenerates both bundles byte-identically. Both `.deps` sidecars are
+  unchanged (18 and 1 leaves).
+  - A probe that takes the address of all 322 `pub fn` in `dist/yukti.cyr`
+    compiles for x86_64, aarch64, both Mach-O targets, and agnos. The agnos
+    probe leaves out the Linux-only `device_db` surface.
+  - `dist/yukti-core.cyr` compiles for all six targets. It runs on x86_64,
+    under qemu-aarch64 and under wine.
+- **Mach-O:** neither build warns `duplicate symbol 'O_NONBLOCK' redefined
+  with conflicting value` any more. The ppoll warning is still there (see
+  the roadmap).
+
+### Fixed — eight stdlib names redeclared program-wide
+
+| was | now | stdlib declares it in |
+|---|---|---|
+| `O_RDONLY = 0` (`enum EjectConst`) | `_YK_O_RDONLY` | every peer; `io.cyr` on agnos |
+| `O_NONBLOCK = 2048` (`enum EjectConst`) | `_YK_O_NONBLOCK` | the Linux and macOS peers |
+| `MS_RDONLY` / `MS_NOSUID` / `MS_NODEV` / `MS_NOEXEC` (`enum MountFlag`) | `_YK_MS_*` | both Linux peers |
+| `SOCK_DGRAM = 2` (`enum NetlinkConst`) | `_YK_SOCK_DGRAM` | `net.cyr` |
+| `SOL_SOCKET = 1` (`enum NetlinkConst`) | `_YK_SOL_SOCKET` | `net.cyr` |
+
+What the old names did:
+
+- **Darwin.** `O_NONBLOCK` is 4 there, and 2048 is Darwin's `O_EXCL`. A
+  Mach-O build that included yukti turned every `O_NONBLOCK` in the program
+  into `O_EXCL`, stdlib code included. `SOL_SOCKET` had the same shape: when
+  yukti came after `net.cyr`, its Linux value 1 replaced `net.cyr`'s Darwin
+  0xFFFF, so `net`'s `setsockopt` calls passed the wrong level.
+- **Windows and agnos.** Neither peer declares `O_NONBLOCK`, so yukti
+  supplied one to other libraries. The same is true of `MS_*` on every
+  non-Linux target.
+- **Linux.** The values agree, so nothing changed at runtime.
+
+`_YK_O_NONBLOCK` now follows the target. It is 4 on Darwin and 2048
+everywhere else, which is Linux's value on both x86_64 and aarch64 and the
+value every target received before. It moved to `src/syscalls.cyr`, the first
+module in the chain, next to the other per-target definitions.
+
+`enum NetlinkConst` was renamed as a whole: `_YK_AF_NETLINK`,
+`_YK_SOCK_CLOEXEC`, `_YK_NETLINK_KOBJECT_UEVENT`, `_YK_SO_RCVBUF` and
+`_YK_RECV_BUF_SIZE`. Its other names are just as likely to be added to the
+stdlib.
+
+No public API changed. Every renamed constant was used only inside yukti.
+One consumer did rely on a renamed name by accident: **vani 1.2.6** reads
+`O_NONBLOCK` in `_audio_open_pcm`, and on Windows only yukti declared it.
+That build already failed on `SYS_FCNTL`, and it now also reports
+`O_NONBLOCK`. vani 1.2.5, the version cyrius 6.6.6 bundles, does not use it,
+and builds the same for Windows before and after this change.
+
+### Added
+
+- **Test `test_private_flags_match_linux_peer`** (6 assertions). On Linux,
+  `_YK_O_RDONLY`, `_YK_O_NONBLOCK` and the four `_YK_MS_*` must equal the
+  peer's values. Setting `_YK_O_NONBLOCK` to 2049 makes it fail.
+- **CI gate "No stdlib names redeclared"** (build job). No enum member or
+  top-level `var` in `src/` may take a name that the installed stdlib
+  declares anywhere: every platform peer and every fold, not just `./lib`.
+  - It must see at least 15 source files and 50 stdlib files, so it cannot
+    pass vacuously. Run on the 2.3.12 source, it fails with exactly the 8
+    names above.
+  - `PCI_VENDOR_AMD` is allowed. It is public API in the kernel-safe core
+    profile. mabda declares its own `PCI_VENDOR_AMD = 0x1002`, which is
+    ATI's id; yukti uses 0x1022 and names 0x1002 `PCI_VENDOR_ATI`. A program
+    that includes both gets one value for both libraries. The rename belongs
+    in mabda.
+  - `SYS_PPOLL` is allowed. yukti declares it only for x86_64 Linux, where no
+    peer names it, and the aarch64 peer's 1073 is never in the same build.
+
+### Changed
+
+- `cyrius.lock` gains the `commit … patra 1.14.3` pin line that `cyrius deps`
+  writes. The 2.3.12 lock was missing it.
+
 ## [2.3.12] - 2026-09-25
 
 **Cyrius 6.6.2 → 6.6.6, and no raw syscalls.** The deps move with the

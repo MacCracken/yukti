@@ -237,11 +237,11 @@ pub fn toc_total_audio_duration_x100(toc) {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: open optical device with O_RDONLY | O_NONBLOCK
+# Helper: open optical device read-only and non-blocking
 # ---------------------------------------------------------------------------
 
 fn _open_optical_device(dev_path_cstr): i64 {
-    var fd = xopen(dev_path_cstr, O_RDONLY | O_NONBLOCK);
+    var fd = xopen(dev_path_cstr, _YK_O_RDONLY | _YK_O_NONBLOCK);
     if (fd < 0) {
         var errno = 0 - fd;
         if (errno == 13) {

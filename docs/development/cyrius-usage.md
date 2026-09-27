@@ -70,7 +70,7 @@ in arch-conditional `enum YkSyscalls` blocks in `src/syscalls.cyr`.
 
 (The yukti-local `sys_stat` shim was dropped at the 6.0.1 bump;
 the stdlib ships `sys_stat` on x86_64 too now.) The aarch64
-cross-build is clean, and the tcyr suite passes 797/797 under
+cross-build is clean, and the tcyr suite passes 803/803 under
 `qemu-aarch64`. The remaining held aarch64 thread is
 hardware-bound — the full-target retest on real Cortex-A72 has
 not been re-run since the 2.1.4 migration (see
@@ -129,7 +129,7 @@ toolchain install.
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 797 assertions, must be 0 failures
+cyrius test  tests/tcyr/yukti.tcyr        # 803 assertions, must be 0 failures
 cyrius bench tests/bcyr/yukti.bcyr        # 46 benchmarks (batch timing)
 cyrius build fuzz/fuzz_parse_uevent.fcyr    build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent

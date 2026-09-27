@@ -1,4 +1,5 @@
 commit	119698f783991114ab9561f4a9991231b8049da3	sakshi	https://github.com/MacCracken/sakshi.git	2.5.2
+commit	b9d3cf8c9e8a6ff14cf169c2f1ce336113beef5a	patra	https://github.com/MacCracken/patra.git	1.14.3
 417031acfb92b8f018315ebf375a410c7aecafecd1175c2e691097bb3373a0ee  lib/alloc.cyr
 69e92cc4b67f1a936f94c92ce8a4c66673758b84dba385e96fbeaa46fa692b4c  lib/alloc_agnos.cyr
 c3b7f80d39f39610f44bebf34ba8f31c82eb85b1a7b7ff5327ef5a81e4945889  lib/alloc_cx.cyr

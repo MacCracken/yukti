@@ -73,6 +73,63 @@ jobs:
       - name: Verify dep hashes
         run: cyrius deps --verify
 
+      - name: No stdlib names redeclared
+        # 2.3.13. Every enum member and top-level `var` is a program-wide
+        # global, and the last definition wins. `enum EjectConst` declared
+        # plain O_RDONLY / O_NONBLOCK = 2048: on Darwin that turned every
+        # O_NONBLOCK in the program into O_EXCL, and on Windows it handed vani
+        # an O_NONBLOCK the peer never declared. MS_* and SOCK_DGRAM /
+        # SOL_SOCKET had the same shape (net.cyr's Darwin SOL_SOCKET is
+        # 0xFFFF). Private constants take a `_YK_` prefix instead.
+        #
+        # Checked against the WHOLE installed stdlib (every platform peer and
+        # every fold), not ./lib, which holds only yukti's own deps. Two
+        # names are allowed, each for a stated reason:
+        #   - PCI_VENDOR_AMD: public API (the core profile, consumed by the
+        #     agnos kernel). mabda declares its own with 0x1002, ATI's id,
+        #     which yukti names PCI_VENDOR_ATI. The fix belongs in mabda.
+        #   - SYS_PPOLL: declared only for x86_64 Linux, where no peer names
+        #     it. The aarch64 peer's 1073 is never in the same build.
+        # The scan must find the full source set, so it cannot pass vacuously.
+        run: |
+          python3 - "$HOME/.cyrius/versions/$CYRIUS_VERSION/lib" <<'PYEOF'
+          import glob, os, re, sys
+          def names(path):
+              out, inenum = {}, False
+              for i, l in enumerate(open(path, errors='replace').read().split('\n'), 1):
+                  c = re.sub(r'#.*', '', l)
+                  if re.match(r'^\s*enum\s+\w+\s*\{', c):
+                      inenum = True
+                  if inenum:
+                      for m in re.finditer(r'\b([A-Za-z_]\w*)\s*=\s*[^;]+;', c):
+                          out.setdefault(m.group(1), []).append(i)
+                      if '}' in c:
+                          inenum = False
+                      continue
+                  m = re.match(r'^(?:pub\s+|public\s+|private\s+)?var\s+([A-Za-z_]\w*)', c)
+                  if m:
+                      out.setdefault(m.group(1), []).append(i)
+              return out
+          src = sorted(glob.glob('src/*.cyr'))
+          peers = [p for p in sorted(glob.glob(os.path.join(sys.argv[1], '*.cyr')))
+                   if not os.path.basename(p).startswith('yukti')]
+          if len(src) < 15 or len(peers) < 50:
+              sys.exit(f"FAIL: scan saw {len(src)} src files and {len(peers)} stdlib files")
+          stdlib = {}
+          for p in peers:
+              for k in names(p):
+                  stdlib.setdefault(k, set()).add(os.path.basename(p))
+          allow = {'PCI_VENDOR_AMD', 'SYS_PPOLL'}
+          bad = 0
+          for p in src:
+              for k, lines in names(p).items():
+                  if k in stdlib and k not in allow:
+                      print(f"FAIL: {p}:{lines[0]} redeclares {k} (stdlib: {', '.join(sorted(stdlib[k]))})")
+                      bad += 1
+          print(f"stdlib-name scan: {len(src)} src files against {len(peers)} stdlib files, {bad} redeclared")
+          sys.exit(1 if bad else 0)
+          PYEOF
+
       - name: Lint
         # Auto-discover so new modules are covered without editing CI.
         # Treat any warning as a failure (fail on any cyrlint "  warn " line).

@@ -23,13 +23,11 @@ What is left needs hardware or a macOS host:
 - [ ] **Run it on ecb (macOS-arm64).** The raw 8/16/24/32 offsets that
       broke Darwin are gone, but no yukti build has ever run on macOS.
       Both Mach-O builds compile (`CYRIUS_MACHO_ARM=1 cyrius build
-      --aarch64`, `CYRIUS_MACHO=1 cyrius build`) and still warn about two
-      pre-existing items:
-      - The `O_NONBLOCK` shadow under "Hardening".
-      - The ppoll number, which is unrouted on Darwin (1073 on arm64,
-        271 on x86_64). The udev netlink monitor is Linux-only anyway;
-        a stdlib ppoll wrapper would route or decline it (see
-        "Upstream").
+      --aarch64`, `CYRIUS_MACHO=1 cyrius build`). One yukti warning is
+      left: the ppoll number, which is unrouted on Darwin (1073 on arm64,
+      271 on x86_64). The udev netlink monitor is Linux-only anyway; a
+      stdlib ppoll wrapper would route or decline it (see "Upstream").
+      2.3.13 removed the other one, the `O_NONBLOCK` redefinition.
 - [ ] **agnos: run the statfs / lstat bridges on a real kernel.**
       Disassembly shows `_yk_statfs` reaching statfs #103 and `_yk_lstat`
       reaching lstat #102, and the 9001–9010 stub band is gone. Neither has
@@ -137,20 +135,6 @@ ownership questions it deliberately did NOT settle:
       matters for exactly the long-running consumers above. Recorded so the
       lost guarantee is a known constraint — verify before any nested or
       threaded enumeration lands.
-- [ ] **`enum EjectConst` re-declares the stdlib's `O_RDONLY` and
-      `O_NONBLOCK`** (`src/storage.cyr`), with Linux values.
-      - **Linux:** harmless, because the values agree.
-      - **Darwin:** `O_NONBLOCK` is 4, and 2048 is Darwin's `O_EXCL`. Last
-        definition wins program-wide, so on a Mach-O build every
-        `O_NONBLOCK` (stdlib code included) becomes `O_EXCL`. Both Mach-O
-        builds warn at this line.
-
-      This is the same shadowing class as the `SYS_STATFS` copies 2.3.12
-      removed. The fix is to drop both names from the enum. agnos needs care:
-      its neutral `O_*` set in `lib/io.cyr` has no `O_NONBLOCK`, so either
-      keep an agnos-only definition or get one added upstream (see
-      "Upstream").
-
 ### Structural / test quality
 
 - [ ] **Adopt `defer { sakshi_span_exit(); }`.** Verified to run on every
@@ -223,9 +207,7 @@ ownership questions it deliberately did NOT settle:
       `sys_fstatat`. These are the same -ENOSYS stubs 6.6.5 / 6.6.6 gave
       agnos for `sys_sendto`, `sys_ftruncate` and `sys_fstatfs`. Until then
       each one needs a fail-closed `_yk_*` bridge. With the stubs, the call
-      sites could call the wrappers directly. Also ask for `O_NONBLOCK` in
-      agnos's neutral `O_*` set in `lib/io.cyr` (see the `EjectConst` item
-      above).
+      sites could call the wrappers directly.
 
 ## Resolved in 2.3.4
 

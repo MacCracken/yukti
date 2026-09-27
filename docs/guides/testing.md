@@ -3,7 +3,7 @@
 ## Running Tests
 
 ```sh
-# Build and run (797 assertions)
+# Build and run (803 assertions)
 cyrius test tests/tcyr/yukti.tcyr
 ```
 
@@ -26,7 +26,7 @@ Expected output:
 === audio parse pcmC0D3p (basic playback) ===
 ... (15 audio groups: PCM parsing, classification, audio history)
 
-797 passed, 0 failed (797 total)
+803 passed, 0 failed (803 total)
 ```
 
 ## Test Coverage by Module

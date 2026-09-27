@@ -402,7 +402,7 @@ enum ProcReadConst {
 }
 
 pub fn read_procfs_text(path_cstr, cap) {
-    var fd = xopen(path_cstr, O_RDONLY);
+    var fd = xopen(path_cstr, _YK_O_RDONLY);
     if (fd < 0) { return 0; }
     var sb = str_builder_new();
     var chunk[4096];
@@ -522,16 +522,18 @@ pub fn validate_mount_point(path_cstr) {
 # parse_mount_flags — convert option strings to mount syscall flags
 # ---------------------------------------------------------------------------
 
+# Private names (2.3.13): plain MS_* are the Linux peers' own globals, and a
+# redeclaration here would override them program-wide.
 enum MountFlag {
-    MS_RDONLY = 1;
-    MS_NOSUID = 2;
-    MS_NODEV = 4;
-    MS_NOEXEC = 8;
+    _YK_MS_RDONLY = 1;
+    _YK_MS_NOSUID = 2;
+    _YK_MS_NODEV = 4;
+    _YK_MS_NOEXEC = 8;
 }
 
 fn _parse_mount_flags(options_str, read_only): i64 {
     var flags = 0;
-    if (read_only) { flags = flags | MS_RDONLY; }
+    if (read_only) { flags = flags | _YK_MS_RDONLY; }
 
     if (options_str == 0) { return flags; }
 
@@ -540,9 +542,9 @@ fn _parse_mount_flags(options_str, read_only): i64 {
     for (var i = 0; i < n; i = i + 1) {
         var opt = vec_get(parts, i);
         var opt_trimmed = str_trim(opt);
-        if (str_eq_cstr(opt_trimmed, "nosuid")) { flags = flags | MS_NOSUID; }
-        if (str_eq_cstr(opt_trimmed, "nodev")) { flags = flags | MS_NODEV; }
-        if (str_eq_cstr(opt_trimmed, "noexec")) { flags = flags | MS_NOEXEC; }
+        if (str_eq_cstr(opt_trimmed, "nosuid")) { flags = flags | _YK_MS_NOSUID; }
+        if (str_eq_cstr(opt_trimmed, "nodev")) { flags = flags | _YK_MS_NODEV; }
+        if (str_eq_cstr(opt_trimmed, "noexec")) { flags = flags | _YK_MS_NOEXEC; }
     }
     return flags;
 }
@@ -725,8 +727,6 @@ pub fn storage_unmount(mount_point_cstr) {
 
 enum EjectConst {
     CDROMEJECT_IOCTL = 0x5309;
-    O_RDONLY = 0;
-    O_NONBLOCK = 2048;
 }
 
 pub fn storage_eject(dev_path_cstr) {
@@ -753,7 +753,7 @@ pub fn storage_eject(dev_path_cstr) {
     # Check if optical drive (starts with "sr")
     if (_yk_starts_with_cstr(dev_name, "sr")) {
         # Optical: open device and CDROMEJECT ioctl
-        var fd = xopen(dev_path_cstr, O_RDONLY | O_NONBLOCK);
+        var fd = xopen(dev_path_cstr, _YK_O_RDONLY | _YK_O_NONBLOCK);
         if (fd < 0) {
             sakshi_span_exit();
             return err_eject_failed(dev_s, str_from("failed to open device"));

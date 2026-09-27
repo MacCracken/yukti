@@ -322,7 +322,7 @@ fn _audio_read_pcm_name(card, device, direction): i64 {
     var path = str_builder_build(sb);
 
     var buf = alloc(2048);
-    var fd = xopen(str_cstr(path), O_RDONLY);
+    var fd = xopen(str_cstr(path), _YK_O_RDONLY);
     if (fd < 0) { return 0; }
     var n = sys_read(fd, buf, 2048);
     sys_close(fd);

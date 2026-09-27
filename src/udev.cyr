@@ -621,14 +621,17 @@ pub fn udev_event_to_device_event(uevent) {
 #  16: filter (vec of DeviceClass values, 0 = no filter)
 # ---------------------------------------------------------------------------
 
+# Private names (2.3.13): plain SOCK_DGRAM / SOL_SOCKET are the stdlib net
+# module's globals, and its Darwin SOL_SOCKET is 0xFFFF, not 1. A redeclaration
+# here would override them program-wide.
 enum NetlinkConst {
-    AF_NETLINK = 16;
-    SOCK_DGRAM = 2;
-    SOCK_CLOEXEC = 524288;
-    NETLINK_KOBJECT_UEVENT = 15;
-    SOL_SOCKET = 1;
-    SO_RCVBUF = 8;
-    RECV_BUF_SIZE = 262144;
+    _YK_AF_NETLINK = 16;
+    _YK_SOCK_DGRAM = 2;
+    _YK_SOCK_CLOEXEC = 524288;
+    _YK_NETLINK_KOBJECT_UEVENT = 15;
+    _YK_SOL_SOCKET = 1;
+    _YK_SO_RCVBUF = 8;
+    _YK_RECV_BUF_SIZE = 262144;
 }
 # socket/bind/setsockopt/recvfrom/ppoll go through the _yk_* bridges in
 # src/syscalls.cyr: stdlib wrappers on Linux, fail-closed on agnos (2.3.12;
@@ -640,7 +643,7 @@ pub fn udev_monitor_new() {
 
 pub fn udev_monitor_with_filter(filter_vec) {
     # Create netlink socket
-    var fd = _yk_socket(AF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    var fd = _yk_socket(_YK_AF_NETLINK, _YK_SOCK_DGRAM | _YK_SOCK_CLOEXEC, _YK_NETLINK_KOBJECT_UEVENT);
     if (fd < 0) {
         var sb = str_builder_new();
         str_builder_add_cstr(sb, "socket() failed: errno ");
@@ -651,7 +654,7 @@ pub fn udev_monitor_with_filter(filter_vec) {
     # Bind to multicast group 1
     # struct sockaddr_nl: { u16 family, u16 pad, u32 pid, u32 groups }
     var addr[12];
-    store16(&addr, AF_NETLINK);
+    store16(&addr, _YK_AF_NETLINK);
     store16(&addr + 2, 0);
     store32(&addr + 4, 0);
     store32(&addr + 8, 1);
@@ -664,8 +667,8 @@ pub fn udev_monitor_with_filter(filter_vec) {
 
     # Set receive buffer size
     var bufsize[4];
-    store32(&bufsize, RECV_BUF_SIZE);
-    _yk_setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, 4);
+    store32(&bufsize, _YK_RECV_BUF_SIZE);
+    _yk_setsockopt(fd, _YK_SOL_SOCKET, _YK_SO_RCVBUF, &bufsize, 4);
 
     var mon = alloc(24);
     store64(mon, fd);

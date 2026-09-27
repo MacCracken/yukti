@@ -187,7 +187,7 @@ pub fn network_mount(share, mount_point_cstr) {
     var options_cstr = str_cstr(options);
 
     # Mount syscall: mount(source, target, fstype, flags, data)
-    # MS_NOSUID=2 | MS_NODEV=4 = 6
+    # _YK_MS_NOSUID=2 | _YK_MS_NODEV=4 = 6
     var flags = 6;
     var r = _yk_mount(source_cstr, mount_point_cstr, kernel_type, flags, options_cstr);
 

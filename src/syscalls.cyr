@@ -57,6 +57,34 @@ enum YkSyscalls {
 #endif
 #endif
 
+# yukti-private open(2) flags (2.3.13), for the device opens in optical,
+# storage, partition and audio. Every enum member and top-level `var` is a
+# program-wide global, and the last definition wins. Until 2.3.12,
+# `enum EjectConst` in src/storage.cyr declared plain `O_RDONLY = 0` and
+# `O_NONBLOCK = 2048`, which redefined the stdlib peers' names for every
+# program that included yukti:
+#
+#   - Darwin: O_NONBLOCK is 4, and 2048 is Darwin's O_EXCL, so a Mach-O
+#     build turned every O_NONBLOCK in the program into O_EXCL.
+#   - Windows and agnos: the peers declare no O_NONBLOCK, so yukti quietly
+#     supplied one to other libraries (vani on Windows).
+#
+# The underscore-prefixed names stay inside yukti. The values follow the
+# target: Darwin 4, and the Linux value (2048, the same on x86_64 and
+# aarch64) everywhere else, which is what every target received before.
+#ifdef CYRIUS_TARGET_MACOS
+enum YkOpenFlag {
+    _YK_O_RDONLY = 0;
+    _YK_O_NONBLOCK = 4;
+}
+#endif
+#ifndef CYRIUS_TARGET_MACOS
+enum YkOpenFlag {
+    _YK_O_RDONLY = 0;
+    _YK_O_NONBLOCK = 2048;
+}
+#endif
+
 # ---------------------------------------------------------------------------
 # _yk_starts_with_cstr — prefix test against a C STRING (yukti 2.3.5)
 #

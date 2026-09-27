@@ -80,9 +80,10 @@ and builds the same for Windows before and after this change.
 - **Test `test_private_flags_match_linux_peer`** (6 assertions). On Linux,
   `_YK_O_RDONLY`, `_YK_O_NONBLOCK` and the four `_YK_MS_*` must equal the
   peer's values. Setting `_YK_O_NONBLOCK` to 2049 makes it fail.
-- **CI gate "No stdlib names redeclared"** (build job). No enum member or
-  top-level `var` in `src/` may take a name that the installed stdlib
-  declares anywhere: every platform peer and every fold, not just `./lib`.
+- **CI gate "No stdlib names redeclared"** (build job). No enum member
+  (valued `A = 1;` or bare `A;`), top-level `var` or top-level `fn` in
+  `src/` may take a name that the installed stdlib declares anywhere:
+  every platform peer and every fold, not just `./lib`.
   - It must see at least 15 source files and 50 stdlib files, so it cannot
     pass vacuously. Run on the 2.3.12 source, it fails with exactly the 8
     names above.
@@ -91,8 +92,9 @@ and builds the same for Windows before and after this change.
     ATI's id; yukti uses 0x1022 and names 0x1002 `PCI_VENDOR_ATI`. A program
     that includes both gets one value for both libraries. The rename belongs
     in mabda.
-  - `SYS_PPOLL` is allowed. yukti declares it only for x86_64 Linux, where no
-    peer names it, and the aarch64 peer's 1073 is never in the same build.
+  - `SYS_PPOLL` is allowed. yukti declares it only on non-agnos x86 targets
+    (Linux, Mach-O x86, PE). Only the aarch64 peer names it (1073), and that
+    peer is never in the same build.
 
 ### Changed
 

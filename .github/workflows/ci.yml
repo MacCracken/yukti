@@ -82,14 +82,17 @@ jobs:
         # SOL_SOCKET had the same shape (net.cyr's Darwin SOL_SOCKET is
         # 0xFFFF). Private constants take a `_YK_` prefix instead.
         #
-        # Checked against the WHOLE installed stdlib (every platform peer and
-        # every fold), not ./lib, which holds only yukti's own deps. Two
+        # Enum members (valued or bare), top-level `var`s and top-level `fn`s
+        # are all compared. Checked against the WHOLE installed stdlib (every
+        # platform peer and every fold), not ./lib, which holds only yukti's
+        # own deps. Two
         # names are allowed, each for a stated reason:
         #   - PCI_VENDOR_AMD: public API (the core profile, consumed by the
         #     agnos kernel). mabda declares its own with 0x1002, ATI's id,
         #     which yukti names PCI_VENDOR_ATI. The fix belongs in mabda.
-        #   - SYS_PPOLL: declared only for x86_64 Linux, where no peer names
-        #     it. The aarch64 peer's 1073 is never in the same build.
+        #   - SYS_PPOLL: declared only on non-agnos x86 targets (Linux,
+        #     Mach-O x86, PE). Only the aarch64 peer names it (1073), and
+        #     that peer is never in the same build.
         # The scan must find the full source set, so it cannot pass vacuously.
         run: |
           python3 - "$HOME/.cyrius/versions/$CYRIUS_VERSION/lib" <<'PYEOF'
@@ -101,12 +104,13 @@ jobs:
                   if re.match(r'^\s*enum\s+\w+\s*\{', c):
                       inenum = True
                   if inenum:
-                      for m in re.finditer(r'\b([A-Za-z_]\w*)\s*=\s*[^;]+;', c):
+                      # Members with or without a value: `A = 1;`, `A;`, `A,`.
+                      for m in re.finditer(r'\b([A-Za-z_]\w*)\s*(?:=[^;,]*)?[;,]', c):
                           out.setdefault(m.group(1), []).append(i)
                       if '}' in c:
                           inenum = False
                       continue
-                  m = re.match(r'^(?:pub\s+|public\s+|private\s+)?var\s+([A-Za-z_]\w*)', c)
+                  m = re.match(r'^(?:pub\s+|public\s+|private\s+)?(?:var|fn)\s+([A-Za-z_]\w*)', c)
                   if m:
                       out.setdefault(m.group(1), []).append(i)
               return out

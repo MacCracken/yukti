@@ -33,8 +33,8 @@ re-learning the layout.
 
 ## Current State
 
-- **Source**: 7,169 lines across 18 files in `src/` — 16 domain modules
-  (7,035 lines, matching the `[lib]` module list in `cyrius.cyml`) plus
+- **Source**: 7,200 lines across 18 files in `src/` — 16 domain modules
+  (7,066 lines, matching the `[lib]` module list in `cyrius.cyml`) plus
   the `lib.cyr` include chain and the `main.cyr` CLI entry point
 - **Tests**: 803 assertions, 3 fuzz harnesses, 46 benchmarks
 - **Binary**: ~157 KB x86_64 static ELF (161,256 bytes, `CYRIUS_DCE=1`;
@@ -91,7 +91,7 @@ At a glance:
 ```bash
 cyrius deps                              # resolve deps into lib/
 cyrius build src/main.cyr build/yukti    # build CLI
-cyrius test tests/tcyr/yukti.tcyr        # 797 assertions
+cyrius test tests/tcyr/yukti.tcyr        # 803 assertions
 cyrius distlib                           # → dist/yukti.cyr (full)
 cyrius distlib core                      # → dist/yukti-core.cyr (kernel-safe)
 ```
@@ -125,7 +125,7 @@ programs/
 dist/
   yukti.cyr        — full userland bundle (`cyrius distlib`)
   yukti-core.cyr   — kernel-safe bundle (`cyrius distlib core`)
-tests/tcyr/        — 797 assertions across all modules
+tests/tcyr/        — 803 assertions across all modules
 tests/bcyr/        — benchmarks with batch timing
 fuzz/              — 3 fuzz targets (uevent, mount table, partition table)
 docs/benchmarks/   — auto-generated results.md + history.csv
@@ -171,7 +171,7 @@ produce a compile-clean bundle.
 0. Read roadmap, CHANGELOG, open issues — know what was intended
 1. Cleanliness: `cyrius build` (0 warnings), `cyrius lint` (0 warnings),
    `cyrius fmt --check` diff-clean, `cyrius vet src/main.cyr` clean
-2. Test sweep: 797+ assertions pass, fuzz harnesses pass
+2. Test sweep: 803+ assertions pass, fuzz harnesses pass
 3. Benchmark baseline: `cyrius bench tests/bcyr/yukti.bcyr`, save CSV
 4. Internal deep review — gaps, optimizations, correctness, docs
 5. External research — udev / sysfs / block-layer changes since last pass
@@ -222,7 +222,7 @@ Severity levels: **CRITICAL** (exploitable immediately) / **HIGH**
 
 Ship as the last patch of the current minor (e.g. 1.2.5 before 1.3.0):
 
-1. Full test suite — 797+ pass, 0 failures
+1. Full test suite — 803+ pass, 0 failures
 2. Benchmark baseline — `cyrius bench`, save CSV for comparison
 3. Dead code audit — review `dead:` list from `cyrius build`, remove
    unreferenced source
@@ -308,13 +308,15 @@ unreliable) saves a lot of debug time.
   first. `_yk_ppoll`'s line is the one exception and must be found
   exactly once, so a scan that matches nothing fails too. Numeric flags
   passed to `xopen` / `file_open` / `sys_open` fail as well.
-- **Stdlib-name gate** (build job, 2.3.13): no enum member or top-level
-  `var` in `src/` may take a name the installed stdlib declares (every
+- **Stdlib-name gate** (build job, 2.3.13): no enum member (valued or
+  bare), top-level `var` or top-level `fn` in `src/` may take a name the
+  installed stdlib declares (every
   platform peer and every fold). Globals are program-wide and the last
   definition wins, so a redeclaration changes the value for every
   consumer. Private constants take a `_YK_` prefix. Two names are
   allowed, each with a stated reason in the step: `PCI_VENDOR_AMD`
-  (public API; mabda's conflicting copy) and `SYS_PPOLL` (x86_64 only).
+  (public API; mabda's conflicting copy) and `SYS_PPOLL` (declared only
+  on non-agnos x86 targets; only the aarch64 peer names it).
 - **Concurrency**: CI uses `cancel-in-progress: true` keyed on workflow + ref
 
 ## Key References

@@ -797,6 +797,26 @@ fn test_private_flags_match_linux_peer() {
     return 0;
 }
 
+# 2.3.14: the ppoll bridge. On Linux a zero-fd ppoll with a zero timeout
+# returns 0 at once (it proves the number reaches ppoll, not something else).
+# On macOS it declines with Darwin's -ENOSYS without issuing a syscall;
+# agnos declines with YK_ENOSYS.
+fn test_ppoll_bridge_per_target() {
+    #ifdef CYRIUS_TARGET_LINUX
+    var ts[16];
+    store64(&ts, 0);
+    store64(&ts + 8, 0);
+    assert_eq(_yk_ppoll(0, 0, &ts), 0, "ppoll(no fds, 0 timeout) == 0");
+    #endif
+    #ifdef CYRIUS_TARGET_MACOS
+    assert_eq(_yk_ppoll(0, 0, 0), 0 - 78, "ppoll declines on macOS (-ENOSYS)");
+    #endif
+    #ifdef CYRIUS_TARGET_AGNOS
+    assert_eq(_yk_ppoll(0, 0, 0), 0 - YK_ENOSYS, "ppoll declines on agnos");
+    #endif
+    return 0;
+}
+
 # ===================================================================
 # Optical tests (35 in Rust — skip hardware tests)
 # ===================================================================
@@ -2266,6 +2286,7 @@ fn main() {
     test_filesystem_usage_root();
     test_filesystem_usage_nonexistent();
     test_private_flags_match_linux_peer();
+    test_ppoll_bridge_per_target();
 
     # Optical tests (12)
     test_disc_type_audio();

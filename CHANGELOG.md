@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.14] - 2026-09-27
+
+**The ppoll bridge declines on macOS.** Darwin has no ppoll, and neither
+Mach-O backend routes the number yukti issues for it (271 on x86_64, the
+stdlib's 1073 alias on arm64), so every Mach-O build that included yukti
+warned `syscall N not routed`. Reached, `_yk_ppoll` was a SIGSYS kill on
+Intel and, before cyrius 6.6.8, a silent re-run of the previous syscall on
+Apple Silicon. It now returns Darwin's -ENOSYS (-78) without issuing a
+syscall, the way the agnos arm already returns -ENOSYS. The Linux arm is
+`#ifndef`-guarded as well, so the number is not even compiled there. The
+only caller is the udev netlink monitor, which is Linux-only. The toolchain
+moves to cyrius 6.6.7, with the dep tags that release bundles.
+
+Verification:
+
+- **Tests:** 804/804 on x86_64 and under `qemu-aarch64` (was 803; one new
+  assertion, listed below).
+- **Fuzz, `core_smoke`, lint, fmt, vet, the stdlib-name gate and the
+  raw-syscall scan:** all pass under cyrius 6.6.7. The raw-syscall scan
+  still finds exactly 1 call, at the allowed site.
+- **Bundles:** a second `cyrius distlib` / `cyrius distlib core` run
+  regenerates both byte-identically.
+- **Mach-O:** built with cyrius 6.6.7, neither build warns about ppoll any
+  more (271 / 1073 are gone). The remaining warnings there come from the
+  stdlib (`thread_local`'s arch_prctl, the aarch64 peer's pause / epoll /
+  inotify) and are fixed in cyrius 6.6.8.
+
+### Fixed
+
+- `_yk_ppoll` (`src/syscalls.cyr`) declines on macOS with -78 instead of
+  issuing an unrouted syscall.
+
+### Added
+
+- `test_ppoll_bridge_per_target`: on Linux a zero-fd ppoll with a zero
+  timeout returns 0 (the number reaches ppoll and nothing else). On macOS and
+  agnos the bridge declines.
+
+### Changed
+
+- cyrius 6.6.6 → 6.6.7, sakshi 2.5.2 → 2.5.5, patra 1.14.3 → 1.15.0 (the
+  versions cyrius 6.6.7 bundles). `cyrius.lock` regenerated.
+
 ## [2.3.13] - 2026-09-27
 
 **yukti stops redeclaring stdlib names.** Every enum member and top-level

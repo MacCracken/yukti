@@ -23,11 +23,11 @@ What is left needs hardware or a macOS host:
 - [ ] **Run it on ecb (macOS-arm64).** The raw 8/16/24/32 offsets that
       broke Darwin are gone, but no yukti build has ever run on macOS.
       Both Mach-O builds compile (`CYRIUS_MACHO_ARM=1 cyrius build
-      --aarch64`, `CYRIUS_MACHO=1 cyrius build`). One yukti warning is
-      left: the ppoll number, which is unrouted on Darwin (1073 on arm64,
-      271 on x86_64). The udev netlink monitor is Linux-only anyway; a
-      stdlib ppoll wrapper would route or decline it (see "Upstream").
-      2.3.13 removed the other one, the `O_NONBLOCK` redefinition.
+      --aarch64`, `CYRIUS_MACHO=1 cyrius build`) with no yukti warning:
+      2.3.14 made `_yk_ppoll` decline on macOS (the ppoll number was
+      unrouted on Darwin, 1073 on arm64 and 271 on x86_64), and 2.3.13
+      removed the `O_NONBLOCK` redefinition. The warnings left come from
+      the cyrius 6.6.7 stdlib and are fixed in cyrius 6.6.8.
 - [ ] **agnos: run the statfs / lstat bridges on a real kernel.**
       Disassembly shows `_yk_statfs` reaching statfs #103 and `_yk_lstat`
       reaching lstat #102, and the 9001–9010 stub band is gone. Neither has
@@ -196,9 +196,9 @@ ownership questions it deliberately did NOT settle:
 - [ ] **Ask for a stdlib ppoll wrapper.** Neither Linux peer wraps ppoll,
       so `_yk_ppoll` (`src/syscalls.cyr`) is the one raw `syscall()` left in
       yukti, and it keeps a private x86_64 number (271). A wrapper would
-      carry the per-target number: aarch64 already names 1073. It would also
-      carry a Darwin route or decline, where both numbers are unrouted
-      today. Once it exists:
+      carry the per-target number: aarch64 already names 1073. The Darwin
+      decline lives in `_yk_ppoll` since 2.3.14 and would move into the
+      wrapper. Once it exists:
       - `_yk_ppoll`'s Linux arm calls it.
       - The local enum goes.
       - CI's raw-syscall gate drops `want` to 0.

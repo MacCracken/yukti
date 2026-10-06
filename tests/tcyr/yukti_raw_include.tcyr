@@ -1,0 +1,38 @@
+# yukti_raw_include.tcyr — dist/yukti.cyr compiles from a raw include (2.3.15)
+#
+# The bundle is what a consumer vendors. Since cyrius 6.6.18's `distlib` it
+# opens with a compile-verified "# Requires" block (one `include "lib/<leaf>.cyr"`
+# per dist/yukti.deps leaf), so the stdlib names the bundle uses resolve from
+# the bundle itself. yukti's named deps come first: their bundles, as
+# `cyrius deps` vendors them into lib/, bring the stdlib leaves yukti.deps no
+# longer lists. Before 2.3.15 the bundle had no includes at all and this file
+# did not compile: the stdlib came only from a consumer's own manifest.
+# Deliberately NOT `include "src/lib.cyr"`, which pulls the stdlib in itself
+# and would prove nothing about the bundle. CHANGELOG [2.3.15].
+
+include "lib/sakshi.cyr"
+include "lib/patra.cyr"
+include "dist/yukti.cyr"
+include "lib/assert.cyr"
+
+fn test_raw_include_error_round_trip() {
+    test_group("dist/yukti.cyr included alone");
+    var e = yukti_err_new(YUKTI_ERR_DEVICE_BUSY, str_from("/dev/sdb1"));
+    assert_eq(yukti_err_kind(e), YUKTI_ERR_DEVICE_BUSY, "err kind round-trips");
+    assert(str_eq_cstr(yukti_err_detail(e), "/dev/sdb1"), "err detail round-trips");
+    assert_eq(yukti_err_context(e), 0, "no context");
+    # trigger_device rejects a non-/sys/ path before it spawns udevadm, so
+    # nothing runs, but its exec_vec call keeps the `process` leaf reachable.
+    # Neither named dep brings `process`; only the requires block does.
+    assert(is_ok(trigger_device("/etc/passwd")) == 0, "trigger rejects /etc");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    test_raw_include_error_round_trip();
+    return assert_summary();
+}
+
+var r = main();
+sys_exit(r);

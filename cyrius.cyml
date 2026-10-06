@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "6.6.7"
+cyrius = "6.6.18"
 
 [build]
 entry = "src/main.cyr"
@@ -74,14 +74,14 @@ stdlib = [
 
 [deps.sakshi]
 git = "https://github.com/MacCracken/sakshi.git"
-tag = "2.5.5"
+tag = "2.5.6"
 modules = ["dist/sakshi.cyr"]
 
 # patra backs device_db (the persistent device-history store) ONLY. It pulls
 # stdlib atomic/sync/thread_local, declared in [deps].stdlib above because the
 # cyrius 6.4.x strict transitive-dep check requires them named. patra also
 # claims its thread-local slots through cyrius's slot allocator,
-# thread_local_alloc, which needs cyrius >= 6.4.65; the 6.6.7 pin satisfies it.
+# thread_local_alloc, which needs cyrius >= 6.4.65; the 6.6.18 pin satisfies it.
 #
 # The tag does not outrun the bundle. It stays for `target = "linux"`, which the
 # bundled lib has no way to express. agnos has no device-history DB, so patra is
@@ -89,7 +89,7 @@ modules = ["dist/sakshi.cyr"]
 # `device_db.cyr` off on agnos to match.
 #
 # Keep BOTH tags (sakshi above, patra here) in lockstep with the versions the
-# pinned cyrius bundles: 6.6.7 folds sakshi 2.5.5 and patra 1.15.0. A newer
+# pinned cyrius bundles: 6.6.18 folds sakshi 2.5.6 and patra 1.15.1. A newer
 # local tag is folded into the NEXT cyrius release; pinning ahead of the fold
 # breaks in both directions, as measured at the 2.3.12 bump:
 #   - patra ahead: `cyrius build` warns that ./lib/ shadows the version-pinned
@@ -99,6 +99,6 @@ modules = ["dist/sakshi.cyr"]
 #     cyrius.lock still records the newer tag's commit.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.15.0"
+tag = "1.15.1"
 modules = ["dist/patra.cyr"]
 target = "linux"

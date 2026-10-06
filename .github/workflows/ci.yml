@@ -299,7 +299,12 @@ jobs:
           echo "yukti-aarch64: $(wc -c < build/yukti-aarch64) bytes"
 
       - name: Test
-        run: cyrius test tests/tcyr/yukti.tcyr
+        # yukti_raw_include.tcyr includes dist/yukti.cyr with nothing but the
+        # named deps' bundles in front of it, so it proves the bundle's
+        # compile-verified requires block (cyrius 6.6.18 distlib, 2.3.15).
+        run: |
+          cyrius test tests/tcyr/yukti.tcyr
+          cyrius test tests/tcyr/yukti_raw_include.tcyr
 
       - name: Kernel-safe tripwire
         # programs/core_smoke.cyr links ONLY src/core.cyr + src/pci.cyr

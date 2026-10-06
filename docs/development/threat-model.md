@@ -143,7 +143,7 @@ surfaces that matter:
   (embedded store), pinned in lockstep with what the toolchain bundles. Both share the Yukti threat model and are
   audited on the same cadence.
 - Cyrius stdlib (`alloc`, `str`, `vec`, `hashmap`, `io`, `fs`,
-  `process`, etc.) ships with the toolchain release (6.6.6) and
+  `process`, etc.) ships with the toolchain release (6.6.18) and
   is SHA-pinned by the toolchain installer, not by yukti.
 
 ## Audit Cadence

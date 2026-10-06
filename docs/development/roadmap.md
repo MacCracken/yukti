@@ -266,7 +266,7 @@ opportunity).
 ## Held — hardware-bound
 
 - [ ] **aarch64 native build — runtime SIGILL retest on
-      Cortex-A72** against the current **6.6.6** toolchain.
+      Cortex-A72** against the current **6.6.18** toolchain.
       `src/` is cross-build-clean and runtime-correct as of 2.1.4
       (33 raw-number arch-divergent syscalls migrated to wrappers
       / `SYS_*` constants; `src/syscalls.cyr` arch-conditional

@@ -58,7 +58,7 @@ main();
 
 ## Build
 
-Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.6.6 (the `cyrius.cyml` pin).
+Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.6.18 (the `cyrius.cyml` pin).
 
 ```sh
 # Resolve deps into lib/

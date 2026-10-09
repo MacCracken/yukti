@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "6.6.18"
+cyrius = "6.7.5"
 
 [build]
 entry = "src/main.cyr"
@@ -74,31 +74,35 @@ stdlib = [
 
 [deps.sakshi]
 git = "https://github.com/MacCracken/sakshi.git"
-tag = "2.5.6"
+tag = "2.5.8"
 modules = ["dist/sakshi.cyr"]
 
 # patra backs device_db (the persistent device-history store) ONLY. It pulls
 # stdlib atomic/sync/thread_local, declared in [deps].stdlib above because the
 # cyrius 6.4.x strict transitive-dep check requires them named. patra also
 # claims its thread-local slots through cyrius's slot allocator,
-# thread_local_alloc, which needs cyrius >= 6.4.65; the 6.6.18 pin satisfies it.
+# thread_local_alloc, which needs cyrius >= 6.4.65; the 6.7.5 pin satisfies it.
 #
-# The tag does not outrun the bundle. It stays for `target = "linux"`, which the
-# bundled lib has no way to express. agnos has no device-history DB, so patra is
-# fetched on Linux only, and `src/lib.cyr` #ifndef-gates both the include and
-# `device_db.cyr` off on agnos to match.
+# The tag stays for `target = "linux"`, which the bundled lib has no way to
+# express. agnos has no device-history DB, so patra is fetched on Linux only,
+# and `src/lib.cyr` #ifndef-gates both the include and `device_db.cyr` off on
+# agnos to match.
 #
-# Keep BOTH tags (sakshi above, patra here) in lockstep with the versions the
-# pinned cyrius bundles: 6.6.18 folds sakshi 2.5.6 and patra 1.15.1. A newer
-# local tag is folded into the NEXT cyrius release; pinning ahead of the fold
-# breaks in both directions, as measured at the 2.3.12 bump:
-#   - patra ahead: `cyrius build` warns that ./lib/ shadows the version-pinned
-#     lib.
-#   - sakshi ahead: patra's dep sidecar names `sakshi` as a stdlib leaf, so
-#     `cyrius deps` silently overwrites the git dep with the bundled copy while
-#     cyrius.lock still records the newer tag's commit.
+# 2.3.16 pins BOTH tags (sakshi above, patra here) to the W2 stdlib-wave
+# releases, which are AHEAD of what the 6.7.5 pin bundles (sakshi 2.5.7,
+# patra 1.15.2); cyrius 6.7.6 refolds them. Until the pin reaches a cyrius that
+# folds both tags, measured at the 2.3.16 bump:
+#   - patra: lib/patra.cyr IS the 1.16.0 tag (no sidecar names patra), and
+#     `cyrius build` warns that ./lib/ shadows the version-pinned lib
+#     ("patra 1.16.0 (pinned: 1.15.2)"). The warning is expected.
+#   - sakshi: lib/sakshi.cyr is the 6.7.5 FOLD (2.5.7), not the 2.5.8 tag.
+#     patra's dep sidecar names `sakshi` as a stdlib leaf, and the fold wins
+#     over a named dep of the same name, so cyrius.lock's commit line names
+#     2.5.8 while its lib/sakshi.cyr hash is the fold's. 2.5.7 -> 2.5.8 makes
+#     sakshi-private syscall numbers `const` and changes a Windows-only UDP
+#     return code; nothing yukti calls behaves differently.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.15.1"
+tag = "1.16.0"
 modules = ["dist/patra.cyr"]
 target = "linux"

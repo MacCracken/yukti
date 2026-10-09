@@ -700,6 +700,18 @@ pub fn storage_mount(dev_path_cstr, options) {
 # unmount — unmount via umount2(2) (_yk_umount2)
 # ---------------------------------------------------------------------------
 
+# The directory storage_unmount removes after a successful umount2: one UNDER
+# /run/media/ (where storage_mount auto-creates its targets), with no `..`
+# component and no `//`. The gate was a raw prefix match, so
+# "/run/media/../../srv/data" passed it and rmdir removed a directory outside
+# /run/media/ (2.3.16). /run/media/ itself is not removed either.
+fn _unmount_rmdir_allowed(mount_point_cstr): bool {
+    var mp_s = str_from(mount_point_cstr);
+    if (_yk_starts_with_cstr(mp_s, "/run/media/") == 0) { return false; }
+    if (str_len(mp_s) <= 11) { return false; }   # "/run/media/" alone
+    return _path_has_traversal(mount_point_cstr) == 0;
+}
+
 pub fn storage_unmount(mount_point_cstr) {
     sakshi_span_enter("unmount", 7);
 
@@ -726,8 +738,7 @@ pub fn storage_unmount(mount_point_cstr) {
 
     # Clean up mount directory if under /run/media/. xrmdir (lib/io.cyr) handles
     # the agnos length-carrying rmdir ABI; do not call sys_rmdir directly.
-    var mp_s = str_from(mount_point_cstr);
-    if (_yk_starts_with_cstr(mp_s, "/run/media/")) {
+    if (_unmount_rmdir_allowed(mount_point_cstr)) {
         xrmdir(mount_point_cstr);
     }
 

@@ -623,6 +623,24 @@ fn test_validate_mount_point_rejects_traversal() {
 # Audit 2026-04-19 LOW-3 — trailing slash on forbidden root
 # Superseded by MED-1 prefix check (`_starts_with_dir` treats a
 # trailing '/' as the component boundary). Regression test.
+# 2.3.16 — storage_unmount's rmdir gate. It was a raw "/run/media/" prefix
+# match, so a successful unmount of "/run/media/../../srv/data" rmdir'ed a
+# directory outside /run/media/. The gate is tested as a predicate because
+# reaching the rmdir needs a umount2 that succeeds (root and a real mount).
+fn test_unmount_rmdir_gate() {
+    test_group("unmount rmdir gate");
+    assert(_unmount_rmdir_allowed("/run/media/usb"), "auto mount point removable");
+    assert(_unmount_rmdir_allowed("/run/media/alice/usb"), "per-user mount point removable");
+    assert(_unmount_rmdir_allowed("/run/media/../../srv/data") == 0, "dotdot escape refused");
+    assert(_unmount_rmdir_allowed("/run/media/x/../../../etc") == 0, "deep dotdot refused");
+    assert(_unmount_rmdir_allowed("/run/media/usb/..") == 0, "trailing dotdot refused");
+    assert(_unmount_rmdir_allowed("/run/media//usb") == 0, "double slash refused");
+    assert(_unmount_rmdir_allowed("/run/media/") == 0, "/run/media/ itself refused");
+    assert(_unmount_rmdir_allowed("/run/mediax/usb") == 0, "sibling prefix refused");
+    assert(_unmount_rmdir_allowed("/mnt/usb") == 0, "outside /run/media/ refused");
+    return 0;
+}
+
 fn test_validate_mount_point_trailing_slash() {
     assert(is_ok(validate_mount_point("/etc/")) == 0, "/etc/ bad");
     assert(is_ok(validate_mount_point("/usr/")) == 0, "/usr/ bad");
@@ -2270,6 +2288,7 @@ fn main() {
     test_validate_mount_point_blacklist_extended();
     test_validate_mount_point_rejects_traversal();
     test_validate_mount_point_trailing_slash();
+    test_unmount_rmdir_gate();
     test_xmkdir_creates_directory();
     test_unescape_mount_path();
     test_sql_escape();

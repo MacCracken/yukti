@@ -251,6 +251,14 @@ pub fn network_mount(share, mount_point_cstr) {
     # sys_mkdir: agnos's sys_mkdir takes (path, pathlen), not (path, mode).
     xmkdir(mount_point_cstr, 493);
 
+    # TOCTOU guard: storage_mount's lstat check, shared (2.3.16). Before it,
+    # a symlinked target was followed by mount(2).
+    var tg_tag, tg = _mount_target_check(mount_point_cstr, source);
+    if (is_ok(tg_tag) == 0) {
+        sakshi_span_exit();
+        return Err(tg);
+    }
+
     # Mount syscall: mount(source, target, fstype, flags, data)
     # _YK_MS_NOSUID=2 | _YK_MS_NODEV=4 = 6
     var flags = 6;

@@ -572,6 +572,42 @@ enum AutoFs {
 }
 
 # ---------------------------------------------------------------------------
+# Mount-target guard — shared by storage_mount and network_mount (2.3.16)
+# ---------------------------------------------------------------------------
+# TOCTOU guard (audit finding MED-2, CVE-2026-27456 class): between
+# validate_mount_point and mount(2) an attacker with write access to the
+# mount parent could symlink the target at /etc or similar. lstat via
+# newfstatat(AT_SYMLINK_NOFOLLOW) refuses to follow the final component — if
+# it's a symlink we abort. _yk_lstat (src/syscalls.cyr) issues it through the
+# stdlib wrapper.
+#   S_IFMT = 0xF000, S_IFLNK = 0xA000, S_IFDIR = 0x4000
+#
+# Shared since 2.3.16: network_mount had no copy of it, so an SMB / NFS
+# mount followed a symlinked target that storage_mount refused. A guard kept
+# inline in one caller is how the 8 KB /proc/mounts truncation came back in
+# network_list_mounted (2.3.4); one helper keeps the two mount paths equal.
+# `device` (a Str) is the error's context. Ok(0), or Err(MOUNT_FAILED).
+fn _mount_target_check(mount_cstr, device) {
+    var stbuf[STAT_BUFSZ];
+    var st_rc = _yk_lstat(mount_cstr, &stbuf);
+    if (st_rc < 0) {
+        return err_mount_failed(device, str_from("mount target stat failed"));
+    }
+    # STAT_MODE, not 24 — aarch64-Linux puts st_mode at 16 and st_uid at 24,
+    # so the literal made this guard compare a uid against S_IFLNK and the
+    # symlink check could never fire off x86_64 (2.3.4 audit).
+    var mode = load32(&stbuf + STAT_MODE);
+    var fmt = mode & 61440;   # 0xF000
+    if (fmt == 40960) {       # 0xA000 — symlink
+        return err_mount_failed(device, str_from("mount target is a symlink (TOCTOU guard)"));
+    }
+    if (fmt != 16384) {       # 0x4000 — directory
+        return err_mount_failed(device, str_from("mount target is not a directory"));
+    }
+    return Ok(0);
+}
+
+# ---------------------------------------------------------------------------
 # mount — mount a device via mount(2) (_yk_mount)
 # ---------------------------------------------------------------------------
 
@@ -613,34 +649,11 @@ pub fn storage_mount(dev_path_cstr, options) {
     # sys_mkdir: agnos's sys_mkdir takes (path, pathlen), not (path, mode).
     xmkdir(mount_cstr, 493);
 
-    # TOCTOU guard (audit finding MED-2, CVE-2026-27456 class):
-    # between validate_mount_point and mount(2) an attacker with write
-    # access to the mount parent could symlink the target at /etc or
-    # similar. lstat via newfstatat(AT_SYMLINK_NOFOLLOW) refuses to
-    # follow the final component — if it's a symlink we abort.
-    # _yk_lstat (src/syscalls.cyr) issues it through the stdlib wrapper.
-    #   S_IFMT = 0xF000, S_IFLNK = 0xA000, S_IFDIR = 0x4000
-    var stbuf[STAT_BUFSZ];
-    var st_rc = _yk_lstat(mount_cstr, &stbuf);
-    if (st_rc < 0) {
+    # TOCTOU guard: the mount target must be a real directory, not a symlink.
+    var tg_tag, tg = _mount_target_check(mount_cstr, str_from(dev_path_cstr));
+    if (is_ok(tg_tag) == 0) {
         sakshi_span_exit();
-        return err_mount_failed(str_from(dev_path_cstr),
-          str_from("mount target stat failed"));
-    }
-    # STAT_MODE, not 24 — aarch64-Linux puts st_mode at 16 and st_uid at 24,
-    # so the literal made this guard compare a uid against S_IFLNK and the
-    # symlink check could never fire off x86_64 (2.3.4 audit).
-    var mode = load32(&stbuf + STAT_MODE);
-    var fmt = mode & 61440;   # 0xF000
-    if (fmt == 40960) {       # 0xA000 — symlink
-        sakshi_span_exit();
-        return err_mount_failed(str_from(dev_path_cstr),
-          str_from("mount target is a symlink (TOCTOU guard)"));
-    }
-    if (fmt != 16384) {       # 0x4000 — directory
-        sakshi_span_exit();
-        return err_mount_failed(str_from(dev_path_cstr),
-          str_from("mount target is not a directory"));
+        return Err(tg);
     }
 
     var read_only = load64(options + 8);

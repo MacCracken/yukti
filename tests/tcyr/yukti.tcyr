@@ -2400,6 +2400,7 @@ fn main() {
     test_network_list_mounted();
     test_network_probe_constants();
     test_smb_option_injection_refused();
+    test_mount_target_guard();
 
     # GPU discovery tests (5)
     test_gpu_vendor_name();
@@ -3038,6 +3039,46 @@ fn test_smb_option_injection_refused() {
     assert(str_contains_cstr(yukti_err_detail(p), "SMB password"), "refusal names the password");
     assert_eq(is_dir(str_from(mp)), 0, "no mount point created (password)");
     xrmdir(mp);
+    return 0;
+}
+
+# 2.3.16 — network_mount gets storage_mount's TOCTOU guard (one shared
+# _mount_target_check). Before it, network_mount followed a symlinked mount
+# target into mount(2); storage_mount refused the same path.
+fn test_mount_target_guard() {
+    test_group("mount target guard");
+    var dir = "/tmp/yukti_mtg_dir";
+    var link = "/tmp/yukti_mtg_link";
+    var file = "/tmp/yukti_mtg_file";
+    xunlink(link);   # leftovers from an aborted run; failure here is fine
+    xunlink(file);
+    xrmdir(dir);
+    xmkdir(dir, 493);
+    assert_eq(xsymlink(dir, link), 0, "symlink fixture");
+    assert_eq(_mock_write(file, "x"), 0, "regular-file fixture");
+    var depth = sakshi_span_depth();
+
+    var nfs = network_share_new(str_from("127.0.0.1"), str_from("/x"), NET_FS_NFS);
+    var n_tag, n = network_mount(nfs, link);
+    assert(is_ok(n_tag) == 0, "network_mount refuses a symlinked target");
+    assert_eq(yukti_err_kind(n), YUKTI_ERR_MOUNT_FAILED, "symlink refusal is MOUNT_FAILED");
+    assert(str_contains_cstr(yukti_err_detail(n), "symlink"), "network_mount names the symlink");
+    var f_tag, f = network_mount(nfs, file);
+    assert(is_ok(f_tag) == 0, "network_mount refuses a non-directory target");
+    assert(str_contains_cstr(yukti_err_detail(f), "not a directory"), "names the non-directory");
+
+    # storage_mount runs the same helper.
+    var opts = mount_options_new();
+    mount_options_set_point(opts, str_from(link));
+    var s_tag, s = storage_mount("/dev/yukti-no-such-device", opts);
+    assert(is_ok(s_tag) == 0, "storage_mount refuses a symlinked target");
+    assert(str_contains_cstr(yukti_err_detail(s), "symlink"), "storage_mount names the symlink");
+
+    assert_eq(sakshi_span_depth(), depth, "guard refusals leave the span stack balanced");
+    assert_eq(is_dir(str_from(dir)), 1, "the symlink's target is untouched");
+    xunlink(link);
+    xunlink(file);
+    xrmdir(dir);
     return 0;
 }
 

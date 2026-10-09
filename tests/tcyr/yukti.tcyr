@@ -158,6 +158,15 @@ fn test_error_errno_mapping() {
     assert(is_ok(r4_tag) == 0, "errno 123 is err");
     var r5_tag, r5 = map_errno_to_err(999, "op", str_from("/dev/x"));
     assert(is_ok(r5_tag) == 0, "errno 999 is err");
+    # 2.3.16: the EPERM / EACCES detail is a Str like every other detail. It
+    # was the caller's cstr, and formatting it read garbage or crashed.
+    assert_eq(yukti_err_kind(r1), YUKTI_ERR_PERMISSION_DENIED, "errno 1 is permission denied");
+    assert(str_eq_cstr(yukti_err_detail(r1), "mount"), "errno 1 detail is a Str");
+    assert(str_eq_cstr(yukti_err_detail(r2), "mount"), "errno 13 detail is a Str");
+    var sb = str_builder_new();
+    yukti_err_to_str(r1, sb);
+    assert(str_eq_cstr(str_builder_build(sb), "permission denied: mount (/dev/sda)"),
+      "errno 1 formats");
     return 0;
 }
 

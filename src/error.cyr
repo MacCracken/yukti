@@ -176,10 +176,14 @@ pub fn err_parse(msg) {
 # Map errno to appropriate error result
 # ---------------------------------------------------------------------------
 
+# `operation` is a cstr (every caller passes a literal) and `path` a Str. The
+# permission branch stored the cstr itself as the error's detail, which every
+# reader takes for a Str — yukti_err_to_str read its first 8 bytes as a data
+# pointer and crashed on a non-root mount's EPERM. It wraps it now (2.3.16).
 pub fn map_errno_to_err(errno, operation, path) {
     # EPERM=1, EACCES=13
-    if (errno == 1) { return err_permission_denied(operation, path); }
-    if (errno == 13) { return err_permission_denied(operation, path); }
+    if (errno == 1) { return err_permission_denied(str_from(operation), path); }
+    if (errno == 13) { return err_permission_denied(str_from(operation), path); }
     # EBUSY=16
     if (errno == 16) { return err_device_busy(path); }
     # ENOMEDIUM=123

@@ -3,15 +3,27 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Cyrius 6.6.6 pin — what 2.3.12 did not close
+## Cyrius 6.7.5 pin (2.3.16) — open items
 
-The pin is `cyrius = "6.6.6"`. 2.3.12 carried out the 6.6.5 and 6.6.6
-bump plans, so these three items are closed; the details are in
-`CHANGELOG.md` [2.3.12]:
+The pin is `cyrius = "6.7.5"`, with the W2 stdlib-wave dep tags (sakshi
+2.5.8, patra 1.16.0), both ahead of what 6.7.5 bundles (2.5.7, 1.15.2).
 
-- The aarch64 statfs → accept(2) defect.
-- `filesystem_usage` reading through `STATFS_*` / `statfs_bsize`.
-- `lib/` re-resolved for the `SYS_UNLINKAT` 35 → 263 peer move.
+- [ ] **Bring the dep tags back in lockstep at the next pin move.** Until
+      the pin reaches a cyrius that folds both W2 tags (6.7.6's refold),
+      `cyrius build` warns `./lib/ shadows … patra 1.16.0 (pinned:
+      1.15.2)`, and `lib/sakshi.cyr` is the 6.7.5 fold (2.5.7) while
+      `cyrius.lock`'s sakshi commit line names 2.5.8 (patra's sidecar
+      names sakshi as a stdlib leaf and the fold wins; `cyrius.cyml`
+      explains it). At the move: regenerate the lock from a clean `lib/`,
+      check `lib/sakshi.cyr` is byte-identical to the tag's
+      `dist/sakshi.cyr`, and check the warning is gone.
+- [ ] **The stdlib-name gate does not read `const`.** CI's "No stdlib
+      names redeclared" step collects enum members, top-level `var`s and
+      `fn`s only. The 6.7.5 stdlib declares no top-level `const`, so
+      nothing is missed today, but the folds start declaring them at the
+      6.7.6 refold (sakshi 2.5.8's private `_SK_SYS_*`), and a `const`
+      beside a same-name `var` is a hard compile error. Add `const` to the
+      declaration pattern on both sides.
 
 What is left needs hardware or a macOS host:
 
@@ -33,7 +45,7 @@ What is left needs hardware or a macOS host:
       reaching lstat #102, and the 9001–9010 stub band is gone. Neither has
       been run on agnos.
 
-## Next patch — 2.3.9: audit follow-through
+## Audit follow-through — 2.3.x residue
 
 2.3.4 was the P(-1) audit / refactor / hardening / security sweep. The
 findings it fixed are in `CHANGELOG.md`; the full write-up with severity,
@@ -96,32 +108,18 @@ ownership questions it deliberately did NOT settle:
       observable outcome is identical to a rejected header. It is
       defense-in-depth against handing a wrapped negative offset to a seek.
       Gating it means observing the seek offset itself.
-- [ ] **`str_from` does not copy, and yukti calls it on borrowed pointers
-      elsewhere.** 2.3.8 fixed `device_db_get_preference`, where the borrowed
-      pointer came from a patra result that was then freed. The same pattern —
-      `str_from(<pointer into a buffer with a shorter lifetime>)` — deserves a
-      sweep across `src/`: `_read_sysfs_attr` returns
-      `str_trim(str_from_buf(&attr_buf, n))` over a STATIC buffer, and
-      `str_from_buf` is `str_new_a`, which also does not copy. That has not
-      been shown to be reachable as a bug, but it is the same shape and has
-      not been checked.
 
 ### Hardening (defence-in-depth)
 
 - [ ] **ANSI escape injection to the terminal.** `src/main.cyr:49` writes
       device-controlled sysfs/uevent strings verbatim.
 - [ ] **`validate_mount_point` is a denylist, not an allowlist**
-      (`src/storage.cyr:265`), and `/mnt-evil` passes a `/mnt` prefix test.
-      `storage_unmount`'s `rmdir` gate (`:657`) likewise accepts `..` in
-      the tail after a raw `/run/media/` prefix match.
-- [ ] **SMB credentials are interpolated into the `mount(2)` data string**
-      with no `,` / `=` rejection (`src/network.cyr:115`). Reachability was
-      **not** traced to any consumer, so this is a library hardening gap,
-      not a demonstrated exploit. Note the `credentials=` "arbitrary file
-      read" variant is **refuted** — that is a mount.cifs userspace helper
-      option and never reaches the syscall.
-- [ ] **`network_mount` omits the mount-path TOCTOU lstat guard** that
-      `storage_mount` has. `src/network.cyr:178`.
+      (`_is_forbidden_mount`, `src/storage.cyr`), and `/mnt-evil` passes a
+      `/mnt` prefix test. An allowlist decides WHERE consumers may mount
+      (argonaut's automount, jalwa's import, the file manager), so it is a
+      consumer contract to settle with them, not a unilateral repair.
+      (`storage_unmount`'s `rmdir` gate, filed beside this item, was fixed
+      in 2.3.16.)
 - [ ] **`lib/fs.cyr`'s `dir_list` / `is_dir` scratch is no longer
       reentrant.** 6.5.29 changed `var buf = alloc(4096)` to
       `var sbuf[4096]; var buf = &sbuf;` (`lib/fs.cyr:125, 178, 357, 378`).
@@ -182,17 +180,11 @@ ownership questions it deliberately did NOT settle:
       - A `while` nested in a `for` sent its `continue` to the `for`'s step.
 
       Either would end an inner loop after one iteration, which matches the
-      2.3.5 symptom. Rebuild the pre-2.3.5 partition loop under 6.6.6 and
-      check it iterates 5 of 5 before sweeping the other 27 sites.
+      2.3.5 symptom. Rebuild the pre-2.3.5 partition loop under the current
+      pin and check it iterates 5 of 5 before sweeping the other 27 sites.
 
 ### Upstream
 
-- [ ] **`dist/yukti-core.deps` falsely lists `alloc`.** The kernel-safe
-      bundle has zero call-shaped `alloc(`; cyrius's sidecar generator
-      matches the word inside comments. **Confirmed by experiment** —
-      rewording the two comments in `core.cyr` empties the sidecar. Not
-      hand-correctable: `cyrius distlib` regenerates it and CI's dist-sync
-      gate would fail. File upstream.
 - [ ] **Ask for a stdlib ppoll wrapper.** Neither Linux peer wraps ppoll,
       so `_yk_ppoll` (`src/syscalls.cyr`) is the one raw `syscall()` left in
       yukti, and it keeps a private x86_64 number (271). A wrapper would
@@ -253,6 +245,13 @@ opportunity).
       surface. No upstream dependency remains; this is schedulable
       work whenever 2.4.0 opens.
 
+- [ ] **Public predicates → `: bool`.** 2.3.16 made the private
+      mount-safety predicates `: bool`; the public ones
+      (`filesystem_is_writable`, `disc_type_has_audio`, `pci_is_storage`,
+      `device_info_is_mounted`, … — the predicate-shaped `pub fn`s) change
+      their declared return type, which is a surface change, so they wait
+      for this minor. The values read the same (0 / 1).
+
 ## Future minor — 2.5.0: device-shape extensions
 
 - [ ] Container-aware enumeration (host vs container devices)
@@ -266,7 +265,7 @@ opportunity).
 ## Held — hardware-bound
 
 - [ ] **aarch64 native build — runtime SIGILL retest on
-      Cortex-A72** against the current **6.6.18** toolchain.
+      Cortex-A72** against the current **6.7.5** toolchain.
       `src/` is cross-build-clean and runtime-correct as of 2.1.4
       (33 raw-number arch-divergent syscalls migrated to wrappers
       / `SYS_*` constants; `src/syscalls.cyr` arch-conditional

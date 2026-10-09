@@ -49,7 +49,7 @@ jobs:
           #   - 6.0+: renamed to `cycc_aarch64`, location may be either
           #     bin/ or top-level depending on the release.
           # Cover every layout. See
-          # docs/development/issues/2026-04-30-cyrius-cc5-aarch64-packaging.md.
+          # docs/development/issues/archive/2026-04-30-cyrius-cc5-aarch64-packaging.md.
           [ -f "$CYRIUS_DIR/cc5_aarch64" ] && cp "$CYRIUS_DIR/cc5_aarch64" "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/"
           [ -f "$CYRIUS_DIR/cycc_aarch64" ] && cp "$CYRIUS_DIR/cycc_aarch64" "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/"
           chmod +x "$HOME/.cyrius/versions/$CYRIUS_VERSION/bin/"* 2>/dev/null || true

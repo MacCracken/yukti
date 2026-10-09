@@ -1,5 +1,11 @@
 # cc5_aarch64 Codegen Bug — Native SIGILL on real aarch64
 
+**Archived 2026-10-08 (yukti 2.3.16):** resolved — the codegen bug was fixed in
+Cyrius 5.4.8 (status below). The aarch64 work still open (the real-hardware
+retest) is tracked in [`../2026-04-19-aarch64-syscall-portability.md`](../2026-04-19-aarch64-syscall-portability.md)
+and the roadmap's "Held — hardware-bound" section; `scripts/retest-aarch64.sh`
+still points here for the historical repro.
+
 **Status**: **resolved in Cyrius 5.4.8** (2026-04-19). `cc5_aarch64`
 sha `5d9e42cba3cdb430d2a376cadafa149c9ec8602ee770e2ff3ef9cb2927c4be74`
 no longer emits the unallocated `0x800000d6` word. Verified on a
@@ -13,7 +19,7 @@ x86_64 Linux syscall numbers (syscall 4 = `stat` on x86_64, but
 `pivot_root` on aarch64; dozens more mismatches across the codebase
 and Cyrius stdlib `syscalls.cyr`). That is a yukti/stdlib portability
 issue, not a toolchain bug — tracked separately in
-[2026-04-19-aarch64-syscall-portability.md](2026-04-19-aarch64-syscall-portability.md).
+[2026-04-19-aarch64-syscall-portability.md](../2026-04-19-aarch64-syscall-portability.md).
 
 **Retained as**: reproduction record for the historical opcode bug.
 `scripts/retest-aarch64.sh pi` stays useful as a regression guard

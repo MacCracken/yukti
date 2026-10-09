@@ -1,5 +1,11 @@
 # cycc 6.6.0 clobbers a function parameter's stack slot on aggregate assign
 
+**Archived 2026-10-08 (yukti 2.3.16):** resolved in cyrius. The P0 fix to
+`_try_aggregate_copy_assign` (an inline-struct copy no longer runs over a
+pointer-mode `Str` local's neighbours; cyrius CHANGELOG [6.6.0]) made the four
+`parse_uevent` cases pass unmodified from yukti 2.3.10 on, and they pass on the
+6.7.5 pin. The "OPEN" status below is the filing's, kept as written.
+
 **Status:** OPEN — blocks 3 tcyr assertions + 1 fuzz harness in yukti 2.3.9
 **Affects:** cycc 6.5.57 through 6.6.0 (bisected below)
 **Severity:** P0 — silent stack-slot corruption in a very common stdlib shape

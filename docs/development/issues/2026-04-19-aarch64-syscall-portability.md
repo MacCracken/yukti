@@ -17,7 +17,7 @@ CHANGELOG [2.3.12].
 
 **Original status (2026-04-19)**: open. With Cyrius 5.4.8's `cc5_aarch64` codegen fix, the
 aarch64 cross-build now produces executable binaries (see
-[2026-04-19-cc5-aarch64-repro.md](2026-04-19-cc5-aarch64-repro.md)),
+[2026-04-19-cc5-aarch64-repro.md](archive/2026-04-19-cc5-aarch64-repro.md)),
 but yukti's test binary segfaults on real aarch64 hardware because
 every `syscall(...)` site in yukti — and the `SYS_*` enum yukti
 inherits from the Cyrius stdlib — uses **x86_64 Linux** syscall
@@ -231,7 +231,7 @@ aarch64 support and the `held` status in CHANGELOG can flip to
 
 ## Related / upstream
 
-- See [2026-04-19-cc5-aarch64-repro.md](2026-04-19-cc5-aarch64-repro.md)
+- See [2026-04-19-cc5-aarch64-repro.md](archive/2026-04-19-cc5-aarch64-repro.md)
   for the historical SIGILL opcode bug — fixed in Cyrius 5.4.8.
 - aarch64 generic syscall table: Linux kernel
   `include/uapi/asm-generic/unistd.h` (source of truth for the

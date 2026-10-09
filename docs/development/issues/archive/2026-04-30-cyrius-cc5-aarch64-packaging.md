@@ -1,5 +1,10 @@
 # cyrius — `cc5_aarch64` moved out of `bin/` to tarball top-level in 5.7.48 (install.sh + downstream CIs miss it)
 
+**Archived 2026-10-08 (yukti 2.3.16):** resolved upstream. cyrius's release
+workflow has shipped the aarch64 backend under `bin/` since v5.8.2
+(`cycc_aarch64` since 6.0), and yukti's CI / release install steps copy it from
+either layout. Nothing is left to do here.
+
 **Filed:** 2026-04-30 (during yukti 2.1.3 release CI failure)
 **Cyrius version observed:** 5.7.48 (the regression release; 5.7.42 confirmed still has it under `bin/`)
 **Tools affected:** the bundled `install.sh`; any downstream consumer that copies `cyrius-X.Y.Z-x86_64-linux/bin/*` to `~/.cyrius/bin/` (yukti CI, patra CI, vidya CI all follow this pattern)

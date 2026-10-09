@@ -1,5 +1,9 @@
 # `ERR_IO` + `ERR_TIMEOUT` enum constants collide ecosystem-wide — namespace `YuktiErrorKind` as `YUKTI_ERR_*`
 
+**Archived 2026-10-08 (yukti 2.3.16):** resolved — every `YuktiErrorKind` member
+is `YUKTI_ERR_*` (`src/error.cyr`; CHANGELOG "Namespace all error codes
+`ERR_*` → `YUKTI_ERR_*` (BREAKING)"), so yukti contributes no bare `ERR_*` name.
+
 **Filed:** 2026-06-23 (by a hoosh consumer — hoosh 2.4.7 toolchain bump to cyrius 6.2.37)
 **Severity:** Medium — `last-definition-wins` build warning today; latent
 value-dependent-logic hazard when yukti is compiled alongside another lib that

@@ -285,7 +285,7 @@ opportunity).
 
       2.3.2 cleared the prerequisite: the aarch64 suite now reports
       all 658 assertions instead of 182, so a retest can be believed.
-      See `docs/development/issues/2026-04-19-cc5-aarch64-repro.md`
+      See `docs/development/issues/archive/2026-04-19-cc5-aarch64-repro.md`
       and `scripts/retest-aarch64.sh`.
 
 ## Toolchain integration opportunities

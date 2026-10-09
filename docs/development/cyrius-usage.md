@@ -120,7 +120,7 @@ suite in particular, has not been re-run on hardware since the
 retest under the current 6.6.6 toolchain. The backend binary was
 renamed `cc5_aarch64` → `cycc_aarch64` in Cyrius 6.0.
 See `docs/development/issues/2026-04-19-aarch64-syscall-portability.md`,
-`docs/development/issues/2026-04-19-cc5-aarch64-repro.md`, and
+`docs/development/issues/archive/2026-04-19-cc5-aarch64-repro.md`, and
 `scripts/retest-aarch64.sh` (which accepts either backend name).
 The CI aarch64 gate is required, not optional — it hard-fails when
 neither `cycc_aarch64` nor `cc5_aarch64` is present in the

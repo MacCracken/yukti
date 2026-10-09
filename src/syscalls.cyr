@@ -111,16 +111,16 @@ enum YkOpenFlag {
 # which would have collided the moment the stdlib gained that name.
 # ---------------------------------------------------------------------------
 
-fn _yk_starts_with_cstr(s, prefix_cstr): i64 {
-    if (s == 0) { return 0; }
-    if (prefix_cstr == 0) { return 0; }
+fn _yk_starts_with_cstr(s, prefix_cstr): bool {
+    if (s == 0) { return false; }
+    if (prefix_cstr == 0) { return false; }
     var plen = strlen(prefix_cstr);
-    if (plen > str_len(s)) { return 0; }
+    if (plen > str_len(s)) { return false; }
     var sd = str_data(s);
     for (var i = 0; i < plen; i = i + 1) {
-        if (load8(sd + i) != load8(prefix_cstr + i)) { return 0; }
+        if (load8(sd + i) != load8(prefix_cstr + i)) { return false; }
     }
-    return 1;
+    return true;
 }
 
 # ---------------------------------------------------------------------------

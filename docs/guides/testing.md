@@ -3,7 +3,7 @@
 ## Running Tests
 
 ```sh
-# Build and run (803 assertions)
+# Build and run (845 assertions)
 cyrius test tests/tcyr/yukti.tcyr
 ```
 

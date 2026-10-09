@@ -64,9 +64,9 @@ Yukti explicitly does **not** trust:
 |-------------------|-----------------------------------------------|-------------------------------------------------------------------------------------------------------|
 | `storage` (mount) | Mounting over system directories              | `_is_forbidden_mount` prefix-matches `/` `/bin` `/sbin` `/lib` `/lib64` `/usr` `/etc` `/boot` `/sys` `/proc` `/dev` `/root` `/var` `/home` `/srv` `/opt` |
 | `storage` (mount) | Path traversal via `..` / `//`                | `_path_has_traversal` rejects both in `validate_mount_point`                                          |
-| `storage` (mount) | Symlink TOCTOU (CVE-2026-27456 class)         | `newfstatat(AT_SYMLINK_NOFOLLOW)` after `mkdir` — refuses to proceed if target is a symlink           |
+| `storage` / `network` (mount) | Symlink TOCTOU (CVE-2026-27456 class) | `_mount_target_check`: `newfstatat(AT_SYMLINK_NOFOLLOW)` after `mkdir` — refuses a symlinked or non-directory target; `storage_mount` and (since 2.3.16) `network_mount` |
 | `storage` (mount) | FS-type auto-detect probing                   | Bounded list of 10 known types; stops on first success                                                |
-| `storage` (unmount) | Unmounting arbitrary paths                  | Caller-supplied path; consumers are expected to restrict to `/run/media/` (yukti does not re-validate) |
+| `storage` (unmount) | Unmounting arbitrary paths                  | Caller-supplied path; consumers are expected to restrict what they unmount. The post-unmount `rmdir` runs only for a path under `/run/media/` with no `..` / `//` (`_unmount_rmdir_allowed`, 2.3.16) |
 | `storage` (eject) | Sysfs write to crafted device name           | `base_name` validated as `[a-zA-Z0-9_-]{1,32}` before composing `/sys/block/<name>/device/delete`     |
 | `storage` (/proc/mounts) | Crafted mount entries                 | Chunked read up to 1 MB; octal unescape handles `\NNN` only; unknown escapes pass through             |
 | `storage` (labels)| Pathological USB label bloats mount path      | Sanitized label capped at 64 chars in `default_mount_point`                                           |
@@ -82,7 +82,7 @@ Yukti explicitly does **not** trust:
 | `device_db`       | SQL injection via USB metadata                | Every user-influenced field routed through `_sql_escape_str` before patra concat                     |
 | `linux`           | Stale device info                             | `refresh()` re-enumerates from sysfs; `enumerate()` clears cache                                      |
 | `event`           | Unbounded listener dispatch                   | Consumer controls listener count; class-based filtering                                               |
-| `network`         | SMB/NFS mount credential handling             | Credentials passed to kernel mount(2) via options string; never logged by sakshi at `info` level     |
+| `network`         | SMB credential injection into the mount data  | The cifs data is one `,`-separated list parsed as root: `,` `=` NUL refused in the username, `,` NUL in the password (not `,,`-escaped — SELinux splits on single commas first); refused before `mkdir` / `mount(2)` (2.3.16). Never logged by sakshi at `info` level |
 
 ## Unsafe Operations (Cyrius)
 
@@ -139,11 +139,14 @@ surfaces that matter:
   link surface.
 - `cyrius.lock` records SHA-256 hashes of every resolved
   `lib/*.cyr`. CI runs `cyrius deps --verify` on every build.
-- First-party deps only — `sakshi 2.5.2` (logging), `patra 1.14.3`
-  (embedded store), pinned in lockstep with what the toolchain bundles. Both share the Yukti threat model and are
-  audited on the same cadence.
+- First-party deps only — `sakshi 2.5.8` (logging), `patra 1.16.0`
+  (embedded store), git tags pinned in `cyrius.cyml` and commit-pinned in
+  `cyrius.lock`. At 2.3.16 both are the W2 tags, ahead of the 6.7.5 fold;
+  `lib/sakshi.cyr` is the fold's 2.5.7 until the pin catches up (see
+  `cyrius.cyml`). Both share the Yukti threat model and are audited on the
+  same cadence.
 - Cyrius stdlib (`alloc`, `str`, `vec`, `hashmap`, `io`, `fs`,
-  `process`, etc.) ships with the toolchain release (6.6.18) and
+  `process`, etc.) ships with the toolchain release (6.7.5) and
   is SHA-pinned by the toolchain installer, not by yukti.
 
 ## Audit Cadence

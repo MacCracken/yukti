@@ -6,7 +6,7 @@
 
 Unified API for detecting, monitoring, and managing hardware devices on Linux — USB storage, optical drives, block devices, GPU, audio, network shares, and udev hotplug events.
 
-**424 KB static binary. Zero dependencies. Direct syscalls.**
+**~175 KB static binary (DCE). Zero dependencies. Direct syscalls.**
 
 Written in [Cyrius](https://github.com/MacCracken/cyrius) — ported from Rust (April 2026).
 
@@ -58,7 +58,7 @@ main();
 
 ## Build
 
-Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.6.18 (the `cyrius.cyml` pin).
+Requires the [Cyrius toolchain](https://github.com/MacCracken/cyrius) 6.7.5 (the `cyrius.cyml` pin).
 
 ```sh
 # Resolve deps into lib/
@@ -70,7 +70,7 @@ cyrius build src/main.cyr build/yukti
 # Run
 ./build/yukti
 
-# Test (804 assertions)
+# Test (845 assertions)
 cyrius test tests/tcyr/yukti.tcyr
 
 # Benchmark

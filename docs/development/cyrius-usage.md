@@ -4,12 +4,12 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 6.6.18 (`cyrius = "6.6.18"` in `cyrius.cyml`).
+**Toolchain pin**: 6.7.5 (`cyrius = "6.7.5"` in `cyrius.cyml`).
 `cyrius` drives the compiler internally (`cycc`, named `cc5` before
 Cyrius 6.0) — never shell out to it directly.
 
 Upgrade notes — **historical record** (5.5.11 → 5.7.48, a full major
-behind the current 6.6.18 pin; retained for the two language gotchas,
+behind the current 6.7.5 pin; retained for the two language gotchas,
 not as current guidance): that arc was mostly stdlib expansion
 (json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
 HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
@@ -70,7 +70,7 @@ in arch-conditional `enum YkSyscalls` blocks in `src/syscalls.cyr`.
 
 (The yukti-local `sys_stat` shim was dropped at the 6.0.1 bump;
 the stdlib ships `sys_stat` on x86_64 too now.) The aarch64
-cross-build is clean, and the tcyr suite passes 803/803 under
+cross-build is clean, and the tcyr suite passes 845/845 under
 `qemu-aarch64`. The remaining held aarch64 thread is
 hardware-bound — the full-target retest on real Cortex-A72 has
 not been re-run since the 2.1.4 migration (see
@@ -81,19 +81,21 @@ not been re-run since the 2.1.4 migration (see
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 6.6.18):
+- **Stdlib modules** (ship with Cyrius 6.7.5):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
   `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`,
   `atomic`, `sync`, `thread_local`
 - **First-party deps** (pinned in `[deps.*]`):
-  - `sakshi` 2.5.6 — structured logging
-  - `patra` 1.15.1 — persistent device history
+  - `sakshi` 2.5.8 — structured logging
+  - `patra` 1.16.0 — persistent device history
 
-  Both tags stay in lockstep with the versions the pinned cyrius
-  bundles. Newer local tags are folded into the next cyrius release;
-  pinning ahead of the fold makes `cyrius build` warn that `./lib/`
-  shadows the pinned lib, or lets the bundled copy silently replace
-  the git dep. `cyrius.cyml` has the details.
+  Normally both tags stay in lockstep with the versions the pinned
+  cyrius bundles. 2.3.16 pins the W2 stdlib-wave tags, which are AHEAD
+  of the 6.7.5 fold (sakshi 2.5.7, patra 1.15.2) until cyrius 6.7.6
+  refolds them. Until then `cyrius build` warns that `./lib/` shadows
+  the pinned patra, and `lib/sakshi.cyr` is the bundled 2.5.7 (patra's
+  sidecar names sakshi as a stdlib leaf, and the fold wins) while
+  `cyrius.lock` records the 2.5.8 commit. `cyrius.cyml` has the details.
 
 ```sh
 cyrius deps              # resolve [deps] into lib/
@@ -129,7 +131,7 @@ toolchain install.
 ## Test / Bench / Fuzz
 
 ```sh
-cyrius test  tests/tcyr/yukti.tcyr        # 803 assertions, must be 0 failures
+cyrius test  tests/tcyr/yukti.tcyr        # 845 assertions, must be 0 failures
 cyrius bench tests/bcyr/yukti.bcyr        # 46 benchmarks (batch timing)
 cyrius build fuzz/fuzz_parse_uevent.fcyr    build/fuzz_parse_uevent
     ./build/fuzz_parse_uevent
@@ -142,7 +144,7 @@ cyrius build fuzz/fuzz_partition_table.fcyr build/fuzz_partition_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.6.18)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.7.5)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so

@@ -2399,6 +2399,7 @@ fn main() {
     test_network_mount_source();
     test_network_list_mounted();
     test_network_probe_constants();
+    test_smb_option_injection_refused();
 
     # GPU discovery tests (5)
     test_gpu_vendor_name();
@@ -2978,6 +2979,65 @@ fn test_network_probe_constants() {
     # Values are 0 or 1 — either is valid
     assert(smb == 0 || smb == 1, "smb probe valid");
     assert(nfs == 0 || nfs == 1, "nfs probe valid");
+    return 0;
+}
+
+# 2.3.16 — SMB credentials go into the cifs mount data, ONE comma-separated
+# key=value list the kernel parses for a root mount. A `,` in a credential
+# started a new option: the username `bob,uid=0` mounted with uid=0.
+fn _smb_share(user, pass) {
+    var s = network_share_new(str_from("nas.invalid"), str_from("/pub"), NET_FS_SMB);
+    if (user != 0) { ns_set_username(s, str_from(user)); }
+    if (pass != 0) { ns_set_password(s, str_from(pass)); }
+    return s;
+}
+
+fn test_smb_option_injection_refused() {
+    test_group("smb credentials");
+    # Ordinary credentials still build the same list. `=` is fine in a password.
+    var ok = _smb_share("bob", "s3=cret");
+    ns_set_port(ok, 4450);
+    assert(str_eq_cstr(_build_smb_options(ok), "username=bob,password=s3=cret,port=4450"),
+      "plain credentials build unchanged");
+    assert(str_eq_cstr(_build_smb_options(_smb_share(0, 0)), "guest"), "no username is guest");
+    # A password without a username is never written, so it is not refused.
+    assert(str_eq_cstr(_build_smb_options(_smb_share(0, "a,b")), "guest"),
+      "unwritten password not refused");
+
+    # The filed injection, and each refused byte in the username.
+    assert_eq(_build_smb_options(_smb_share("bob,uid=0", 0)), 0, "username ,uid=0 refused");
+    assert_eq(_build_smb_options(_smb_share("bob=x", 0)), 0, "username '=' refused");
+    var nb[8];
+    store8(&nb, 98);        # "b\0x"
+    store8(&nb + 1, 0);
+    store8(&nb + 2, 120);
+    var nul_user = network_share_new(str_from("nas.invalid"), str_from("/pub"), NET_FS_SMB);
+    ns_set_username(nul_user, str_from_buf(&nb, 3));
+    assert_eq(_build_smb_options(nul_user), 0, "username NUL refused");
+
+    # The password: `,` refused, and the `,,` escape form too (SELinux splits
+    # on every single comma before cifs reads `,,`).
+    assert_eq(_build_smb_options(_smb_share("bob", "pw,uid=0")), 0, "password ,uid=0 refused");
+    assert_eq(_build_smb_options(_smb_share("bob", "pw,,context=x")), 0, "password ,, refused");
+    var nul_pass = _smb_share("bob", 0);
+    ns_set_password(nul_pass, str_from_buf(&nb, 3));
+    assert_eq(_build_smb_options(nul_pass), 0, "password NUL refused");
+
+    # network_mount refuses BEFORE touching the filesystem or calling mount(2).
+    var mp = "/tmp/yukti_smb_inject_mp";
+    xrmdir(mp);   # leftover from an aborted run; failure here is fine
+    var depth = sakshi_span_depth();
+    var r_tag, r = network_mount(_smb_share("bob,uid=0", "pw"), mp);
+    assert(is_ok(r_tag) == 0, "network_mount refuses ,uid=0");
+    assert_eq(yukti_err_kind(r), YUKTI_ERR_MOUNT_FAILED, "refusal is MOUNT_FAILED");
+    assert(str_contains_cstr(yukti_err_detail(r), "SMB username"), "refusal names the username");
+    assert_eq(is_dir(str_from(mp)), 0, "no mount point created");
+    assert_eq(sakshi_span_depth(), depth, "refusal leaves the span stack balanced");
+    var p_tag, p = network_mount(_smb_share("bob", "pw,uid=0"), mp);
+    assert(is_ok(p_tag) == 0, "network_mount refuses a ',' password");
+    assert(str_contains_cstr(yukti_err_detail(p), "SMB password"), "refusal names the password");
+    assert_eq(is_dir(str_from(mp)), 0, "no mount point created (password)");
+    xrmdir(mp);
     return 0;
 }
 

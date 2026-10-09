@@ -109,10 +109,69 @@ pub fn network_mount_source(share) {
 }
 
 # ---------------------------------------------------------------------------
+# SMB credentials in the mount data (2.3.16)
+# ---------------------------------------------------------------------------
+# mount(2)'s data argument for cifs is ONE comma-separated `key=value` list,
+# parsed by the kernel for a mount that runs as root. A username or password
+# holding `,` ends its own option and starts another: the username
+# `bob,uid=0` mounted the share with every file owned by root, and the same
+# move sets `file_mode=`, `noperm`, `forceuid`, ... A `=` has no legitimate
+# place in a username, and NUL ends the C string the kernel reads, silently
+# dropping every option after it (the password, the port).
+#
+# The password is refused on `,` too, not escaped as `,,`. The kernel's cifs
+# parser does read `,,` as a literal comma (smb3_fs_context_parse_monolithic,
+# fs/smb/client/fs_context.c; mount.cifs doubles commas the same way), but
+# security_sb_eat_lsm_opts runs FIRST and SELinux splits the string on every
+# single comma, so a password `x,context=...` escaped to `x,,context=...`
+# still hands SELinux its own `context=` mount option. A password with a
+# comma never mounted through this path anyway: the comma split it. `=` is
+# allowed in a password; the kernel splits each option at its first `=`.
+#
+# NetworkShare has no domain field, so no `domain=` is ever written; the host
+# and path go into the mount SOURCE, not this list.
+
+# true when `s` holds no `,`, no NUL and (unless allow_eq) no `=`.
+fn _smb_cred_ok(s, allow_eq: bool): bool {
+    var d = str_data(s);
+    var n = str_len(s);
+    for (var i = 0; i < n; i = i + 1) {
+        var c = load8(d + i);
+        if (c == 0) { return false; }
+        if (c == 44) { return false; }               # ','
+        if (c == 61) {                               # '='
+            if (!allow_eq) { return false; }
+        }
+    }
+    return true;
+}
+
+# 0 when the share's credentials are safe to write into the cifs mount data,
+# else a cstr naming what is refused. Checks exactly what _build_smb_options
+# writes: no username means `guest`, and the password is written only with one.
+fn _smb_credentials_refusal(share): i64 {
+    var user = ns_username(share);
+    if (user == 0) { return 0; }
+    if (!_smb_cred_ok(user, false)) {
+        return "SMB username contains ',', '=' or NUL (cifs mount option injection)";
+    }
+    var pass = ns_password(share);
+    if (pass != 0) {
+        if (!_smb_cred_ok(pass, true)) {
+            return "SMB password contains ',' or NUL (cifs mount option injection)";
+        }
+    }
+    return 0;
+}
+
+# ---------------------------------------------------------------------------
 # Build mount data options string for SMB/NFS
 # ---------------------------------------------------------------------------
 
+# 0 when a credential is refused (see _smb_credentials_refusal) — never a
+# list a credential has rewritten.
 fn _build_smb_options(share): i64 {
+    if (_smb_credentials_refusal(share) != 0) { return 0; }
     var sb = str_builder_new();
 
     var user = ns_username(share);
@@ -173,18 +232,24 @@ pub fn network_mount(share, mount_point_cstr) {
         return Err(val_r);
     }
 
-    # Create mount point directory, mode 0755. xmkdir (lib/io.cyr), not
-    # sys_mkdir: agnos's sys_mkdir takes (path, pathlen), not (path, mode).
-    xmkdir(mount_point_cstr, 493);
-
-    # Build options
+    # Build options BEFORE touching the filesystem, so a refused credential
+    # leaves no mount-point directory behind (2.3.16).
     var options = 0;
     if (fs_type == NET_FS_SMB) {
+        var refusal = _smb_credentials_refusal(share);
+        if (refusal != 0) {
+            sakshi_span_exit();
+            return err_mount_failed(source, str_from(refusal));
+        }
         options = _build_smb_options(share);
     } else {
         options = _build_nfs_options(share);
     }
     var options_cstr = str_cstr(options);
+
+    # Create mount point directory, mode 0755. xmkdir (lib/io.cyr), not
+    # sys_mkdir: agnos's sys_mkdir takes (path, pathlen), not (path, mode).
+    xmkdir(mount_point_cstr, 493);
 
     # Mount syscall: mount(source, target, fstype, flags, data)
     # _YK_MS_NOSUID=2 | _YK_MS_NODEV=4 = 6

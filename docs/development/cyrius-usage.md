@@ -4,12 +4,12 @@ How to build, test, bundle, and release Yukti with the Cyrius toolchain.
 This page is the single source of truth for commands; `CLAUDE.md` links
 here instead of duplicating examples.
 
-**Toolchain pin**: 6.7.5 (`cyrius = "6.7.5"` in `cyrius.cyml`).
+**Toolchain pin**: 6.7.9 (`cyrius = "6.7.9"` in `cyrius.cyml`).
 `cyrius` drives the compiler internally (`cycc`, named `cc5` before
 Cyrius 6.0) — never shell out to it directly.
 
 Upgrade notes — **historical record** (5.5.11 → 5.7.48, a full major
-behind the current 6.7.5 pin; retained for the two language gotchas,
+behind the current 6.7.9 pin; retained for the two language gotchas,
 not as current guidance): that arc was mostly stdlib expansion
 (json pretty-print/streaming/pointer in 5.7.40-5.7.42, sandhi
 HTTP/TLS folded into stdlib at 5.7.0, Landlock + getrandom syscall
@@ -88,7 +88,7 @@ not been re-run since the 2.1.4 migration (see
 Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
 `~/.cyrius/deps/…`). Do **not** re-vendor them by hand.
 
-- **Stdlib modules** (ship with Cyrius 6.7.5):
+- **Stdlib modules** (ship with Cyrius 6.7.9):
   `syscalls`, `string`, `alloc`, `str`, `fmt`, `vec`, `hashmap`, `io`,
   `fs`, `tagged`, `process`, `fnptr`, `chrono`, `args`, `freelist`,
   `atomic`, `sync`, `thread_local`
@@ -96,13 +96,11 @@ Resolved by `cyrius deps` into `lib/` (gitignored; symlinks into
   - `sakshi` 2.5.8 — structured logging
   - `patra` 1.16.0 — persistent device history
 
-  Normally both tags stay in lockstep with the versions the pinned
-  cyrius bundles. 2.3.16 pins the W2 stdlib-wave tags, which are AHEAD
-  of the 6.7.5 fold (sakshi 2.5.7, patra 1.15.2) until cyrius 6.7.6
-  refolds them. Until then `cyrius build` warns that `./lib/` shadows
-  the pinned patra, and `lib/sakshi.cyr` is the bundled 2.5.7 (patra's
-  sidecar names sakshi as a stdlib leaf, and the fold wins) while
-  `cyrius.lock` records the 2.5.8 commit. `cyrius.cyml` has the details.
+  Both tags stay in lockstep with the versions the pinned cyrius
+  bundles: cyrius 6.7.9 bundles sakshi 2.5.8 and patra 1.16.0, so
+  `lib/sakshi.cyr` and `lib/patra.cyr` are byte-identical to those tags
+  and `cyrius build` warns of no shadowed lib. A newer local tag is
+  folded into the NEXT cyrius release (sakshi 2.5.9 into 6.7.10).
 
 ```sh
 cyrius deps              # resolve [deps] into lib/
@@ -151,7 +149,7 @@ cyrius build fuzz/fuzz_partition_table.fcyr build/fuzz_partition_table
 Never claim a performance improvement without before/after benchmark
 numbers. The CSV history in `docs/benchmarks/` is the proof.
 
-## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.7.5)
+## Dist Bundles (multi-profile, Cyrius 5.4.6+, current pin 6.7.9)
 
 `cyrius distlib` concatenates `[lib] modules` (or `[lib.PROFILE]`) into
 a single self-contained `.cyr` file, stripping `include` directives so

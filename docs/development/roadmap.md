@@ -3,27 +3,18 @@
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here.
 
-## Cyrius 6.7.5 pin (2.3.16) — open items
+## Cyrius 6.7.9 pin (2.3.17) — open items
 
-The pin is `cyrius = "6.7.5"`, with the W2 stdlib-wave dep tags (sakshi
-2.5.8, patra 1.16.0), both ahead of what 6.7.5 bundles (2.5.7, 1.15.2).
+The pin is `cyrius = "6.7.9"`, with the dep tags it bundles (sakshi 2.5.8,
+patra 1.16.0).
 
-- [ ] **Bring the dep tags back in lockstep at the next pin move.** Until
-      the pin reaches a cyrius that folds both W2 tags (6.7.6's refold),
-      `cyrius build` warns `./lib/ shadows … patra 1.16.0 (pinned:
-      1.15.2)`, and `lib/sakshi.cyr` is the 6.7.5 fold (2.5.7) while
-      `cyrius.lock`'s sakshi commit line names 2.5.8 (patra's sidecar
-      names sakshi as a stdlib leaf and the fold wins; `cyrius.cyml`
-      explains it). At the move: regenerate the lock from a clean `lib/`,
-      check `lib/sakshi.cyr` is byte-identical to the tag's
-      `dist/sakshi.cyr`, and check the warning is gone.
 - [ ] **The stdlib-name gate does not read `const`.** CI's "No stdlib
       names redeclared" step collects enum members, top-level `var`s and
-      `fn`s only. The 6.7.5 stdlib declares no top-level `const`, so
-      nothing is missed today, but the folds start declaring them at the
-      6.7.6 refold (sakshi 2.5.8's private `_SK_SYS_*`), and a `const`
-      beside a same-name `var` is a hard compile error. Add `const` to the
-      declaration pattern on both sides.
+      `fn`s only. The 6.7.9 stdlib declares top-level `const`s (22 of its
+      modules, among them the folded sakshi's private `_SK_SYS_*`, math,
+      process and the TLS stack), and a `const` beside a same-name `var` is
+      a hard compile error. Add `const` to the declaration pattern on both
+      sides.
 
 What is left needs hardware or a macOS host:
 
@@ -36,10 +27,10 @@ What is left needs hardware or a macOS host:
       broke Darwin are gone, but no yukti build has ever run on macOS.
       Both Mach-O builds compile (`CYRIUS_MACHO_ARM=1 cyrius build
       --aarch64`, `CYRIUS_MACHO=1 cyrius build`) with no yukti warning:
-      2.3.14 made `_yk_ppoll` decline on macOS (the ppoll number was
-      unrouted on Darwin, 1073 on arm64 and 271 on x86_64), and 2.3.13
-      removed the `O_NONBLOCK` redefinition. The warnings left come from
-      the cyrius 6.6.7 stdlib and are fixed in cyrius 6.6.8.
+      ppoll declines on macOS (`sys_ppoll`, -78, since 2.3.17; 2.3.14's
+      `_yk_ppoll` before it), and 2.3.13 removed the `O_NONBLOCK`
+      redefinition. 2.3.17's ppoll probe ran on ecb and ach (-78 on both);
+      the suite itself has not.
 - [ ] **agnos: run the statfs / lstat bridges on a real kernel.**
       Disassembly shows `_yk_statfs` reaching statfs #103 and `_yk_lstat`
       reaching lstat #102, and the 9001–9010 stub band is gone. Neither has
@@ -185,21 +176,13 @@ ownership questions it deliberately did NOT settle:
 
 ### Upstream
 
-- [ ] **Ask for a stdlib ppoll wrapper.** Neither Linux peer wraps ppoll,
-      so `_yk_ppoll` (`src/syscalls.cyr`) is the one raw `syscall()` left in
-      yukti, and it keeps a private x86_64 number (271). A wrapper would
-      carry the per-target number: aarch64 already names 1073. The Darwin
-      decline lives in `_yk_ppoll` since 2.3.14 and would move into the
-      wrapper. Once it exists:
-      - `_yk_ppoll`'s Linux arm calls it.
-      - The local enum goes.
-      - CI's raw-syscall gate drops `want` to 0.
-- [ ] **Ask for agnos declining stubs** for `sys_socket`, `sys_bind`,
-      `sys_connect`, `sys_setsockopt`, `sys_recvfrom`, `sys_ioctl` and
-      `sys_fstatat`. These are the same -ENOSYS stubs 6.6.5 / 6.6.6 gave
-      agnos for `sys_sendto`, `sys_ftruncate` and `sys_fstatfs`. Until then
-      each one needs a fail-closed `_yk_*` bridge. With the stubs, the call
-      sites could call the wrappers directly.
+- [ ] **The agnos socket bridges could call through.** cyrius 6.7.9's
+      agnos peer defines `sys_ioctl` / `sys_fstatat` (-38), so 2.3.17
+      dropped `_yk_ioctl`; `_yk_lstat` stays (its agnos arm is the real
+      lstat #102). The agnos peer has had real TCP `sys_socket` /
+      `sys_bind` / `sys_connect` since cyrius 6.6.17, but the `_yk_socket`
+      family still returns -ENOSYS there, so `network_probe_host` fails on
+      agnos although agnos could connect.
 
 ## Resolved in 2.3.4
 

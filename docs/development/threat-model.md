@@ -141,12 +141,11 @@ surfaces that matter:
   `lib/*.cyr`. CI runs `cyrius deps --verify` on every build.
 - First-party deps only — `sakshi 2.5.8` (logging), `patra 1.16.0`
   (embedded store), git tags pinned in `cyrius.cyml` and commit-pinned in
-  `cyrius.lock`. At 2.3.16 both are the W2 tags, ahead of the 6.7.5 fold;
-  `lib/sakshi.cyr` is the fold's 2.5.7 until the pin catches up (see
-  `cyrius.cyml`). Both share the Yukti threat model and are audited on the
-  same cadence.
+  `cyrius.lock`. At 2.3.17 both are the tags cyrius 6.7.9 bundles, so the
+  resolved `lib/` copies are byte-identical to them. Both share the Yukti
+  threat model and are audited on the same cadence.
 - Cyrius stdlib (`alloc`, `str`, `vec`, `hashmap`, `io`, `fs`,
-  `process`, etc.) ships with the toolchain release (6.7.5) and
+  `process`, etc.) ships with the toolchain release (6.7.9) and
   is SHA-pinned by the toolchain installer, not by yukti.
 
 ## Audit Cadence

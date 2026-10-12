@@ -85,14 +85,12 @@ jobs:
         # Enum members (valued or bare), top-level `var`s and top-level `fn`s
         # are all compared. Checked against the WHOLE installed stdlib (every
         # platform peer and every fold), not ./lib, which holds only yukti's
-        # own deps. Two
-        # names are allowed, each for a stated reason:
+        # own deps. One name is allowed, for a stated reason:
         #   - PCI_VENDOR_AMD: public API (the core profile, consumed by the
         #     agnos kernel). mabda declares its own with 0x1002, ATI's id,
         #     which yukti names PCI_VENDOR_ATI. The fix belongs in mabda.
-        #   - SYS_PPOLL: declared only on non-agnos x86 targets (Linux,
-        #     Mach-O x86, PE). Only the aarch64 peer names it (1073), and
-        #     that peer is never in the same build.
+        # (SYS_PPOLL was allowed until 2.3.17, when the local x86_64 number
+        # went with _yk_ppoll: cyrius 6.7.9's sys_ppoll carries it.)
         # The scan must find the full source set, so it cannot pass vacuously.
         run: |
           python3 - "$HOME/.cyrius/versions/$CYRIUS_VERSION/lib" <<'PYEOF'
@@ -123,7 +121,7 @@ jobs:
           for p in peers:
               for k in names(p):
                   stdlib.setdefault(k, set()).add(os.path.basename(p))
-          allow = {'PCI_VENDOR_AMD', 'SYS_PPOLL'}
+          allow = {'PCI_VENDOR_AMD'}
           bad = 0
           for p in src:
               for k, lines in names(p).items():
@@ -375,12 +373,11 @@ jobs:
           # x86-compat `accept 43 -> 202` row, so filesystem_usage ran
           # accept(2) on every ARM host.
           #
-          # The ONE allowed site is `_yk_ppoll` in src/syscalls.cyr, because
-          # no stdlib peer wraps ppoll. It is matched by file AND spelling,
-          # and it must be found EXACTLY once. A second raw call fails, and a
-          # scan that silently matches nothing fails too instead of passing
-          # vacuously. When the stdlib gains a ppoll wrapper and _yk_ppoll
-          # moves onto it, set `want` to 0.
+          # There is no allowed site. Until 2.3.17 `_yk_ppoll` in
+          # src/syscalls.cyr was the one raw call (no stdlib peer wrapped
+          # ppoll), and the gate required it exactly once. cyrius 6.7.9's
+          # `sys_ppoll` replaced it, so any `syscall(` now fails. The
+          # file-count floor below keeps the scan from passing vacuously.
           #
           # Numeric open(2) flags are the same defect one step removed: 577
           # is O_WRONLY|O_CREAT|O_TRUNC in x86_64/aarch64 bits, but it
@@ -396,17 +393,9 @@ jobs:
           rawsys=$(for f in $SCAN; do
             sed -E 's/#.*$//' "$f" | grep -nE '\bsyscall[[:space:]]*\(' | sed "s|^|$f:|" || true
           done)
-          allow='^src/syscalls\.cyr:[0-9]+:[[:space:]]*return syscall\(SYS_PPOLL, '
-          want=1
-          allowed=$(echo "$rawsys" | grep -cE "$allow" || true)
-          other=$(echo "$rawsys" | grep -vE "$allow" | grep -v '^$' || true)
-          if [ -n "$other" ]; then
+          if [ -n "$rawsys" ]; then
             echo "FAIL: raw syscall( — call the stdlib wrapper, or bridge it in src/syscalls.cyr"
-            echo "$other"
-            FAIL=1
-          fi
-          if [ "$allowed" -ne "$want" ]; then
-            echo "FAIL: expected $want raw syscall (_yk_ppoll in src/syscalls.cyr), found $allowed"
+            echo "$rawsys"
             FAIL=1
           fi
           flags=$(for f in $SCAN; do
@@ -417,7 +406,7 @@ jobs:
             echo "$flags"
             FAIL=1
           fi
-          echo "raw syscalls: $allowed at the allowed site (_yk_ppoll, want $want), $(echo "$other" | grep -c . || true) elsewhere, over $nfiles files"
+          echo "raw syscalls: $(echo "$rawsys" | grep -c . || true), over $nfiles files"
           # Unbounded stack buffers (>= 64KB — force heap review).
           #
           # Two bugs fixed at 2.3.5, both exposed when a comment in

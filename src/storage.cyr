@@ -782,7 +782,7 @@ pub fn storage_eject(dev_path_cstr) {
             sakshi_span_exit();
             return err_eject_failed(dev_s, str_from("failed to open device"));
         }
-        var r = _yk_ioctl(fd, CDROMEJECT_IOCTL, 0);
+        var r = sys_ioctl(fd, CDROMEJECT_IOCTL, 0);
         sys_close(fd);
         if (r < 0) {
             sakshi_span_exit();

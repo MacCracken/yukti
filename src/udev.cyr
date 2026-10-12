@@ -633,9 +633,10 @@ enum NetlinkConst {
     _YK_SO_RCVBUF = 8;
     _YK_RECV_BUF_SIZE = 262144;
 }
-# socket/bind/setsockopt/recvfrom/ppoll go through the _yk_* bridges in
+# socket/bind/setsockopt/recvfrom go through the _yk_* bridges in
 # src/syscalls.cyr: stdlib wrappers on Linux, fail-closed on agnos (2.3.12;
 # raw syscall(SYS_*, …) before that, hardcoded x86_64 numbers pre-2.1.4).
+# ppoll is the stdlib's sys_ppoll. CHANGELOG [2.3.17]
 
 pub fn udev_monitor_new() {
     return udev_monitor_with_filter(0);
@@ -690,8 +691,9 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
 
     # ppoll(2) instead of poll(2) — aarch64's syscall table has no
     # SYS_POLL, only SYS_PPOLL. ppoll takes a timespec* (not int ms)
-    # and an extra (sigmask, sigsetsize) pair. We drive both arches
-    # through ppoll uniformly via _yk_ppoll (src/syscalls.cyr).
+    # and an extra (sigmask, sigsetsize) pair: NULL mask, sigsetsize 8.
+    # We drive both arches through ppoll uniformly via the stdlib's
+    # sys_ppoll, which declines on macOS (-78), Windows and agnos (-38).
     # A NEGATIVE timeout means "block indefinitely" in poll(2) terms. ppoll
     # spells that as a NULL timespec, not as a negative one.
     #
@@ -709,7 +711,7 @@ pub fn udev_monitor_poll(mon, timeout_ms) {
         store64(&ts + 8, (timeout_ms - (timeout_ms / 1000) * 1000) * 1000000);
         tsp = &ts;
     }
-    var ret = _yk_ppoll(&pfd, 1, tsp);
+    var ret = sys_ppoll(&pfd, 1, tsp, 0, 8);
     if (ret < 0) {
         return err_udev_socket(str_from("ppoll() failed"));
     }

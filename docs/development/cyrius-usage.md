@@ -61,12 +61,19 @@ in arch-conditional `enum YkSyscalls` blocks in `src/syscalls.cyr`.
 - One of those local numbers was wrong. The aarch64
   `SYS_STATFS = 43` was renumbered by ESYSXLAT into accept(2),
   so `filesystem_usage` had never worked on ARM.
-- `src/syscalls.cyr` now holds only the `_yk_*` bridges and one
-  x86_64 number, ppoll's 271. The bridges cover the agnos ABI
-  splits: mount, umount2, statfs, lstat, the socket family and
-  ioctl.
-- `_yk_ppoll` is the single raw `syscall()` in the tree, because
-  no stdlib peer wraps ppoll.
+- `src/syscalls.cyr` was left holding only the `_yk_*` bridges
+  and one x86_64 number, ppoll's 271. The bridges covered the
+  agnos ABI splits: mount, umount2, statfs, lstat, the socket
+  family and ioctl.
+- `_yk_ppoll` was the single raw `syscall()` in the tree, because
+  no stdlib peer wrapped ppoll.
+
+2.3.17 (cyrius 6.7.9) retired the last two stopgaps. The udev
+monitor calls the stdlib's `sys_ppoll`, which carries the
+per-target number and declines on macOS (-78), Windows and agnos
+(-38), and the optical / eject paths call `sys_ioctl` directly
+(the agnos peer declines it with -38, what `_yk_ioctl` returned).
+yukti issues no raw `syscall()` and declares no `SYS_*` number.
 
 (The yukti-local `sys_stat` shim was dropped at the 6.0.1 bump;
 the stdlib ships `sys_stat` on x86_64 too now.) The aarch64
@@ -241,8 +248,9 @@ release yourself.
   `sys_statfs`, …), the portable `x*` helpers (`xopen`, `xmkdir`,
   `xlseek`, …), or a `_yk_*` bridge in `src/syscalls.cyr`. Never
   raw `syscall()`, whether the number is a literal or a `SYS_*`
-  name: both hard-code one target's ABI. The sole exception is
-  `_yk_ppoll`, and CI enforces it (2.3.12). Open flags are spelled
+  name: both hard-code one target's ABI. CI enforces it with no
+  exception (2.3.12; the one exception, `_yk_ppoll`, moved onto
+  `sys_ppoll` at 2.3.17). Open flags are spelled
   as `O_*`, never numbers. Arity mismatches are hard errors since
   cyrius 6.5.1.
 

@@ -1,11 +1,9 @@
-# yukti/syscalls.cyr — agnos ABI bridges, and the one syscall the stdlib
-# does not wrap.
+# yukti/syscalls.cyr — agnos ABI bridges.
 #
 # Every kernel call in yukti goes through a stdlib wrapper: the `sys_*`
 # family in lib/syscalls*.cyr or the portable `x*` family in lib/io.cyr.
 # Those resolve the syscall number per target at compile time. yukti
-# declares no `SYS_*` number of its own, apart from the x86_64 ppoll
-# below, which no stdlib peer declares.
+# declares no `SYS_*` number of its own and issues no raw `syscall()`.
 #
 # 2.3.12 (cyrius 6.6.6) removed the arch-conditional `enum YkSyscalls`
 # blocks that used to sit here. They hand-carried numbers the stdlib
@@ -24,38 +22,22 @@
 # The agnos half: agnos IS an x86_64 target, so cycc defines
 # CYRIUS_ARCH_X86 *and* CYRIUS_TARGET_AGNOS on an agnos build. The
 # agnos peer (lib/syscalls_x86_64_agnos.cyr) is standalone. It does
-# not include lib/syscalls_linux_common.cyr, so the socket family,
-# ioctl and fstatat have no wrapper there, and statfs / lstat take an
-# explicit path length. The `_yk_*` bridges below keep yukti's
+# not include lib/syscalls_linux_common.cyr, and its statfs / lstat
+# take an explicit path length. The `_yk_*` bridges below keep yukti's
 # Linux-only modules (optical / storage / network / udev) COMPILING on
 # agnos. The rule, per bridge:
 #
 #   - agnos has the real syscall: call through to it (mkdir, statfs,
 #     lstat).
 #   - agnos lacks the call, or only has a stub that returns 0: fail
-#     closed with -ENOSYS (mount, umount2, the socket family, ioctl,
-#     ppoll). Fabricating success is the one outcome never acceptable.
+#     closed with -ENOSYS (mount, umount2, the socket family).
+#     Fabricating success is the one outcome never acceptable.
 #
 # Before 2.3.12 the fail-closed half was a band of fake `SYS_*`
 # numbers (9001-9010) handed to raw `syscall()`. That band is retired.
 # Its statfs stub (9009) shadowed agnos's real statfs number, 103
 # (6.6.6 warns on that too), and "an unknown syscall number fails" was
 # an assumption about the kernel rather than code yukti owns.
-
-# x86_64 ppoll. Neither Linux peer wraps ppoll, and only the aarch64
-# peer names it, as 1073: a private alias that ESYSXLAT routes to
-# aarch64's native 73. Native 73 cannot be issued directly
-# on aarch64, because the x86-compat `flock 73 -> 32` row claims it.
-# So x86_64 is the one target that needs a local number. Guarded
-# `#ifndef CYRIUS_TARGET_AGNOS` because an agnos build also defines
-# CYRIUS_ARCH_X86. See `_yk_ppoll` at the end of this file.
-#ifndef CYRIUS_TARGET_AGNOS
-#ifdef CYRIUS_ARCH_X86
-enum YkSyscalls {
-    SYS_PPOLL = 271;
-}
-#endif
-#endif
 
 # yukti-private open(2) flags (2.3.13), for the device opens in optical,
 # storage, partition and audio. Every enum member and top-level `var` is a
@@ -237,23 +219,16 @@ fn _yk_lstat(path, buf): i64 {
 }
 
 # ---------------------------------------------------------------------------
-# ioctl + socket-family bridges (yukti 2.3.12)
+# socket-family bridges (yukti 2.3.12)
 # ---------------------------------------------------------------------------
-# agnos has no ioctl and no BSD-socket surface, and its stdlib peer defines
-# none of these wrappers, so each one fails closed there. The callers are the
-# optical, eject, netlink-monitor and network-probe paths. agnos never reaches
-# them at runtime: vani, the sole agnos consumer, drives only `yukti_audio_*`.
-# Each Linux arm is the stdlib wrapper with the same arguments, so it issues
-# the same syscall the raw `syscall(SYS_*, …)` call did.
-fn _yk_ioctl(fd, request, argp): i64 {
-    #ifdef CYRIUS_TARGET_AGNOS
-    return 0 - YK_ENOSYS;
-    #endif
-    #ifndef CYRIUS_TARGET_AGNOS
-    return sys_ioctl(fd, request, argp);
-    #endif
-}
-
+# Each one fails closed on agnos. The callers are the netlink-monitor and
+# network-probe paths, and agnos never reaches them at runtime: vani, the
+# sole agnos consumer, drives only `yukti_audio_*`. Each Linux arm is the
+# stdlib wrapper with the same arguments, so it issues the same syscall the
+# raw `syscall(SYS_*, …)` call did. The agnos peer has defined these
+# wrappers itself since cyrius 6.6.17 (socket / bind / connect for TCP over
+# its tagged-fd adapter, setsockopt / recvfrom declining with -38); the
+# bridges keep yukti's agnos answer -ENOSYS for every one.
 fn _yk_socket(domain, type, protocol): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
     return 0 - YK_ENOSYS;
@@ -299,34 +274,5 @@ fn _yk_recvfrom(fd, buf, len, flags, srcaddr, srcaddrlen): i64 {
     #endif
 }
 
-# ---------------------------------------------------------------------------
-# ppoll bridge (yukti 2.3.12): the one raw syscall in yukti
-# ---------------------------------------------------------------------------
-# No stdlib peer wraps ppoll, so this is the one place yukti spells `syscall()`
-# itself, and CI allows it here and nowhere else. aarch64 has no poll(2), only
-# ppoll, so both Linux arches use ppoll. SYS_PPOLL is the local 271 on x86_64
-# and the stdlib's 1073 alias on aarch64 (top of this file). `tsp` is a
-# struct timespec*, or 0 to block indefinitely; the signal mask is NULL with
-# sigsetsize 8. Switch to the stdlib wrapper once one exists (see roadmap.md).
-#
-# 2.3.14: macOS declines with Darwin's -ENOSYS (78), like agnos. Darwin has no
-# ppoll, and neither Mach-O backend routes the number (271 on x86_64, 1073 on
-# arm64), so every Mach-O build that included yukti warned "syscall N not
-# routed". Reached, the call was a SIGSYS kill on Intel and, before cyrius
-# 6.6.8, a silent re-run of the previous syscall on Apple Silicon. The only
-# caller is the udev netlink monitor, which is Linux-only anyway. The number
-# must not be COMPILED on macOS at all, so the Linux arm is `#ifndef`-guarded
-# too, not just preceded by an early return.
-fn _yk_ppoll(fds, nfds, tsp): i64 {
-    #ifdef CYRIUS_TARGET_AGNOS
-    return 0 - YK_ENOSYS;
-    #endif
-    #ifdef CYRIUS_TARGET_MACOS
-    return 0 - 78;
-    #endif
-    #ifndef CYRIUS_TARGET_AGNOS
-    #ifndef CYRIUS_TARGET_MACOS
-    return syscall(SYS_PPOLL, fds, nfds, tsp, 0, 8);
-    #endif
-    #endif
-}
+# ioctl and ppoll have no bridge since 2.3.17: cyrius 6.7.9's sys_ioctl /
+# sys_ppoll carry the agnos (and macOS / PE) declines. CHANGELOG [2.3.17]

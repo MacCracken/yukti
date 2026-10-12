@@ -5,7 +5,7 @@ description = "Device abstraction — USB, optical, block, GPU, network, udev ho
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/yukti"
 language = "cyrius"
-cyrius = "6.7.5"
+cyrius = "6.7.9"
 
 [build]
 entry = "src/main.cyr"
@@ -81,7 +81,7 @@ modules = ["dist/sakshi.cyr"]
 # stdlib atomic/sync/thread_local, declared in [deps].stdlib above because the
 # cyrius 6.4.x strict transitive-dep check requires them named. patra also
 # claims its thread-local slots through cyrius's slot allocator,
-# thread_local_alloc, which needs cyrius >= 6.4.65; the 6.7.5 pin satisfies it.
+# thread_local_alloc, which needs cyrius >= 6.4.65; the 6.7.9 pin satisfies it.
 #
 # The tag stays for `target = "linux"`, which the bundled lib has no way to
 # express. agnos has no device-history DB, so patra is fetched on Linux only,
